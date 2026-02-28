@@ -27,23 +27,39 @@ if (config.env !== 'test') {
     app.use(logger.errorHandler);
 }
 
+// Force HTTPS in production (Render sends x-forwarded-proto)
+if (config.env === 'production') {
+    app.use((req, res, next) => {
+        if (req.headers['x-forwarded-proto'] !== 'https') {
+            return res.redirect(`https://${req.get('Host')}${req.url}`);
+        }
+        return next();
+    });
+}
+
 const allowedOrigins = [
-  "https://queuify.vercel.app",
-  "http://localhost:5173", // optional for local dev
+    "https://queuify.vercel.app",
+    "http://localhost:5173", // optional for local dev
 ];
 
-app.use(
-  cors({
+// Production-ready CORS setup
+const corsOptions = {
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS: " + origin));
-      }
+        // allow requests with no origin (like mobile apps or curl requests)
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS: " + origin));
+        }
     },
     credentials: true,
-  })
-);
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
+};
+
+app.use(cors(corsOptions));
+// Handle OPTIONS preflight for all routes
+app.options('*', cors(corsOptions));
 
 // Security headers
 app.use(helmet({
