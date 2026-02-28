@@ -28,21 +28,28 @@ if (config.env !== 'test') {
 }
 
 const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5176'
+  "https://queuify.vercel.app",
+  "http://localhost:5173", // optional for local dev
 ];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS: " + origin));
+      }
+    },
+    credentials: true,
+  })
+);
 
 // Security headers
 app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS
-app.use(cors({
-    origin: true,   // allow all origins in development
-    credentials: true
-}));
 
 // Parse JSON
 app.use(express.json({ limit: '20mb' }));
