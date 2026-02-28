@@ -173,3 +173,113 @@ CREATE TABLE IF NOT EXISTS organization_images (
 );
 
 CREATE INDEX idx_org_images_org_id ON organization_images(org_id);
+
+-- ═══════════════════════════════════════
+-- 9. Notifications
+-- ═══════════════════════════════════════
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type VARCHAR(50) DEFAULT 'system',
+    link VARCHAR(255),
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+
+-- ═══════════════════════════════════════
+-- 10. Organization Profiles
+-- ═══════════════════════════════════════
+CREATE TABLE IF NOT EXISTS organization_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID UNIQUE NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    description TEXT,
+    logo_url TEXT,
+    website VARCHAR(255),
+    phone VARCHAR(50),
+    address TEXT,
+    established_year INTEGER,
+    total_staff INTEGER,
+    "isVerified" BOOLEAN DEFAULT false,
+    "trustScore" INTEGER DEFAULT 0,
+    images JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_org_profiles_updated_at BEFORE UPDATE ON organization_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ═══════════════════════════════════════
+-- 11. Plans
+-- ═══════════════════════════════════════
+CREATE TABLE IF NOT EXISTS plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    price_monthly DECIMAL(10, 2) NOT NULL,
+    price_yearly DECIMAL(10, 2) NOT NULL,
+    commission_rate DECIMAL(5, 2) DEFAULT 0.00,
+    features JSONB,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ═══════════════════════════════════════
+-- 12. Resource Services (Many-to-Many)
+-- ═══════════════════════════════════════
+CREATE TABLE IF NOT EXISTS resource_services (
+    resource_id UUID NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    service_id UUID NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    PRIMARY KEY (resource_id, service_id)
+);
+
+-- ═══════════════════════════════════════
+-- 13. System Logs
+-- ═══════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(255) NOT NULL,
+    details JSONB,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
+
+CREATE TABLE IF NOT EXISTS admin_activity_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    action VARCHAR(255) NOT NULL,
+    performed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_admin_activity_logs_admin_id ON admin_activity_logs(admin_id);
+
+CREATE TABLE IF NOT EXISTS request_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    route VARCHAR(255),
+    method VARCHAR(10),
+    status INTEGER,
+    response_time DECIMAL,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    org_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS error_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message TEXT,
+    stack TEXT,
+    route VARCHAR(255),
+    method VARCHAR(10),
+    status_code INTEGER,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
