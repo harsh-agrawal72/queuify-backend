@@ -17,6 +17,12 @@ CREATE TABLE organizations (
     org_code VARCHAR(10) UNIQUE,
     industry_type VARCHAR(100) DEFAULT 'general',
     status organization_status NOT NULL DEFAULT 'pending',
+    phone VARCHAR(50),
+    address TEXT,
+    plan VARCHAR(50) DEFAULT 'basic',
+    type VARCHAR(100) DEFAULT 'Clinic',
+    subscription_status VARCHAR(50) DEFAULT 'active',
+    plan_id UUID,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -28,9 +34,17 @@ CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255),
     role user_role NOT NULL DEFAULT 'user',
     org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    is_password_set BOOLEAN DEFAULT true,
+    activated_at TIMESTAMP WITH TIME ZONE,
+    invited_at TIMESTAMP WITH TIME ZONE,
+    provider VARCHAR(50) DEFAULT 'local',
+    google_id VARCHAR(255),
+    is_suspended BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
@@ -49,8 +63,13 @@ CREATE TABLE services (
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
+    queue_type VARCHAR(50) DEFAULT 'DYNAMIC',
+    estimated_service_time INTEGER DEFAULT 30,
+    queue_scope VARCHAR(50) DEFAULT 'CENTRAL',
+    is_paid BOOLEAN DEFAULT false,
     is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- ═══════════════════════════════════════
@@ -59,13 +78,13 @@ CREATE TABLE services (
 CREATE TABLE resources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    service_id UUID NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    service_id UUID REFERENCES services(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(50) DEFAULT 'staff',
     description TEXT,
     price DECIMAL(10, 2) DEFAULT 0.00,
     duration_minutes INTEGER DEFAULT 30,
-    capacity INTEGER DEFAULT 1,
+    concurrent_capacity INTEGER DEFAULT 1,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -82,6 +101,8 @@ CREATE TABLE slots (
     end_time TIMESTAMP WITH TIME ZONE NOT NULL,
     max_capacity INTEGER NOT NULL DEFAULT 1,
     booked_count INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    status VARCHAR(50) DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
