@@ -7,6 +7,9 @@ const pool = new Pool({
     user: config.postgres.user,
     password: config.postgres.password,
     database: config.postgres.database,
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 pool.on('error', (err) => {
