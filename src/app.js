@@ -28,17 +28,19 @@ if (config.env !== 'test') {
 }
 
 // Force HTTPS in production (Render sends x-forwarded-proto)
-if (config.env === 'production') {
-    app.use((req, res, next) => {
-        if (req.headers['x-forwarded-proto'] !== 'https') {
-            return res.redirect(`https://${req.get('Host')}${req.url}`);
-        }
-        return next();
-    });
-}
+// if (config.env === 'production') {
+//     app.use((req, res, next) => {
+//         if (req.headers['x-forwarded-proto'] !== 'https') {
+//             return res.redirect(`https://${req.get('Host')}${req.url}`);
+//         }
+//         return next();
+//     });
+// }
+
+
 
 const allowedOrigins = [
-    "https://queuify.vercel.app",
+    "https://queuify-frontend.onrender.com",
     "http://localhost:5173", // optional for local dev
 ];
 
