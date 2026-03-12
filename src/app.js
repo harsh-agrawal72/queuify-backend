@@ -40,7 +40,7 @@ if (config.env !== 'test') {
 
 
 const allowedOrigins = [
-    "https://queuify-frontend.onrender.com",
+    "https://queuify.onrender.com",
     "http://localhost:5173", // optional for local dev
 ];
 
