@@ -90,6 +90,21 @@ const globalSearch = catchAsync(async (req, res) => {
     res.send(results);
 });
 
+const getAdmins = catchAsync(async (req, res) => {
+    const admins = await adminService.getAdmins(req.user.org_id);
+    res.send(admins);
+});
+
+const inviteAdmin = catchAsync(async (req, res) => {
+    const admin = await adminService.inviteAdmin(req.body, req.user.id, req.user.org_id);
+    res.status(httpStatus.CREATED).send(admin);
+});
+
+const deleteAdmin = catchAsync(async (req, res) => {
+    await adminService.deleteAdmin(req.params.adminId, req.user.id, req.user.org_id);
+    res.status(httpStatus.NO_CONTENT).send();
+});
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -106,5 +121,8 @@ module.exports = {
     getLiveQueue,
     getNotifications,
     markAllNotificationsAsRead,
-    globalSearch
+    globalSearch,
+    getAdmins,
+    inviteAdmin,
+    deleteAdmin
 };

@@ -38,4 +38,12 @@ router.route('/appointments/:appointmentId')
     .patch(validate(adminValidation.updateAppointmentStatus), adminController.updateAppointmentStatus)
     .delete(validate(adminValidation.deleteAppointment), adminController.deleteAppointment);
 
+// Admin Management within Organization
+router.route('/admins')
+    .get(adminController.getAdmins);
+
+router.post('/admins/invite', validate(adminValidation.inviteAdmin), adminController.inviteAdmin);
+
+router.delete('/admins/:adminId', validate(adminValidation.deleteAdmin), adminController.deleteAdmin);
+
 module.exports = router;

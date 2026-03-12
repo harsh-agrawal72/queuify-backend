@@ -919,6 +919,84 @@ const globalSearch = async (orgId, searchQuery) => {
     }
 };
 
+const tokenService = require('./token.service');
+
+const getAdmins = async (orgId) => {
+    const res = await pool.query(
+        `SELECT id, name, email, role, is_password_set, invited_at, activated_at, is_suspended 
+         FROM users 
+         WHERE org_id = $1 AND role = 'admin'
+         ORDER BY created_at DESC`,
+        [orgId]
+    );
+    return res.rows;
+};
+
+const inviteAdmin = async (adminBody, currentAdminId, orgId) => {
+    const { email, name } = adminBody;
+
+    // Check if email taken
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Email already in use');
+    }
+
+    const tempPassword = Math.random().toString(36).slice(-10);
+    const hashedPassword = await require('bcryptjs').hash(tempPassword, 8);
+
+    const res = await pool.query(
+        `INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, invited_at) 
+         VALUES ($1, $2, $3, 'admin', $4, false, NOW()) RETURNING *`,
+        [name || 'Admin', email, hashedPassword, orgId]
+    );
+    const newAdmin = res.rows[0];
+
+    // Generate token
+    const invToken = await tokenService.generateToken(newAdmin.id, 'admin', orgId, '7d', undefined, { type: 'invite' });
+    const inviteLink = `http://localhost:5173/set-password?token=${invToken}`;
+
+    // Send email
+    try {
+        await emailService.sendEmail(
+            email,
+            'You are invited as an Admin',
+            `<p>Click here to set your password: <a href="${inviteLink}">${inviteLink}</a></p>`
+        );
+    } catch (e) {
+        console.error('Invite email failed', e);
+    }
+
+    // Log activity
+    await pool.query(
+        'INSERT INTO admin_activity_logs (admin_id, action, performed_by, details) VALUES ($1, $2, $3, $4)',
+        [newAdmin.id, 'INVITE_BY_ADMIN', currentAdminId, JSON.stringify({ orgId })]
+    );
+
+    return newAdmin;
+};
+
+const deleteAdmin = async (adminIdToDelete, currentAdminId, orgId) => {
+    if (adminIdToDelete === currentAdminId) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'You cannot delete yourself');
+    }
+
+    // Verify admin belongs to the same org
+    const check = await pool.query("SELECT id FROM users WHERE id = $1 AND org_id = $2 AND role = 'admin'", [adminIdToDelete, orgId]);
+    if (check.rows.length === 0) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Admin not found or does not belong to your organization');
+    }
+
+    // Log deletion
+    await pool.query(
+        'INSERT INTO admin_activity_logs (admin_id, action, performed_by, details) VALUES ($1, $2, $3, $4)',
+        [adminIdToDelete, 'DELETE_BY_ADMIN', currentAdminId, JSON.stringify({ orgId })]
+    );
+
+    // Delete
+    const res = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id, name, email', [adminIdToDelete]);
+    return res.rows[0];
+};
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -935,5 +1013,8 @@ module.exports = {
     getLiveQueue,
     getNotifications,
     markAllNotificationsAsRead,
-    globalSearch
+    globalSearch,
+    getAdmins,
+    inviteAdmin,
+    deleteAdmin
 };

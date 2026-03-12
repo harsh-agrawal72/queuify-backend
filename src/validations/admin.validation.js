@@ -43,10 +43,25 @@ const deleteAppointment = {
     }),
 };
 
+const inviteAdmin = {
+    body: Joi.object().keys({
+        email: Joi.string().email().required(),
+        name: Joi.string().required(),
+    }),
+};
+
+const deleteAdmin = {
+    params: Joi.object().keys({
+        adminId: Joi.string().uuid().required(),
+    }),
+};
+
 module.exports = {
     createSlot,
     updateSlot,
     deleteSlot,
     updateAppointmentStatus,
     deleteAppointment,
+    inviteAdmin,
+    deleteAdmin,
 };

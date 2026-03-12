@@ -20,7 +20,7 @@ const templates = {
     'Bank': {
         description: 'General queue system. Customers wait for any available counter.',
         defaultService: 'Inquiry/Cashier',
-        queueScope: 'PER_SERVICE',
+        queueScope: 'CENTRAL',
         queueType: 'DYNAMIC',
         icon: 'Landmark'
     },
@@ -34,14 +34,14 @@ const templates = {
     'Service Center': {
         description: 'First-come-first-served walk-in queue for repairs and services.',
         defaultService: 'Device Repair',
-        queueScope: 'PER_SERVICE',
+        queueScope: 'CENTRAL',
         queueType: 'DYNAMIC',
         icon: 'Wrench'
     },
     'Government Office': {
         description: 'Manage public queues and appointments for various services.',
         defaultService: 'Public Service',
-        queueScope: 'PER_SERVICE',
+        queueScope: 'CENTRAL',
         queueType: 'DYNAMIC',
         icon: 'Building'
     },
@@ -62,7 +62,7 @@ const templates = {
     'Other': {
         description: 'General purpose central queue for any service.',
         defaultService: 'Standard Service',
-        queueScope: 'PER_SERVICE',
+        queueScope: 'CENTRAL',
         queueType: 'DYNAMIC',
         icon: 'Box'
     }
