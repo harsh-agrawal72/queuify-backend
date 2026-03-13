@@ -17,10 +17,12 @@ const getOverview = async (orgId) => {
         console.log("Fetching Overview for Org:", orgId);
 
         const totalSlotsRes = await query('SELECT COUNT(*) FROM slots WHERE org_id = $1', [orgId]);
-        console.log("Slots:", totalSlotsRes.rows[0]);
-
-        const totalBookingsRes = await query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND DATE(created_at) = CURRENT_DATE", [orgId]);
-        console.log("Total Bookings:", totalBookingsRes.rows[0]);
+        
+        // Range-based date filtering for index usage
+        const totalBookingsRes = await query(
+            "SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + interval '1 day'",
+            [orgId]
+        );
 
         const activeBookingsRes = await query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'confirmed'", [orgId]);
 
@@ -121,8 +123,8 @@ const getTodayQueue = async (orgId) => {
         LEFT JOIN slots sl ON a.slot_id = sl.id
         WHERE a.org_id = $1 
         AND (
-            (a.slot_id IS NOT NULL AND DATE(sl.start_time) = CURRENT_DATE)
-            OR (a.slot_id IS NULL AND DATE(a.created_at) = CURRENT_DATE)
+            (a.slot_id IS NOT NULL AND sl.start_time >= CURRENT_DATE AND sl.start_time < CURRENT_DATE + interval '1 day')
+            OR (a.slot_id IS NULL AND a.created_at >= CURRENT_DATE AND a.created_at < CURRENT_DATE + interval '1 day')
         )
         AND a.status != 'cancelled'
         ORDER BY a.created_at ASC
@@ -607,15 +609,22 @@ const updateAppointmentStatus = async (orgId, appointmentId, status) => {
         }
 
         const res = await client.query(
-            `UPDATE appointments SET status = $1${status === 'cancelled' ? ", cancelled_by = 'admin'" : ''} WHERE id = $2 RETURNING *`,
+            `UPDATE appointments SET status = $1${status === 'cancelled' ? ", cancelled_by = 'admin'" : ''}, updated_at = NOW() WHERE id = $2 RETURNING *`,
             [status, appointmentId]
         );
         const updatedAppointment = res.rows[0];
 
+        // If status changed to completed, cancelled, or no_show, trigger auto-advancement
+        if (['completed', 'cancelled', 'no_show'].includes(status)) {
+            // Use local require to avoid circular dependency
+            const { advanceQueueAutomatically } = require('./appointment.service');
+            await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+        }
+
         // --- NOTIFICATIONS (Fire and Forget) ---
         (async () => {
             try {
-                console.log(`[Email-Async] Starting notification process for Appointment: ${appointmentId}`);
+                console.log(`[Email-Async] [StatusUpdate] Starting for Appointment: ${appointmentId}, New Status: ${status}`);
                 const appointmentDetails = await pool.query(`
                     SELECT a.*, u.name as user_name, u.email as user_email, u.email_notification_enabled,
                            o.name as org_name, s.name as service_name
@@ -728,9 +737,14 @@ const deleteAppointment = async (orgId, appointmentId) => {
         );
         const cancelledAppt = res.rows[0];
 
+        // If status changed to cancelled, trigger auto-advancement
+        const { advanceQueueAutomatically } = require('./appointment.service');
+        await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+
         // --- NOTIFICATIONS (Fire and Forget) ---
         (async () => {
             try {
+                console.log(`[Email-Async] [Deletion] Starting for Appointment: ${appointmentId}`);
                 const userRes = await pool.query('SELECT name, email, email_notification_enabled FROM users WHERE id = $1', [appointment.user_id]);
                 const userData = userRes.rows[0];
                 const orgRes = await pool.query('SELECT name, contact_email, email_notification FROM organizations WHERE id = $1', [orgId]);
@@ -814,11 +828,11 @@ const getLiveQueue = async (orgId, date) => {
             ROW_NUMBER() OVER (
                 PARTITION BY (
                     CASE 
-                        WHEN s.queue_scope = 'PER_RESOURCE' THEN a.slot_id::text 
-                        ELSE (SELECT CONCAT(a.service_id, '_', COALESCE(sl.start_time::text, DATE(a.created_at)::text)))
+                        WHEN s.queue_scope = 'PER_RESOURCE' THEN a.resource_id::text 
+                        ELSE a.service_id::text
                     END
                 )
-                ORDER BY a.created_at ASC
+                ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC
             ) as queue_number
          FROM appointments a
          JOIN users u ON a.user_id = u.id
@@ -827,23 +841,23 @@ const getLiveQueue = async (orgId, date) => {
          LEFT JOIN slots sl ON a.slot_id = sl.id
          WHERE a.org_id = $1
          AND (
-             (a.slot_id IS NOT NULL AND DATE(sl.start_time) = $2::date)
-             OR (a.slot_id IS NULL AND DATE(a.created_at) = $2::date)
+             (a.slot_id IS NOT NULL AND sl.start_time >= $2::date AND sl.start_time < $2::date + interval '1 day')
+             OR (a.slot_id IS NULL AND a.created_at >= $2::date AND a.created_at < $2::date + interval '1 day')
          )
          AND a.status IN ('pending', 'confirmed', 'serving', 'completed', 'no_show')
-         ORDER BY a.created_at ASC`,
+         ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC`,
         [orgId, queryDate]
     );
 
-    // Group by Service-Resource pair
+    // Group by Service-Resource pair (Unified for the day)
     const queues = [];
     const appointments = appointmentsRes.rows;
 
     appointments.forEach(appt => {
         const isPerResource = appt.queue_scope === 'PER_RESOURCE';
         const queueId = isPerResource
-            ? (appt.slot_id ? `slot-${appt.slot_id}` : `resource-${appt.service_id}-${appt.resource_id}`)
-            : (appt.slot_id ? `central-slot-${appt.service_id}-${appt.slot_start}` : `central-${appt.service_id}`);
+            ? `resource-${appt.resource_id}`
+            : `service-${appt.service_id}`;
 
         let queue = queues.find(q => q.id === queueId);
         if (!queue) {
@@ -851,11 +865,8 @@ const getLiveQueue = async (orgId, date) => {
                 id: queueId,
                 service_id: appt.service_id,
                 resource_id: isPerResource ? appt.resource_id : null,
-                slot_id: appt.slot_id,
                 name: appt.service_name,
                 resource_name: isPerResource ? appt.resource_name : 'Central Queue',
-                slot_start: appt.slot_start,
-                slot_end: appt.slot_end,
                 scope: appt.queue_scope,
                 appointments: []
             };

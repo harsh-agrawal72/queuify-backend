@@ -423,33 +423,35 @@ const getQueueStatus = async (appointmentId) => {
         [appointment.service_id]
     );
 
-    // 3. Dynamic Ranking Query (Matches partitioning logic)
-    const partitionQuery = `
-        CASE 
-            WHEN service.queue_scope = 'PER_RESOURCE' THEN a.slot_id::text 
-            ELSE (SELECT CONCAT(a.service_id, '_', sl.start_time) FROM slots sl WHERE sl.id = a.slot_id)
-        END
-    `;
+    // 3. Dynamic Ranking Query (Unified for the whole day to match Admin Live Queue)
+    // We group by Resource (if PER_RESOURCE) or Service (if CENTRAL) for the date of the appointment
+    const filterClause = service.queue_scope === 'PER_RESOURCE'
+        ? 'a.resource_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)'
+        : 'a.service_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)';
 
-    const filterClause = appointment.slot_id
-        ? (service.queue_scope === 'PER_RESOURCE'
-            ? 'a.slot_id = $1'
-            : 'a.service_id = $1 AND (SELECT start_time FROM slots WHERE id = a.slot_id) = (SELECT start_time FROM slots WHERE id = $2)')
-        : 'a.service_id = $1 AND DATE(a.created_at) = DATE($2)';
+    // Date can be from slot or creation
+    const referenceDate = appointment.slot_id ? 
+        (await pool.query('SELECT start_time FROM slots WHERE id = $1', [appointment.slot_id])).rows[0]?.start_time : 
+        appointment.created_at;
 
-    const filterParams = (appointment.slot_id && service.queue_scope !== 'PER_RESOURCE')
-        ? [appointment.service_id, appointment.slot_id]
-        : [appointment.slot_id || appointment.service_id, appointment.slot_id ? undefined : appointment.created_at].filter(p => p !== undefined);
+    const filterParams = [
+        service.queue_scope === 'PER_RESOURCE' ? appointment.resource_id : appointment.service_id,
+        referenceDate
+    ];
 
     const { rows: rankedRows } = await pool.query(
         `WITH RankedQueue AS (
             SELECT 
                 a.id, 
                 a.status, 
-                ROW_NUMBER() OVER (PARTITION BY ${partitionQuery} ORDER BY a.created_at ASC) as q_rank
+                a.slot_id,
+                sl.start_time as slot_start,
+                ROW_NUMBER() OVER (
+                    ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC
+                ) as q_rank
             FROM appointments a
-            JOIN services service ON a.service_id = service.id
-            WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed')
+            LEFT JOIN slots sl ON a.slot_id = sl.id
+            WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed', 'no_show')
             AND ${filterClause}
          )
          SELECT * FROM RankedQueue`,
@@ -459,53 +461,37 @@ const getQueueStatus = async (appointmentId) => {
     const myEntry = rankedRows.find(r => r.id === appointmentId);
     const myRank = myEntry ? parseInt(myEntry.q_rank) : 0;
 
-    // 4. Calculate Current Serving (The rank of the entry with 'serving' status, else the MIN active)
+    // 4. Calculate Current Serving
+    // Only show a serving number if someone is ACTUALLY in 'serving' status.
+    // If not, we don't want to default to rank 1 (which causes "Serving Now" bug).
     const servingEntry = rankedRows.find(r => r.status === 'serving');
-    let currentServingNumber;
+    let currentServingNumber = 0;
 
     if (servingEntry) {
         currentServingNumber = parseInt(servingEntry.q_rank);
     } else {
-        const activeRanks = rankedRows
-            .filter(r => ['pending', 'confirmed'].includes(r.status))
-            .map(r => parseInt(r.q_rank));
-        currentServingNumber = activeRanks.length > 0 ? Math.min(...activeRanks) : myRank;
+        // If no one is serving, find the first person who is STILL WAITING.
+        // But we don't return this as "serving". We use it to calculate people ahead.
+        const firstWaiting = rankedRows.find(r => ['pending', 'confirmed'].includes(r.status));
+        // If the first waiting person hasn't been called yet, "current serving" is effectively "just before them"
+        currentServingNumber = firstWaiting ? Math.max(0, parseInt(firstWaiting.q_rank) - 1) : myRank;
     }
 
-    const peopleAhead = Math.max(0, myRank - currentServingNumber);
+    const peopleAhead = Math.max(0, myRank - (servingEntry ? currentServingNumber : currentServingNumber + 1));
 
     // 5. Calculate Estimated Wait Time
     let estimatedWaitMinutes = 0;
-
-    if (service.queue_type === 'STATIC') {
-        estimatedWaitMinutes = peopleAhead * (service.estimated_service_time || 15);
-    } else {
-        // DYNAMIC: Average of last 10 completed appointments for this service/resource
-        const { rows: [avgRes] } = await pool.query(
-            `WITH RecentCompleted AS (
-                 SELECT a.updated_at, a.created_at
-                 FROM appointments a
-                 WHERE ${filterClause}
-                 AND a.status = 'completed'
-                 AND a.updated_at IS NOT NULL
-                 ORDER BY a.updated_at DESC
-                 LIMIT 10
-             )
-             SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as avg_duration
-             FROM RecentCompleted`,
-            filterParams
-        );
-        const avgDuration = parseFloat(avgRes?.avg_duration) || service.estimated_service_time || 15;
-        estimatedWaitMinutes = Math.round(peopleAhead * avgDuration);
-    }
+    const avgDuration = service.estimated_service_time || 15;
+    estimatedWaitMinutes = peopleAhead * avgDuration;
 
     return {
-        queue_number: myRank, // legacy support
+        queue_number: myRank,
         myRank: myRank,
-        current_serving_number: currentServingNumber,
+        current_serving_number: servingEntry ? currentServingNumber : 0, // 0 means no one is currently being served
         people_ahead: peopleAhead,
         estimated_wait_time: estimatedWaitMinutes,
-        status: appointment.status
+        status: appointment.status,
+        is_serving: appointment.status === 'serving'
     };
 };
 

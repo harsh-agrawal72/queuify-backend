@@ -21,7 +21,8 @@ ADD COLUMN IF NOT EXISTS queue_mode_default queue_scope DEFAULT 'CENTRAL';
 ALTER TABLE appointments
 ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(50),
 ADD COLUMN IF NOT EXISTS queue_number INTEGER,
-ADD COLUMN IF NOT EXISTS token_number VARCHAR(100);
+ADD COLUMN IF NOT EXISTS token_number VARCHAR(100),
+ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
 
 -- 3. Users missing columns
 ALTER TABLE users
