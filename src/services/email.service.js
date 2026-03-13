@@ -5,10 +5,14 @@ const config = require('../config/config');
 const transporter = nodemailer.createTransport({
     host: config.email.smtp.host,
     port: config.email.smtp.port,
+    secure: config.email.smtp.port == 465, // true for 465, false for other ports
     auth: {
         user: config.email.smtp.auth.user,
         pass: config.email.smtp.auth.pass,
     },
+    tls: {
+        rejectUnauthorized: false // Often needed for certain SMTP servers
+    }
 });
 
 // Verify connection

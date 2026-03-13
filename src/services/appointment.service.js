@@ -236,7 +236,7 @@ const advanceQueueAutomatically = async (serviceId, resourceId = null, slotId = 
             if (nextRes.rows.length > 0) {
                 const nextApptId = nextRes.rows[0].id;
                 await client.query(
-                    "UPDATE appointments SET status = 'serving', updated_at = NOW() WHERE id = $1",
+                    "UPDATE appointments SET status = 'serving', serving_started_at = NOW(), updated_at = NOW() WHERE id = $1",
                     [nextApptId]
                 );
                 console.log(`Queue advanced: Appointment ${nextApptId} is now serving.`);
@@ -410,6 +410,32 @@ const getUserAppointments = async (userId) => {
     return appointmentModel.getAppointmentsByUserId(userId);
 };
 
+/**
+ * Calculate the average duration of recently completed appointments
+ */
+const getSystemAverageSpeed = async (serviceId, resourceId = null) => {
+    const filterClause = resourceId ? 'service_id = $1 AND resource_id = $2' : 'service_id = $1';
+    const params = resourceId ? [serviceId, resourceId] : [serviceId];
+
+    const { rows } = await pool.query(
+        `SELECT 
+            EXTRACT(EPOCH FROM (completed_at - serving_started_at)) / 60 as duration
+         FROM appointments
+         WHERE ${filterClause} 
+         AND status = 'completed'
+         AND serving_started_at IS NOT NULL
+         AND completed_at IS NOT NULL
+         ORDER BY completed_at DESC
+         LIMIT 10`,
+        params
+    );
+
+    if (rows.length === 0) return null;
+
+    const sum = rows.reduce((acc, row) => acc + parseFloat(row.duration), 0);
+    return Math.round(sum / rows.length);
+};
+
 const getQueueStatus = async (appointmentId) => {
     // 1. Get Appointment details
     const appointment = await appointmentModel.getAppointmentById(appointmentId);
@@ -481,8 +507,22 @@ const getQueueStatus = async (appointmentId) => {
 
     // 5. Calculate Estimated Wait Time
     let estimatedWaitMinutes = 0;
-    const avgDuration = service.estimated_service_time || 15;
-    estimatedWaitMinutes = peopleAhead * avgDuration;
+    const adminEstimate = service.estimated_service_time || 15;
+    
+    // System Average Calculation
+    const systemAvg = await getSystemAverageSpeed(appointment.service_id, appointment.resource_id);
+    
+    if (peopleAhead <= 0) {
+        estimatedWaitMinutes = 0;
+    } else {
+        // Use admin estimate for the first 2 people, system average for the rest (if available)
+        const peopleForAdminEstimate = Math.min(peopleAhead, 2);
+        const peopleForSystemAverage = Math.max(0, peopleAhead - 2);
+        
+        const effectiveSystemAvg = systemAvg || adminEstimate;
+        
+        estimatedWaitMinutes = (peopleForAdminEstimate * adminEstimate) + (peopleForSystemAverage * effectiveSystemAvg);
+    }
 
     return {
         queue_number: myRank,
@@ -501,5 +541,6 @@ module.exports = {
     updateAppointmentStatus,
     getUserAppointments,
     getQueueStatus,
-    advanceQueueAutomatically
+    advanceQueueAutomatically,
+    getSystemAverageSpeed
 };

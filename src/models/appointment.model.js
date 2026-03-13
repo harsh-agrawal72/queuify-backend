@@ -232,10 +232,18 @@ const getAppointmentsByOrgId = async (orgId) => {
 };
 
 const updateAppointmentStatus = async (id, status) => {
-    const result = await pool.query(
-        `UPDATE appointments SET status = $1 WHERE id = $2 RETURNING *`,
-        [status, id]
-    );
+    let query = 'UPDATE appointments SET status = $1';
+    const params = [status, id];
+
+    if (status === 'serving') {
+        query += ', serving_started_at = NOW()';
+    } else if (status === 'completed') {
+        query += ', completed_at = NOW()';
+    }
+
+    query += ' WHERE id = $2 RETURNING *';
+
+    const result = await pool.query(query, params);
     return result.rows[0];
 };
 

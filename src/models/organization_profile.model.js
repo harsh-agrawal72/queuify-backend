@@ -40,10 +40,20 @@ const upsertProfile = async (orgId, profileData) => {
         if (val === '' && (k === 'established_year' || k === 'total_staff')) {
             return null;
         }
+        if (k === 'established_year' || k === 'total_staff') {
+            return val ? parseInt(val, 10) : null;
+        }
         return val;
     })];
-    const result = await pool.query(query, values);
-    return result.rows[0];
+    try {
+        const result = await pool.query(query, values);
+        return result.rows[0];
+    } catch (err) {
+        console.error('Error in upsertProfile:', err.message);
+        console.error('Query:', query);
+        console.error('Values:', values);
+        throw err;
+    }
 };
 
 module.exports = {

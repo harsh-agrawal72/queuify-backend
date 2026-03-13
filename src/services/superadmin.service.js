@@ -210,9 +210,12 @@ const updateOrganization = async (orgId, updateBody) => {
 
 
 const impersonateOrgAdmin = async (orgId, superadminId) => {
-    const res = await pool.query("SELECT * FROM users WHERE org_id = $1 AND role = 'admin' LIMIT 1", [orgId]);
+    console.log(`[Impersonate] Service call: orgId=${orgId}, superadminId=${superadminId}`);
+    
+    const res = await pool.query("SELECT * FROM users WHERE org_id = $1 AND role = 'admin' AND is_suspended = false LIMIT 1", [orgId]);
     if (res.rows.length === 0) {
-        throw new ApiError(httpStatus.NOT_FOUND, 'No admin found for this organization');
+        console.warn(`[Impersonate] Failed: No active admin found for organization ${orgId}`);
+        throw new ApiError(httpStatus.NOT_FOUND, 'No active admin found for this organization');
     }
     const user = res.rows[0];
 

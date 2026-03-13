@@ -16,18 +16,18 @@ const getUserStats = async (userId) => {
         [userId]
     );
 
-    // 2. Upcoming (status = confirmed or pending, and start_time > now)
+    // 2. Upcoming (status in ['confirmed', 'pending', 'serving'] AND start_time > NOW())
     const upcomingRes = await pool.query(`
         SELECT COUNT(*) FROM appointments a
         JOIN slots s ON a.slot_id = s.id
         WHERE a.user_id = $1 
-        AND (a.status = 'confirmed' OR a.status = 'pending')
+        AND a.status IN ('confirmed', 'pending', 'serving')
         AND s.start_time > NOW()
     `, [userId]);
 
-    // 3. Completed
+    // 3. Completed (status = 'completed' OR status = 'no_show')
     const completedRes = await pool.query(
-        "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status = 'completed'",
+        "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status IN ('completed', 'no_show')",
         [userId]
     );
 
