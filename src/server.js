@@ -1,6 +1,8 @@
 const app = require('./app');
 const config = require('./config/config');
 const { pool } = require('./config/db');
+const fs = require('fs');
+const path = require('path');
 
 const http = require('http');
 let socket;
@@ -47,6 +49,18 @@ const connectDB = async () => {
     try {
         const client = await pool.connect();
         console.log('Connected to PostgreSQL');
+
+        // Apply any pending schema columns (e.g. email_notification_enabled) gracefully
+        try {
+            console.log('Checking and applying schema migrations if needed...');
+            const sqlPath = path.join(__dirname, 'database', 'migrations', 'fix_500_errors.sql');
+            const sqlQuery = fs.readFileSync(sqlPath, { encoding: 'utf-8' });
+            await client.query(sqlQuery);
+            console.log('All DB Schema columns validated successfully!');
+        } catch (migErr) {
+            console.error('Migration notice:', migErr.message);
+        }
+
         client.release();
     } catch (err) {
         console.error('PostgreSQL connection error:', err.message);
