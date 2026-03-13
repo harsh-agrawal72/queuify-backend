@@ -22,16 +22,18 @@ transporter.verify(function (error, success) {
 
 const sendEmail = async (to, subject, html) => {
     try {
+        console.log(`[EmailService] Attempting to send email. To: ${to}, Subject: ${subject}`);
         const msg = {
             from: `"Queuify Manager" <${config.email.from}>`,
             to,
             subject,
             html,
         };
-        await transporter.sendMail(msg);
-        console.log(`Email sent to ${to}`);
+        const info = await transporter.sendMail(msg);
+        console.log(`[EmailService] SUCCESS: Email sent to ${to}. MessageId: ${info.messageId}`);
     } catch (error) {
-        console.error('Error sending email:', error);
+        console.error(`[EmailService] ERROR: Failed to send email to ${to}:`, error.message);
+        if (error.code) console.error(`[EmailService] SMTP Error Code: ${error.code}`);
     }
 };
 

@@ -21,13 +21,20 @@ const bookAppointment = async (appointmentBody) => {
         // Send Notifications & Emails Asynchronously to not block the response
         (async () => {
             try {
+                console.log(`[Booking-Async] Starting notification process for Appointment: ${appointment.id}`);
                 const appointmentWithDetails = await appointmentModel.getAppointmentById(appointment.id);
                 const user = await userModel.getUserById(appointment.user_id);
                 const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointment.org_id]);
                 const org = orgRes.rows[0];
 
+                if (!appointmentWithDetails) {
+                    console.error(`[Booking-Async] Could not fetch appointment details for ID: ${appointment.id}`);
+                    return;
+                }
+
                 // 1. Notify User (respecting org-wide toggle AND user preference)
                 if (org && org.email_notification && user && user.email && user.email_notification_enabled !== false) {
+                    console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
                     await emailService.sendBookingConfirmation(user.email, appointmentWithDetails);
                 }
 
@@ -46,6 +53,7 @@ const bookAppointment = async (appointmentBody) => {
                     const admins = await userModel.getAdminsByOrg(appointment.org_id);
                     const adminMessage = `New booking received from ${user?.name || 'User'} for ${appointmentWithDetails.service_name}. Token: ${appointmentWithDetails.token_number}`;
 
+                    console.log(`[Booking-Async] Notifying ${admins.length} admins.`);
                     // In-App Notifications to all admins
                     for (const admin of admins) {
                         await notificationService.sendNotification(
@@ -59,6 +67,7 @@ const bookAppointment = async (appointmentBody) => {
 
                     // Email Notification to Org Contact
                     if (org.email_notification && org.contact_email) {
+                        console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
                         const subject = `New Booking: ${appointmentWithDetails.token_number}`;
                         const html = `<h2>New Appointment Booking</h2>
                             <p>A new appointment has been booked at your organization.</p>
@@ -69,7 +78,7 @@ const bookAppointment = async (appointmentBody) => {
                     }
                 }
             } catch (e) {
-                console.error('Notification/Email failed during booking:', e);
+                console.error('[Booking-Async] FAILURE:', e);
             }
         })();
 
@@ -103,55 +112,67 @@ const cancelAppointment = async (appointmentId, userId) => {
             });
         } catch (e) { console.error('Socket emit failed:', e); }
 
-        // Send Notifications
-        try {
-            const user = await userModel.getUserById(appointment.user_id);
-            const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointment.org_id]);
-            const org = orgRes.rows[0];
+        // Send Notifications (Fire and Forget)
+        (async () => {
+            try {
+                console.log(`[Cancel-Async] Starting notification process for Appointment: ${appointment.id}`);
+                const user = await userModel.getUserById(appointment.user_id);
+                const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointment.org_id]);
+                const org = orgRes.rows[0];
 
-            // 1. Notify User (respecting preference)
-            if (user && user.email && user.email_notification_enabled !== false) {
-                await emailService.sendCancellationEmail(user.email, appointment);
-            }
+                // For cancellation, we need full details for the email
+                const appointmentWithDetails = await appointmentModel.getAppointmentById(appointment.id);
 
-            await notificationService.sendNotification(
-                appointment.user_id,
-                'Appointment Cancelled',
-                `Your appointment for ${appointment.service_name} at ${appointment.org_name} has been cancelled.`,
-                'appointment',
-                `/appointments`
-            );
-
-            // 2. Notify Admins
-            if (org && org.new_booking_notification) {
-                const admins = await userModel.getAdminsByOrg(appointment.org_id);
-                const adminMessage = `Appointment for ${user?.name || 'User'} (${appointment.service_name}) has been cancelled.`;
-
-                // In-App Notifications to all admins
-                for (const admin of admins) {
-                    await notificationService.sendNotification(
-                        admin.id,
-                        'Appointment Cancelled',
-                        adminMessage,
-                        'appointment',
-                        `/admin/appointments?search=${appointment.id}`
-                    );
+                // 1. Notify User (respecting preference)
+                if (user && user.email && user.email_notification_enabled !== false) {
+                    console.log(`[Cancel-Async] Sending cancellation email to user: ${user.email}`);
+                    await emailService.sendCancellationEmail(user.email, appointmentWithDetails || appointment);
                 }
 
-                // Email Notifications
-                if (org.email_notification && org.contact_email) {
-                    await emailService.sendCancellationEmail(org.contact_email, appointment);
-                }
+                await notificationService.sendNotification(
+                    appointment.user_id,
+                    'Appointment Cancelled',
+                    `Your appointment for ${appointment.service_name || 'Service'} has been cancelled.`,
+                    'appointment',
+                    `/appointments`
+                );
 
-                if (org.email_notification && admins.length > 0) {
+                // 2. Notify Admins
+                if (org && org.new_booking_notification) {
+                    const admins = await userModel.getAdminsByOrg(appointment.org_id);
+                    const adminMessage = `Appointment for ${user?.name || 'User'} (${appointment.service_name || 'Service'}) has been cancelled.`;
+
+                    console.log(`[Cancel-Async] Notifying ${admins.length} admins.`);
+                    // In-App Notifications to all admins
                     for (const admin of admins) {
-                        if (admin.email !== org.contact_email) {
-                            await emailService.sendCancellationEmail(admin.email, appointment);
+                        await notificationService.sendNotification(
+                            admin.id,
+                            'Appointment Cancelled',
+                            adminMessage,
+                            'appointment',
+                            `/admin/appointments?search=${appointment.id}`
+                        );
+                    }
+
+                    // Email Notifications
+                    if (org.email_notification) {
+                        if (org.contact_email) {
+                            console.log(`[Cancel-Async] Sending cancellation email to org contact: ${org.contact_email}`);
+                            await emailService.sendCancellationEmail(org.contact_email, appointmentWithDetails || appointment);
+                        }
+
+                        if (admins.length > 0) {
+                            for (const admin of admins) {
+                                if (admin.email && admin.email !== org.contact_email) {
+                                    console.log(`[Cancel-Async] Sending cancellation email to secondary admin: ${admin.email}`);
+                                    await emailService.sendCancellationEmail(admin.email, appointmentWithDetails || appointment);
+                                }
+                            }
                         }
                     }
                 }
-            }
-        } catch (e) { console.error('Notification/Email failed:', e); }
+            } catch (e) { console.error('[Cancel-Async] FAILURE:', e); }
+        })();
 
         return appointment;
     } catch (error) {
@@ -313,53 +334,73 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
             queue_number: appointment.queue_number
         });
 
-        // Notifications logic...
-        const user = await userModel.getUserById(appointment.user_id);
-        const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [orgId]);
-        const org = orgRes.rows[0];
+        // Notifications logic (Fire and Forget)...
+        (async () => {
+            try {
+                console.log(`[UserUpdate-Async] Starting notification process for Appointment: ${appointmentId}`);
+                // Fetch full details including service and org names
+                const appointmentWithDetails = await appointmentModel.getAppointmentById(appointmentId);
+                const user = await userModel.getUserById(appointment.user_id);
+                const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [orgId]);
+                const org = orgRes.rows[0];
 
-        if (user && user.email && user.email_notification_enabled !== false) {
-            await emailService.sendStatusUpdateEmail(user.email, { ...appointment, status });
-        }
+                if (!appointmentWithDetails) {
+                    console.error(`[UserUpdate-Async] Could not fetch details for ID: ${appointmentId}`);
+                    return;
+                }
 
-        await notificationService.sendNotification(
-            appointment.user_id,
-            'Appointment Updated',
-            `Your ticket for ${appointment.service_name} is now ${status}.`,
-            'appointment',
-            `/appointments`
-        );
+                if (user && user.email && user.email_notification_enabled !== false) {
+                    console.log(`[UserUpdate-Async] Sending email to user: ${user.email}`);
+                    await emailService.sendStatusUpdateEmail(user.email, appointmentWithDetails);
+                }
 
-        // 2. Notify Admins
-        if (org && org.new_booking_notification) {
-            const admins = await userModel.getAdminsByOrg(orgId);
-            const adminMessage = `Status of ${user?.name || 'User'}'s appointment for ${appointment.service_name} updated to ${status}.`;
-
-            // In-App Notifications
-            for (const admin of admins) {
                 await notificationService.sendNotification(
-                    admin.id,
-                    'Appointment Status Updated',
-                    adminMessage,
+                    appointment.user_id,
+                    'Appointment Updated',
+                    `Your ticket for ${appointmentWithDetails.service_name || 'Service'} is now ${status}.`,
                     'appointment',
-                    `/admin/appointments?search=${appointmentId}`
+                    `/appointments`
                 );
-            }
 
-            // Email Notifications
-            if (org.email_notification && org.contact_email) {
-                await emailService.sendStatusUpdateEmail(org.contact_email, { ...appointment, status });
-            }
+                // 2. Notify Admins
+                if (org && org.new_booking_notification) {
+                    const admins = await userModel.getAdminsByOrg(orgId);
+                    const adminMessage = `Status of ${user?.name || 'User'}'s appointment for ${appointmentWithDetails.service_name || 'Service'} updated to ${status}.`;
 
-            if (org.email_notification && admins.length > 0) {
-                for (const admin of admins) {
-                    if (admin.email !== org.contact_email) {
-                        await emailService.sendStatusUpdateEmail(admin.email, { ...appointment, status });
+                    console.log(`[UserUpdate-Async] Notifying ${admins.length} admins.`);
+                    // In-App Notifications
+                    for (const admin of admins) {
+                        await notificationService.sendNotification(
+                            admin.id,
+                            'Appointment Status Updated',
+                            adminMessage,
+                            'appointment',
+                            `/admin/appointments?search=${appointmentId}`
+                        );
+                    }
+
+                    // Email Notifications
+                    if (org.email_notification) {
+                        if (org.contact_email) {
+                            console.log(`[UserUpdate-Async] Sending email to org contact: ${org.contact_email}`);
+                            await emailService.sendStatusUpdateEmail(org.contact_email, appointmentWithDetails);
+                        }
+
+                        if (admins.length > 0) {
+                            for (const admin of admins) {
+                                if (admin.email && admin.email !== org.contact_email) {
+                                    console.log(`[UserUpdate-Async] Sending email to secondary admin: ${admin.email}`);
+                                    await emailService.sendStatusUpdateEmail(admin.email, appointmentWithDetails);
+                                }
+                            }
+                        }
                     }
                 }
+            } catch (e) {
+                console.error('[UserUpdate-Async] FAILURE:', e);
             }
-        }
-    } catch (e) { console.error('Socket/Notification failed:', e); }
+        })();
+    } catch (e) { console.error('Socket failed:', e); }
 
     return updatedAppointment;
 };
