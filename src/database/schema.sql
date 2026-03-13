@@ -23,6 +23,11 @@ CREATE TABLE organizations (
     type VARCHAR(100) DEFAULT 'Clinic',
     subscription_status VARCHAR(50) DEFAULT 'active',
     plan_id UUID,
+    open_time VARCHAR(20),
+    close_time VARCHAR(20),
+    email_notification BOOLEAN DEFAULT true,
+    new_booking_notification BOOLEAN DEFAULT true,
+    queue_mode_default VARCHAR(50) DEFAULT 'CENTRAL',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -44,6 +49,8 @@ CREATE TABLE users (
     google_id VARCHAR(255),
     is_suspended BOOLEAN DEFAULT false,
     is_active BOOLEAN DEFAULT true,
+    notification_enabled BOOLEAN DEFAULT true,
+    email_notification_enabled BOOLEAN DEFAULT true,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -122,7 +129,8 @@ CREATE TABLE appointments (
     resource_id UUID REFERENCES resources(id) ON DELETE SET NULL,
     status appointment_status NOT NULL DEFAULT 'pending',
     queue_number INTEGER,
-    token_number INTEGER,
+    token_number VARCHAR(100),
+    cancelled_by VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     reminder_sent BOOLEAN DEFAULT FALSE
