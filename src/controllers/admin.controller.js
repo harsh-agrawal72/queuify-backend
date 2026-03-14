@@ -51,7 +51,7 @@ const updateSlot = catchAsync(async (req, res) => {
 });
 
 const deleteSlot = catchAsync(async (req, res) => {
-    const deletedSlot = await adminService.softDeleteSlot(req.user.org_id, req.params.slotId);
+    const deletedSlot = await adminService.deleteSlot(req.user.org_id, req.params.slotId);
     res.status(httpStatus.OK).json({ success: true, data: deletedSlot });
 });
 
