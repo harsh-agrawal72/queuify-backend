@@ -219,11 +219,15 @@ const impersonateOrgAdmin = async (orgId, superadminId) => {
     }
     const user = res.rows[0];
 
-    // Log the impersonation event
-    await pool.query(
-        "INSERT INTO impersonation_logs (superadmin_id, org_id) VALUES ($1, $2)",
-        [superadminId, orgId]
-    );
+    // Log the impersonation event (non-fatal if table doesn't exist)
+    try {
+        await pool.query(
+            "INSERT INTO impersonation_logs (superadmin_id, org_id) VALUES ($1, $2)",
+            [superadminId, orgId]
+        );
+    } catch (logErr) {
+        console.warn('[Impersonate] Could not write to impersonation_logs (table may not exist):', logErr.message);
+    }
 
     // Update last login for the impersonated user so they show active in lists
     await require('../models/user.model').updateUserLastLogin(user.id);

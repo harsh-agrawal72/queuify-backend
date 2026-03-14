@@ -105,6 +105,15 @@ const deleteAdmin = catchAsync(async (req, res) => {
     res.status(httpStatus.NO_CONTENT).send();
 });
 
+const deleteOrganization = catchAsync(async (req, res) => {
+    const { confirmText } = req.body;
+    if (confirmText !== 'DELETE') {
+        return res.status(400).json({ message: 'Please type DELETE to confirm' });
+    }
+    await adminService.deleteOrganization(req.user.org_id);
+    res.status(200).json({ success: true, message: 'Organization deleted successfully' });
+});
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -124,5 +133,6 @@ module.exports = {
     globalSearch,
     getAdmins,
     inviteAdmin,
-    deleteAdmin
+    deleteAdmin,
+    deleteOrganization
 };

@@ -151,7 +151,44 @@ const updateProfile = async (userId, updateBody) => {
     }
 };
 
+
+/**
+ * Delete user account permanently
+ * Cancels active appointments and removes user record
+ */
+const deleteAccount = async (userId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Cancel all active appointments before deleting
+        await client.query(
+            `UPDATE appointments 
+             SET status = 'cancelled', cancelled_by = 'user', updated_at = NOW()
+             WHERE user_id = $1 AND status IN ('confirmed', 'pending')`,
+            [userId]
+        );
+
+        // Hard delete the user (appointments keep user_id as null via SET NULL if FK allows, else cascade)
+        const res = await client.query('DELETE FROM users WHERE id = $1 RETURNING id, name, email', [userId]);
+        if (res.rows.length === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+        }
+
+        await client.query('COMMIT');
+        return res.rows[0];
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error('[deleteAccount] Error:', e);
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     getUserStats,
-    updateProfile
+    updateProfile,
+    deleteAccount
 };
+

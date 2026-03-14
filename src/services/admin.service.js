@@ -435,15 +435,24 @@ const updateSlot = async (orgId, slotId, updateBody) => {
     const { start_time, end_time, max_capacity } = updateBody;
     console.log('[updateSlot] Req body:', updateBody);
 
-    const check = await query('SELECT id, booked_count FROM slots WHERE id = $1 AND org_id = $2', [slotId, orgId]);
+    const check = await query('SELECT id, booked_count, start_time, end_time FROM slots WHERE id = $1 AND org_id = $2', [slotId, orgId]);
     if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found');
 
     const currentSlot = check.rows[0];
+    const isPast = new Date(currentSlot.end_time) < new Date();
 
-    // Check if there are ANY appointments for this slot
-    const apptCheck = await query('SELECT COUNT(*) FROM appointments WHERE slot_id = $1', [slotId]);
-    if (parseInt(apptCheck.rows[0].count) > 0) {
-        throw new ApiError(httpStatus.BAD_REQUEST, "You can't delete or modify the slot which have any appointment");
+    // Only block if there are ACTIVE (confirmed/pending) appointments
+    const activeApptCheck = await query(
+        `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending')`,
+        [slotId]
+    );
+    if (parseInt(activeApptCheck.rows[0].count) > 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, "You can't modify a slot that has active (confirmed/pending) appointments");
+    }
+
+    // Also block update if slot is in the past (no point changing time of past slot)
+    if (isPast && (start_time || end_time)) {
+        throw new ApiError(httpStatus.BAD_REQUEST, "Cannot change the time of a past slot");
     }
 
     // Validate capacity if it's being updated
@@ -472,18 +481,41 @@ const hardDeleteSlot = async (orgId, slotId) => {
         console.log(`[admin.service] Attempting Permanent Delete for slot ${slotId}`);
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, booked_count FROM slots WHERE id = $1 AND org_id = $2', [slotId, orgId]);
+        const check = await client.query(
+            'SELECT id, booked_count, start_time, end_time FROM slots WHERE id = $1 AND org_id = $2',
+            [slotId, orgId]
+        );
         if (check.rows.length === 0) {
             throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found');
         }
 
-        // Check if there are ANY appointments for this slot
-        const apptCheck = await client.query('SELECT COUNT(*) FROM appointments WHERE slot_id = $1', [slotId]);
-        if (parseInt(apptCheck.rows[0].count) > 0) {
-            throw new ApiError(httpStatus.BAD_REQUEST, "You can't delete or modify the slot which have any appointment");
+        const slot = check.rows[0];
+        const isPast = new Date(slot.end_time) < new Date();
+        const bookedCount = parseInt(slot.booked_count) || 0;
+
+        // Check for ACTIVE (confirmed/pending) appointments
+        const activeApptCheck = await client.query(
+            `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending')`,
+            [slotId]
+        );
+        const activeCount = parseInt(activeApptCheck.rows[0].count);
+
+        // Block deletion only if there are active appointments AND the slot is NOT in the past
+        if (activeCount > 0 && !isPast) {
+            throw new ApiError(
+                httpStatus.BAD_REQUEST,
+                "You can't delete a slot that has active (confirmed/pending) appointments"
+            );
         }
 
-        // Permanent Delete
+        // Delete all related appointments first (past slot OR all completed/cancelled)
+        const apptDeleteRes = await client.query(
+            `DELETE FROM appointments WHERE slot_id = $1`,
+            [slotId]
+        );
+        console.log(`[admin.service] Deleted ${apptDeleteRes.rowCount} appointments for slot ${slotId}`);
+
+        // Now delete the slot
         const deleteRes = await client.query(
             `DELETE FROM slots WHERE id = $1 AND org_id = $2`,
             [slotId, orgId]
@@ -491,7 +523,7 @@ const hardDeleteSlot = async (orgId, slotId) => {
         console.log(`[admin.service] Slot permanently deleted: ${deleteRes.rowCount}`);
 
         await client.query('COMMIT');
-        return { ...check.rows[0], deleted: true };
+        return { ...slot, deleted: true };
 
     } catch (e) {
         await client.query('ROLLBACK');
@@ -883,7 +915,7 @@ const getLiveQueue = async (orgId, date) => {
 
 const getNotifications = async (userId) => {
     // Fetch notifications from the actual notifications table for THIS user (the admin)
-    const res = await query(
+    const res = await pool.query(
         `SELECT id, title, message, created_at as time, is_read, type, link
          FROM notifications 
          WHERE user_id = $1 
@@ -1029,6 +1061,35 @@ const deleteAdmin = async (adminIdToDelete, currentAdminId, orgId) => {
     return res.rows[0];
 };
 
+
+const deleteOrganization = async (orgId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Delete admin activity logs first (no direct org link)
+        await client.query(
+            'DELETE FROM admin_activity_logs WHERE admin_id IN (SELECT id FROM users WHERE org_id = $1)',
+            [orgId]
+        );
+
+        // Delete organization — cascades users, slots, appointments, services, resources, etc.
+        const res = await client.query('DELETE FROM organizations WHERE id = $1 RETURNING id, name', [orgId]);
+        if (res.rows.length === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
+        }
+
+        await client.query('COMMIT');
+        return res.rows[0];
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error('[deleteOrganization] Error:', e);
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -1048,5 +1109,7 @@ module.exports = {
     globalSearch,
     getAdmins,
     inviteAdmin,
-    deleteAdmin
+    deleteAdmin,
+    deleteOrganization
 };
+

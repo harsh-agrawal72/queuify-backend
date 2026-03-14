@@ -7,5 +7,7 @@ const router = express.Router();
 
 router.get('/stats', auth('user'), userController.getUserStats);
 router.patch('/profile', auth('user'), userController.updateProfile);
+router.delete('/account', auth('user'), userController.deleteAccount);
 
 module.exports = router;
+
