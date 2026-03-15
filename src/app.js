@@ -15,6 +15,9 @@ const { authLimiter, apiLimiter } = require('./middlewares/rateLimiter');
 
 const app = express();
 
+// Trust proxy - Required for Render/Cloud environments
+app.set('trust proxy', 1);
+
 // Explicit Global Logger
 app.use((req, res, next) => {
     console.log(`[Global Request] ${req.method} ${req.originalUrl}`);
