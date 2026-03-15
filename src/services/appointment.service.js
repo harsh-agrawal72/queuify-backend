@@ -497,7 +497,7 @@ const getQueueStatus = async (appointmentId) => {
         const { rows } = await pool.query(
             `WITH RankedQueue AS (
                 SELECT 
-                    a.id, a.status, a.slot_id, sl.start_time as slot_start,
+                    a.id, a.status, a.slot_id, sl.start_time as slot_start, a.serving_started_at,
                     ROW_NUMBER() OVER (ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC) as q_rank
                 FROM appointments a
                 LEFT JOIN slots sl ON a.slot_id = sl.id
@@ -536,36 +536,39 @@ const getQueueStatus = async (appointmentId) => {
     const peopleAhead = Math.max(0, myRank - (servingEntry ? currentServingNumber : currentServingNumber + 1));
     console.log(`[Diagnostic] People Ahead: ${peopleAhead}`);
 
-    // 5. Calculate Estimated Wait Time
+    // 5. Advanced Math v2.0: Estimated Wait Time calculation
     let estimatedWaitMinutes = 0;
-    const adminEstimate = service.estimated_service_time || 15;
+    const avgTime = (await getSystemAverageSpeed(appointment.service_id, appointment.resource_id)) || service.estimated_service_time || 15;
+    const now = new Date();
     
-    try {
-        const systemAvg = await getSystemAverageSpeed(appointment.service_id, appointment.resource_id);
-        console.log(`[Diagnostic] System Average: ${systemAvg}`);
+    if (appointment.status === 'serving') {
+        estimatedWaitMinutes = 0;
+    } else if (servingEntry) {
+        // Case A: Someone is currently being served
+        const servingRank = parseInt(servingEntry.q_rank);
+        const startTime = new Date(servingEntry.serving_started_at);
+        const timeSpent = (now - startTime) / 60000;
+        const remainingTime = Math.max(0, avgTime - timeSpent);
+        const peopleAhead = Math.max(0, myRank - servingRank - 1);
         
-        if (peopleAhead <= 0) {
-            estimatedWaitMinutes = 0;
-        } else {
-            // Priority: Use system average if available, else admin estimate
-            const effectiveAvg = systemAvg || adminEstimate;
-            estimatedWaitMinutes = peopleAhead * effectiveAvg;
-        }
-    } catch (e) {
-        console.warn(`[Diagnostic] Wait time calculation error (non-fatal): ${e.message}`);
-        estimatedWaitMinutes = peopleAhead * adminEstimate;
+        estimatedWaitMinutes = remainingTime + (peopleAhead * avgTime);
+    } else {
+        // Case B: No one is being served yet
+        const baseStartTime = referenceDate ? (new Date(referenceDate) > now ? new Date(referenceDate) : now) : now;
+        const waitMinutesTillStart = (baseStartTime - now) / 60000;
+        const peopleAhead = Math.max(0, myRank - 1);
+        
+        estimatedWaitMinutes = Math.max(0, waitMinutesTillStart) + (peopleAhead * avgTime);
     }
 
-    // 6. Calculate Expected Turn Time
-    const now = new Date();
     const expectedStartTime = new Date(now.getTime() + estimatedWaitMinutes * 60000);
 
     return {
         queue_number: myRank,
         myRank: myRank,
         current_serving_number: servingEntry ? currentServingNumber : 0,
-        people_ahead: peopleAhead,
-        estimated_wait_time: estimatedWaitMinutes,
+        people_ahead: Math.max(0, myRank - (servingEntry ? currentServingNumber : currentServingNumber + 1)),
+        estimated_wait_time: Math.round(estimatedWaitMinutes),
         expected_start_time: expectedStartTime.toISOString(),
         slot_start_time: referenceDate ? referenceDate.toISOString() : null,
         status: appointment.status,
