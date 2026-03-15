@@ -13,6 +13,10 @@ const transporter = nodemailer.createTransport({
     tls: {
         rejectUnauthorized: false // Often needed for certain SMTP servers
     },
+    pool: true, // reuse connections
+    connectionTimeout: 20000, // 20 seconds
+    greetingTimeout: 20000, // 20 seconds
+    socketTimeout: 30000, // 30 seconds
     family: 4 // Force IPv4 — Render servers default to IPv6 which is unreachable for Gmail SMTP
 });
 
