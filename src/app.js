@@ -90,23 +90,25 @@ app.get('/health', (req, res) => {
     res.json({ status: 'healthy', uptime: process.uptime() });
 });
 
-// Diagnostic routes (Temporary)
-app.get('/v1/diag/email', (req, res) => {
-    res.json({
-        host: config.email.smtp.host,
-        port: config.email.smtp.port,
-        user: config.email.smtp.auth.user ? 'SET' : 'MISSING',
-        from: config.email.from
-    });
-});
-
-app.get('/v1/diag/dns', (req, res) => {
+app.get('/v1/diag/all', (req, res) => {
     const dns = require('dns');
     dns.lookup('smtp.gmail.com', { family: 4 }, (err, address) => {
         res.json({
-            hostname: 'smtp.gmail.com',
-            ipv4: address || null,
-            error: err ? err.message : null
+            timestamp: new Date().toISOString(),
+            deploy_version: "3.0-robust-dns-proxy-v2",
+            trust_proxy_setting: app.get('trust proxy'),
+            env: config.env,
+            smtp_config: {
+                host: config.email.smtp.host,
+                port: config.email.smtp.port,
+                has_user: !!config.email.smtp.auth.user
+            },
+            dns_test: {
+                hostname: 'smtp.gmail.com',
+                resolved_ipv4: address || null,
+                error: err ? err.message : null
+            },
+            headers: req.headers // To see what Render is sending
         });
     });
 });
