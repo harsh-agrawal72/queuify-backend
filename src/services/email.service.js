@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 const config = require('../config/config');
 
 // Create transporter
@@ -17,6 +18,26 @@ const transporter = nodemailer.createTransport({
     connectionTimeout: 20000, // 20 seconds
     greetingTimeout: 20000, // 20 seconds
     socketTimeout: 30000, // 30 seconds
+    lookup: (hostname, options, callback) => {
+        console.log(`[Email-DNS] Resolving ${hostname} (Forcing IPv4)`);
+        dns.lookup(hostname, { family: 4 }, (err, address, family) => {
+            if (err) {
+                console.error(`[Email-DNS] Local lookup failed: ${err.message}. Retrying via resolve4...`);
+                // Fallback to direct DNS resolution if system lookup fails
+                dns.resolve4(hostname, (err4, addresses) => {
+                    if (err4) {
+                        console.error(`[Email-DNS] resolve4 failed: ${err4.message}`);
+                        return callback(err4);
+                    }
+                    console.log(`[Email-DNS] Resolved via resolve4: ${addresses[0]}`);
+                    callback(null, addresses[0], 4);
+                });
+            } else {
+                console.log(`[Email-DNS] Resolved via lookup: ${address}`);
+                callback(null, address, family);
+            }
+        });
+    },
     family: 4 // Force IPv4 — Render servers default to IPv6 which is unreachable for Gmail SMTP
 });
 
