@@ -119,13 +119,13 @@ const deleteSlot = async (slotId, orgId) => {
             throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found or access denied');
         }
 
-        // Check if there are ANY appointments for this slot
-        const apptCheck = await client.query('SELECT COUNT(*) FROM appointments WHERE slot_id = $1', [slotId]);
-        if (parseInt(apptCheck.rows[0].count) > 0) {
-            throw new ApiError(httpStatus.BAD_REQUEST, "You can't delete or modify the slot which have any appointment");
-        }
-
-        await client.query(`DELETE FROM slots WHERE id = $1 AND org_id = $2`, [slotId, orgId]);
+        // In the "Full Soft Delete Mechanism", we allow marking a slot as inactive 
+        // even if it has appointments, so we preserve historical data while 
+        // preventing new bookings.
+        await client.query(
+            `UPDATE slots SET is_active = FALSE WHERE id = $1 AND org_id = $2`,
+            [slotId, orgId]
+        );
 
         await client.query('COMMIT');
         return result.rows[0];
@@ -150,17 +150,22 @@ const updateSlot = async (slotId, orgId, updateBody) => {
     // Step 4: Validate updates against active appointments and deleted status
     const client = await pool.connect();
     try {
-        const res = await client.query(
+        const apptRes = await client.query(
             `SELECT COUNT(*) FROM appointments WHERE slot_id = $1`,
             [slotId]
         );
-        const totalAppointments = parseInt(res.rows[0].count);
+        const totalAppointments = parseInt(apptRes.rows[0].count);
 
+        // In the "Full Soft Delete Mechanism", we allow updates to slots 
+        // but we should still be careful. However, the user specifically 
+        // asked for the mechanism where deletion is unrestricted. 
+        // I will keep the update restriction for now as it's safer, 
+        // unless they explicitly ask to allow updates with appointments too.
         if (totalAppointments > 0) {
-            throw new ApiError(httpStatus.BAD_REQUEST, "You can't delete or modify the slot which have any appointment");
+            throw new ApiError(httpStatus.BAD_REQUEST, "You can't modify a slot that already has appointments. Please delete (deactivate) this slot and create a new one if needed.");
         }
 
-        // Proceed with update (using a direct query or model helper if exists, here direct for simplicity)
+        // Proceed with update
         const { start_time, end_time, max_capacity } = updateBody;
 
         // Build dynamic update query

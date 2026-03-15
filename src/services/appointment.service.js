@@ -449,6 +449,10 @@ const getQueueStatus = async (appointmentId) => {
         [appointment.service_id]
     );
 
+    if (!service) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Service not found for this appointment');
+    }
+
     // 3. Dynamic Ranking Query (Unified for the whole day to match Admin Live Queue)
     // We group by Resource (if PER_RESOURCE) or Service (if CENTRAL) for the date of the appointment
     const filterClause = service.queue_scope === 'PER_RESOURCE'
@@ -531,7 +535,8 @@ const getQueueStatus = async (appointmentId) => {
         people_ahead: peopleAhead,
         estimated_wait_time: estimatedWaitMinutes,
         status: appointment.status,
-        is_serving: appointment.status === 'serving'
+        is_serving: appointment.status === 'serving',
+        org_id: appointment.org_id
     };
 };
 

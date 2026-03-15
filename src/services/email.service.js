@@ -12,7 +12,8 @@ const transporter = nodemailer.createTransport({
     },
     tls: {
         rejectUnauthorized: false // Often needed for certain SMTP servers
-    }
+    },
+    family: 4 // Force IPv4 — Render servers default to IPv6 which is unreachable for Gmail SMTP
 });
 
 // Verify connection

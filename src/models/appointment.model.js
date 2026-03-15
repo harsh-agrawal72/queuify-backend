@@ -31,11 +31,11 @@ const createAppointment = async (appointmentBody) => {
             // If STATIC, we must ensure we don't exceed capacity for the given slot
             if (service.queue_type === 'STATIC' && slotId) {
                 const slotRes = await client.query(
-                    'SELECT * FROM slots WHERE id = $1 FOR UPDATE',
+                    'SELECT * FROM slots WHERE id = $1 AND is_active = TRUE FOR UPDATE',
                     [slotId]
                 );
                 const slot = slotRes.rows[0];
-                if (!slot) throw new Error('Slot not found');
+                if (!slot) throw new Error('Slot not found or is inactive');
 
                 // Overbooking prevention: Use concurrent_capacity if slot capacity is generic
                 const maxCap = slot.max_capacity || resource.concurrent_capacity || 1;
@@ -46,11 +46,11 @@ const createAppointment = async (appointmentBody) => {
         } else if (service.queue_type === 'STATIC' && slotId) {
             // CENTRAL STATIC queue slot check
             const slotRes = await client.query(
-                'SELECT * FROM slots WHERE id = $1 FOR UPDATE',
+                'SELECT * FROM slots WHERE id = $1 AND is_active = TRUE FOR UPDATE',
                 [slotId]
             );
             const slot = slotRes.rows[0];
-            if (!slot) throw new Error('Slot not found');
+            if (!slot) throw new Error('Slot not found or is inactive');
             if (slot.booked_count >= slot.max_capacity) {
                 throw new Error('This session is fully booked');
             }
@@ -141,7 +141,7 @@ const getAppointmentById = async (id) => {
                        ORDER BY a.created_at ASC
                    ) as calculated_queue
             FROM appointments a
-            JOIN services s ON a.service_id = s.id
+            LEFT JOIN services s ON a.service_id = s.id
             WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
          )
          SELECT a.*, 
@@ -150,7 +150,7 @@ const getAppointmentById = async (id) => {
                 r.name as resource_name
          FROM appointments a
          LEFT JOIN QueueRanks q ON a.id = q.id
-         JOIN services s ON a.service_id = s.id
+         LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN resources r ON a.resource_id = r.id
          WHERE a.id = $1`,
         [id]
