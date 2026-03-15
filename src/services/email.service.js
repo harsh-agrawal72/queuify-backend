@@ -2,8 +2,14 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const config = require('../config/config');
 
-console.log('[EmailService] Initializing Transporter...');
-console.log(`[EmailService] Host: ${config.email.smtp.host}, Port: ${config.email.smtp.port}, Secure: ${config.email.smtp.port == 465}`);
+// Force IPv4 globally for the process to avoid ENETUNREACH on Render
+if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+}
+
+const VERSION_TAG = "[v4-FINAL]";
+console.log(`${VERSION_TAG} EmailService Initializing...`);
+console.log(`${VERSION_TAG} Host: ${config.email.smtp.host}, Port: ${config.email.smtp.port}`);
 
 // Create transporter
 const transporter = nodemailer.createTransport({
@@ -22,31 +28,31 @@ const transporter = nodemailer.createTransport({
     greetingTimeout: 20000, // 20 seconds
     socketTimeout: 30000, // 30 seconds
     lookup: (hostname, options, callback) => {
-        console.log(`[Email-DNS-Diagnostic] Resolving: ${hostname}`);
+        console.log(`${VERSION_TAG} DNS Lookup starting for: ${hostname}`);
         dns.lookup(hostname, { family: 4 }, (err, address, family) => {
             if (err) {
-                console.error(`[Email-DNS-Diagnostic] Error: ${err.message}`);
+                console.error(`${VERSION_TAG} DNS Error: ${err.message}`);
                 return callback(err);
             }
-            console.log(`[Email-DNS-Diagnostic] SUCCESS: ${address} (Family: ${family})`);
-            callback(null, address, 4); // Always return family 4
+            console.log(`${VERSION_TAG} DNS Success: ${address} (Family: ${family})`);
+            callback(null, address, 4);
         });
-    },
-    family: 4 // Force IPv4 — Render servers default to IPv6 which is unreachable for Gmail SMTP
+    }
+    // Removed top-level 'family' to ensure custom 'lookup' is used
 });
 
 // Verify connection
 transporter.verify(function (error, success) {
     if (error) {
-        console.error('Email Service Error:', error);
+        console.error(`${VERSION_TAG} Verify Failed:`, error.message);
     } else {
-        console.log('Email Service is ready to send messages');
+        console.log(`${VERSION_TAG} Verify Success: Service Ready`);
     }
 });
 
 const sendEmail = async (to, subject, html) => {
     try {
-        console.log(`[EmailService] Attempting to send email. To: ${to}, Subject: ${subject}`);
+        console.log(`${VERSION_TAG} Sending Email to: ${to}`);
         const msg = {
             from: `"Queuify Manager" <${config.email.from}>`,
             to,
