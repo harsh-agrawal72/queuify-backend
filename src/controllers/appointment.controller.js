@@ -52,8 +52,14 @@ module.exports = {
     cancelAppointment,
     updateStatus,
     getQueueStatus: catchAsync(async (req, res) => {
-        const status = await appointmentService.getQueueStatus(req.params.appointmentId);
-        res.send(status);
+        try {
+            const status = await appointmentService.getQueueStatus(req.params.appointmentId);
+            res.send(status);
+        } catch (error) {
+            console.error(`[Controller-getQueueStatus] Error for ID ${req.params.appointmentId}:`, error);
+            // Pass to global error handler but log locally first
+            throw error;
+        }
     })
 };
 

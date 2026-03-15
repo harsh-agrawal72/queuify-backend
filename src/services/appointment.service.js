@@ -437,37 +437,54 @@ const getSystemAverageSpeed = async (serviceId, resourceId = null) => {
 };
 
 const getQueueStatus = async (appointmentId) => {
+    console.log(`[getQueueStatus] Fetching status for appointment: ${appointmentId}`);
     // 1. Get Appointment details
     const appointment = await appointmentModel.getAppointmentById(appointmentId);
     if (!appointment) {
+        console.error(`[getQueueStatus] Appointment not found: ${appointmentId}`);
         throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
     }
 
     // 2. Fetch service details for ranking logic and timing
     const { rows: [service] } = await pool.query(
-        'SELECT queue_type, estimated_service_time, queue_scope FROM services WHERE id = $1',
+        'SELECT id, queue_type, estimated_service_time, queue_scope FROM services WHERE id = $1',
         [appointment.service_id]
     );
 
     if (!service) {
+        console.error(`[getQueueStatus] Service not found for appointment: ${appointment.service_id}`);
         throw new ApiError(httpStatus.NOT_FOUND, 'Service not found for this appointment');
     }
 
-    // 3. Dynamic Ranking Query (Unified for the whole day to match Admin Live Queue)
-    // We group by Resource (if PER_RESOURCE) or Service (if CENTRAL) for the date of the appointment
-    const filterClause = service.queue_scope === 'PER_RESOURCE'
-        ? 'a.resource_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)'
-        : 'a.service_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)';
+    // 3. Dynamic Ranking Query
+    let filterClause;
+    let filterParams;
+    let referenceDate = appointment.created_at;
 
-    // Date can be from slot or creation
-    const referenceDate = appointment.slot_id ? 
-        (await pool.query('SELECT start_time FROM slots WHERE id = $1', [appointment.slot_id])).rows[0]?.start_time : 
-        appointment.created_at;
+    try {
+        if (appointment.slot_id) {
+            const slotRes = await pool.query('SELECT start_time FROM slots WHERE id = $1', [appointment.slot_id]);
+            if (slotRes.rows[0]?.start_time) {
+                referenceDate = slotRes.rows[0].start_time;
+            }
+        }
+    } catch (e) {
+        console.warn(`[getQueueStatus] Error fetching slot start_time: ${e.message}. Using created_at.`);
+    }
 
-    const filterParams = [
-        service.queue_scope === 'PER_RESOURCE' ? appointment.resource_id : appointment.service_id,
-        referenceDate
-    ];
+    if (service.queue_scope === 'PER_RESOURCE') {
+        filterClause = 'a.resource_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)';
+        filterParams = [appointment.resource_id || null, referenceDate];
+    } else {
+        filterClause = 'a.service_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)';
+        filterParams = [appointment.service_id || null, referenceDate];
+    }
+
+    console.log('[getQueueStatus] Final Params for Ranking:', { 
+        id: appointment.resource_id || appointment.service_id, 
+        refDate: referenceDate,
+        scope: service.queue_scope
+    });
 
     const { rows: rankedRows } = await pool.query(
         `WITH RankedQueue AS (
@@ -482,11 +499,15 @@ const getQueueStatus = async (appointmentId) => {
             FROM appointments a
             LEFT JOIN slots sl ON a.slot_id = sl.id
             WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed', 'no_show')
-            AND ${filterClause}
+            AND (
+                ${service.queue_scope === 'PER_RESOURCE' ? 'a.resource_id' : 'a.service_id'} = $1::uuid
+            )
+            AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)
          )
          SELECT * FROM RankedQueue`,
         filterParams
     );
+
 
     const myEntry = rankedRows.find(r => r.id === appointmentId);
     const myRank = myEntry ? parseInt(myEntry.q_rank) : 0;

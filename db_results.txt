@@ -1,0 +1,8 @@
+﻿[dotenv@17.2.4] injecting env (17) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+--- DB CONFIG ---
+HOST: localhost
+DATABASE: smartqueue
+--- COLUMNS ---
+updated_at, org_id, working_hours, established_year, total_staff, verified, created_at, id, contact_phone, website_url, facebook_url, gst_number, registration_number, instagram_url, linkedin_url, description, address, city, state, pincode, contact_email
+--- TABLE LIST ---
+slots, services, resources, users, organizations, request_logs, error_logs, appointments, activity_logs, plans, notifications, resource_services, reviews, impersonation_logs, admin_activity_logs, organization_profiles, organization_images
