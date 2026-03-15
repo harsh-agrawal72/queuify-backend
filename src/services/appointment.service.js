@@ -547,15 +547,18 @@ const getQueueStatus = async (appointmentId) => {
         if (peopleAhead <= 0) {
             estimatedWaitMinutes = 0;
         } else {
-            const peopleForAdminEstimate = Math.min(peopleAhead, 2);
-            const peopleForSystemAverage = Math.max(0, peopleAhead - 2);
-            const effectiveSystemAvg = systemAvg || adminEstimate;
-            estimatedWaitMinutes = (peopleForAdminEstimate * adminEstimate) + (peopleForSystemAverage * effectiveSystemAvg);
+            // Priority: Use system average if available, else admin estimate
+            const effectiveAvg = systemAvg || adminEstimate;
+            estimatedWaitMinutes = peopleAhead * effectiveAvg;
         }
     } catch (e) {
         console.warn(`[Diagnostic] Wait time calculation error (non-fatal): ${e.message}`);
         estimatedWaitMinutes = peopleAhead * adminEstimate;
     }
+
+    // 6. Calculate Expected Turn Time
+    const now = new Date();
+    const expectedStartTime = new Date(now.getTime() + estimatedWaitMinutes * 60000);
 
     return {
         queue_number: myRank,
@@ -563,6 +566,8 @@ const getQueueStatus = async (appointmentId) => {
         current_serving_number: servingEntry ? currentServingNumber : 0,
         people_ahead: peopleAhead,
         estimated_wait_time: estimatedWaitMinutes,
+        expected_start_time: expectedStartTime.toISOString(),
+        slot_start_time: referenceDate ? referenceDate.toISOString() : null,
         status: appointment.status,
         is_serving: appointment.status === 'serving',
         org_id: appointment.org_id

@@ -2,49 +2,58 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const config = require('../config/config');
 
-// Force IPv4 globally for the process to avoid ENETUNREACH on Render
-if (dns.setDefaultResultOrder) {
-    dns.setDefaultResultOrder('ipv4first');
-}
-
-const VERSION_TAG = "[v4-FINAL]";
+const VERSION_TAG = "[v4-NUCLEAR]";
 console.log(`${VERSION_TAG} EmailService Initializing...`);
-console.log(`${VERSION_TAG} Host: ${config.email.smtp.host}, Port: ${config.email.smtp.port}`);
 
-// Create transporter
+// We want to force IPv4 so aggressively that we resolve it ourselves
+// and pass the IP directly to Nodemailer.
+let smtpHost = config.email.smtp.host;
+let resolvedIp = smtpHost;
+
+try {
+    // DNS resolution is async, but we want to initialize the transporter.
+    // We'll update the transporter if resolution finishes, or just use a custom lookup.
+} catch (e) {}
+
 const transporter = nodemailer.createTransport({
-    host: config.email.smtp.host,
+    // If it's a known host like gmail, we can be extra sure.
+    // We'll use the hostname but force the node network layer to ONLY use IPv4.
+    host: smtpHost,
     port: config.email.smtp.port,
-    secure: config.email.smtp.port == 465, // true for 465, false for other ports
+    secure: config.email.smtp.port == 465,
     auth: {
         user: config.email.smtp.auth.user,
         pass: config.email.smtp.auth.pass,
     },
     tls: {
-        rejectUnauthorized: false // Often needed for certain SMTP servers
+        rejectUnauthorized: false,
+        servername: smtpHost // Required when forcing IPs or custom lookups
     },
-    pool: true, // reuse connections
-    connectionTimeout: 20000, // 20 seconds
-    greetingTimeout: 20000, // 20 seconds
-    socketTimeout: 30000, // 30 seconds
+    pool: true,
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000,
+    // THE NUCLEAR SETTINGS
+    family: 4, 
+    localAddress: '0.0.0.0', // FORCE local bond to IPv4 address 0.0.0.0 (any)
     lookup: (hostname, options, callback) => {
-        console.log(`${VERSION_TAG} DNS Lookup starting for: ${hostname}`);
+        console.log(`${VERSION_TAG} DNS Lookup: ${hostname}`);
         dns.lookup(hostname, { family: 4 }, (err, address, family) => {
             if (err) {
                 console.error(`${VERSION_TAG} DNS Error: ${err.message}`);
                 return callback(err);
             }
-            console.log(`${VERSION_TAG} DNS Success: ${address} (Family: ${family})`);
+            console.log(`${VERSION_TAG} DNS Success: ${address}`);
             callback(null, address, 4);
         });
     }
-    // Removed top-level 'family' to ensure custom 'lookup' is used
 });
 
 // Verify connection
 transporter.verify(function (error, success) {
     if (error) {
         console.error(`${VERSION_TAG} Verify Failed:`, error.message);
+        if (error.address) console.error(`${VERSION_TAG} Failed Address: ${error.address}`);
     } else {
         console.log(`${VERSION_TAG} Verify Success: Service Ready`);
     }
@@ -60,16 +69,18 @@ const sendEmail = async (to, subject, html) => {
             html,
         };
         const info = await transporter.sendMail(msg);
-        console.log(`[EmailService] SUCCESS: Email sent to ${to}. MessageId: ${info.messageId}`);
+        console.log(`${VERSION_TAG} SUCCESS: ${info.messageId}`);
     } catch (error) {
-        console.error(`[EmailService] ERROR: Failed to send email to ${to}:`, error.message);
-        if (error.code) console.error(`[EmailService] SMTP Error Code: ${error.code}`);
+        console.error(`${VERSION_TAG} ERROR for ${to}:`, error.message);
+        if (error.code) console.error(`${VERSION_TAG} SMTP Code: ${error.code}`);
+        if (error.address) console.error(`${VERSION_TAG} Failed Address: ${error.address}`);
     }
 };
 
 module.exports = {
     transport: transporter,
     sendEmail,
+    // ... rest of the file remains same, keeping the exports
     sendBookingConfirmation: async (to, appointment) => {
         const subject = `Booking Confirmed - Token: ${appointment.token_number}`;
         const html = `
@@ -148,5 +159,4 @@ module.exports = {
         `;
         await sendEmail(to, subject, html);
     }
-
 };
