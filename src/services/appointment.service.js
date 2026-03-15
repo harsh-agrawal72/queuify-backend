@@ -438,35 +438,45 @@ const getSystemAverageSpeed = async (serviceId, resourceId = null) => {
 
 const getQueueStatus = async (appointmentId) => {
     try {
-        console.log(`[Diagnostic-v2.1] Starting getQueueStatus for appointmentId: ${appointmentId}`);
+        console.log(`[Diagnostic-v2.2] START for ID: ${appointmentId}`);
         
-        // 1. Get Appointment details
+        // 1. Get Appointment
         const appointment = await appointmentModel.getAppointmentById(appointmentId);
         if (!appointment) {
+            console.error(`[Diagnostic-v2.2] Appointment NOT FOUND: ${appointmentId}`);
             throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
         }
 
-        // 2. Fetch service details
+        // 2. Get Service
         const { rows: svcRows } = await pool.query(
             'SELECT id, queue_type, estimated_service_time, queue_scope FROM services WHERE id = $1',
             [appointment.service_id]
         );
         const service = svcRows[0];
         if (!service) {
+            console.error(`[Diagnostic-v2.2] Service NOT FOUND for ID: ${appointment.service_id}`);
             throw new ApiError(httpStatus.NOT_FOUND, 'Service not found');
         }
 
-        // 3. Dynamic Ranking Query
+        // 3. Resolve Reference Date
         let referenceDate = appointment.created_at;
         if (appointment.slot_id) {
-            const slotRes = await pool.query('SELECT start_time FROM slots WHERE id = $1', [appointment.slot_id]);
-            if (slotRes.rows[0]?.start_time) {
-                referenceDate = slotRes.rows[0].start_time;
+            try {
+                const slotRes = await pool.query('SELECT start_time FROM slots WHERE id = $1', [appointment.slot_id]);
+                if (slotRes.rows[0]?.start_time) {
+                    referenceDate = slotRes.rows[0].start_time;
+                }
+            } catch (e) {
+                console.warn(`[Diagnostic-v2.2] Slot fetch error (non-fatal): ${e.message}`);
             }
         }
 
-        const scopeId = service.queue_scope === 'PER_RESOURCE' ? appointment.resource_id : appointment.service_id;
-        const filterParams = [scopeId, referenceDate || new Date()];
+        // 4. Ranking Query with safe SQL types
+        const isPerResource = service.queue_scope === 'PER_RESOURCE';
+        const scopeId = isPerResource ? (appointment.resource_id || appointment.service_id) : appointment.service_id;
+        
+        // Use a default date if referenceDate is null to avoid SQL crashes
+        const queryDate = referenceDate || new Date();
 
         const { rows: rankedRows } = await pool.query(
             `WITH RankedQueue AS (
@@ -477,13 +487,15 @@ const getQueueStatus = async (appointmentId) => {
                 LEFT JOIN slots sl ON a.slot_id = sl.id
                 WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed', 'no_show')
                 AND (
-                    ${service.queue_scope === 'PER_RESOURCE' ? 'a.resource_id' : 'a.service_id'} = $1::uuid
+                    ${isPerResource ? 'a.resource_id' : 'a.service_id'} = $1::uuid
                 )
                 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)
              )
              SELECT * FROM RankedQueue`,
-            filterParams
+            [scopeId, queryDate]
         );
+
+        console.log(`[Diagnostic-v2.2] Ranked rows found: ${rankedRows.length}`);
 
         const myEntry = rankedRows.find(r => r.id === appointmentId);
         const myRank = myEntry ? parseInt(myEntry.q_rank) : 0;
@@ -499,23 +511,25 @@ const getQueueStatus = async (appointmentId) => {
 
         const peopleAhead = Math.max(0, myRank - (servingEntry ? currentServingNumber : currentServingNumber + 1));
 
-        // 5. Advanced Math v2.0 calculation
+        // 5. Advanced Math v2.0
         let estimatedWaitMinutes = 0;
         const avgTime = (await getSystemAverageSpeed(appointment.service_id, appointment.resource_id)) || service.estimated_service_time || 15;
         const now = new Date();
         
         if (appointment.status === 'serving') {
             estimatedWaitMinutes = 0;
-        } else if (servingEntry) {
-            // Case A: Someone is currently being served
+        } else if (servingEntry && servingEntry.serving_started_at) {
             const servingRank = parseInt(servingEntry.q_rank);
-            const startTime = servingEntry.serving_started_at ? new Date(servingEntry.serving_started_at) : now;
-            const timeSpent = (now - startTime) / 60000;
-            const remainingTime = Math.max(0, avgTime - timeSpent);
-            const middlePeople = Math.max(0, myRank - servingRank - 1);
-            estimatedWaitMinutes = remainingTime + (middlePeople * avgTime);
+            const startTime = new Date(servingEntry.serving_started_at);
+            if (!isNaN(startTime.getTime())) {
+                const timeSpent = (now - startTime) / 60000;
+                const remainingTime = Math.max(0, avgTime - timeSpent);
+                const middlePeople = Math.max(0, myRank - servingRank - 1);
+                estimatedWaitMinutes = remainingTime + (middlePeople * avgTime);
+            } else {
+                estimatedWaitMinutes = peopleAhead * avgTime;
+            }
         } else {
-            // Case B: No one is being served yet
             const baseDate = referenceDate ? new Date(referenceDate) : now;
             const baseStartTime = isNaN(baseDate.getTime()) || baseDate < now ? now : baseDate;
             const waitMinutesTillStart = (baseStartTime - now) / 60000;
@@ -523,16 +537,17 @@ const getQueueStatus = async (appointmentId) => {
             estimatedWaitMinutes = Math.max(0, waitMinutesTillStart) + (peopleWaitingAhead * avgTime);
         }
 
-        // Final safety check for NaN
         if (isNaN(estimatedWaitMinutes)) estimatedWaitMinutes = peopleAhead * avgTime;
 
-        const expectedStartTime = new Date(now.getTime() + estimatedWaitMinutes * 60000);
-        let expectedTurnISO = null;
-        try {
-            if (!isNaN(expectedStartTime.getTime())) {
-                expectedTurnISO = expectedStartTime.toISOString();
-            }
-        } catch (e) { console.error('ISO conversion failed', e); }
+        // 6. Safe formatting
+        const expectedStartTime = new Date(now.getTime() + Math.round(estimatedWaitMinutes) * 60000);
+        const safeISO = (d) => {
+            try {
+                if (!d) return null;
+                const dateObj = new Date(d);
+                return isNaN(dateObj.getTime()) ? null : dateObj.toISOString();
+            } catch (e) { return null; }
+        };
 
         return {
             queue_number: myRank,
@@ -540,15 +555,19 @@ const getQueueStatus = async (appointmentId) => {
             current_serving_number: servingEntry ? currentServingNumber : 0,
             people_ahead: peopleAhead,
             estimated_wait_time: Math.round(estimatedWaitMinutes),
-            expected_start_time: expectedTurnISO,
-            slot_start_time: referenceDate ? new Date(referenceDate).toISOString() : null,
+            expected_start_time: safeISO(expectedStartTime),
+            slot_start_time: safeISO(referenceDate),
             status: appointment.status,
             is_serving: appointment.status === 'serving',
             org_id: appointment.org_id
         };
     } catch (error) {
-        console.error(`[QueueStatus-CRASH] ID ${appointmentId}:`, error);
-        throw error; // Let global handler take it, but now we have logs
+        console.error(`[Diagnostic-CRITICAL-500] ID ${appointmentId}:`, error);
+        // If it's not a handled 404, we want to know why it crashed
+        if (!(error instanceof ApiError)) {
+            console.error('Stack Trace:', error.stack);
+        }
+        throw error;
     }
 };
 
