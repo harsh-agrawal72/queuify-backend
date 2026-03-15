@@ -437,122 +437,130 @@ const getSystemAverageSpeed = async (serviceId, resourceId = null) => {
 };
 
 const getQueueStatus = async (appointmentId) => {
-    console.log(`[getQueueStatus] Fetching status for appointment: ${appointmentId}`);
+    console.log(`[Diagnostic] Starting getQueueStatus for appointmentId: ${appointmentId}`);
+    
     // 1. Get Appointment details
-    const appointment = await appointmentModel.getAppointmentById(appointmentId);
+    let appointment;
+    try {
+        appointment = await appointmentModel.getAppointmentById(appointmentId);
+        console.log(`[Diagnostic] Appointment fetch result:`, appointment ? 'FOUND' : 'NOT FOUND');
+    } catch (err) {
+        console.error(`[Diagnostic] Crash in getAppointmentById:`, err);
+        throw err;
+    }
+
     if (!appointment) {
-        console.error(`[getQueueStatus] Appointment not found: ${appointmentId}`);
         throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
     }
 
-    // 2. Fetch service details for ranking logic and timing
-    const { rows: [service] } = await pool.query(
-        'SELECT id, queue_type, estimated_service_time, queue_scope FROM services WHERE id = $1',
-        [appointment.service_id]
-    );
+    // 2. Fetch service details
+    let service;
+    try {
+        const { rows } = await pool.query(
+            'SELECT id, queue_type, estimated_service_time, queue_scope FROM services WHERE id = $1',
+            [appointment.service_id]
+        );
+        service = rows[0];
+        console.log(`[Diagnostic] Service fetch result:`, service ? 'FOUND' : 'NOT FOUND');
+    } catch (err) {
+        console.error(`[Diagnostic] Crash in service fetch:`, err);
+        throw err;
+    }
 
     if (!service) {
-        console.error(`[getQueueStatus] Service not found for appointment: ${appointment.service_id}`);
         throw new ApiError(httpStatus.NOT_FOUND, 'Service not found for this appointment');
     }
 
     // 3. Dynamic Ranking Query
-    let filterClause;
-    let filterParams;
     let referenceDate = appointment.created_at;
-
     try {
         if (appointment.slot_id) {
             const slotRes = await pool.query('SELECT start_time FROM slots WHERE id = $1', [appointment.slot_id]);
             if (slotRes.rows[0]?.start_time) {
                 referenceDate = slotRes.rows[0].start_time;
+                console.log(`[Diagnostic] Using slot start_time: ${referenceDate}`);
             }
         }
     } catch (e) {
-        console.warn(`[getQueueStatus] Error fetching slot start_time: ${e.message}. Using created_at.`);
+        console.warn(`[Diagnostic] Slot timing fetch error (non-fatal): ${e.message}`);
     }
 
-    if (service.queue_scope === 'PER_RESOURCE') {
-        filterClause = 'a.resource_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)';
-        filterParams = [appointment.resource_id || null, referenceDate];
-    } else {
-        filterClause = 'a.service_id = $1 AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)';
-        filterParams = [appointment.service_id || null, referenceDate];
+    const filterParams = [
+        service.queue_scope === 'PER_RESOURCE' ? (appointment.resource_id || null) : (appointment.service_id || null),
+        referenceDate || new Date()
+    ];
+
+    console.log('[Diagnostic] Ranking Query Params:', JSON.stringify(filterParams));
+
+    let rankedRows = [];
+    try {
+        const { rows } = await pool.query(
+            `WITH RankedQueue AS (
+                SELECT 
+                    a.id, a.status, a.slot_id, sl.start_time as slot_start,
+                    ROW_NUMBER() OVER (ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC) as q_rank
+                FROM appointments a
+                LEFT JOIN slots sl ON a.slot_id = sl.id
+                WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed', 'no_show')
+                AND (
+                    ${service.queue_scope === 'PER_RESOURCE' ? 'a.resource_id' : 'a.service_id'} = $1::uuid
+                )
+                AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)
+             )
+             SELECT * FROM RankedQueue`,
+            filterParams
+        );
+        rankedRows = rows;
+        console.log(`[Diagnostic] Ranked rows found: ${rankedRows.length}`);
+    } catch (err) {
+        console.error(`[Diagnostic] Crash in ranking query:`, err);
+        throw err;
     }
-
-    console.log('[getQueueStatus] Final Params for Ranking:', { 
-        id: appointment.resource_id || appointment.service_id, 
-        refDate: referenceDate,
-        scope: service.queue_scope
-    });
-
-    const { rows: rankedRows } = await pool.query(
-        `WITH RankedQueue AS (
-            SELECT 
-                a.id, 
-                a.status, 
-                a.slot_id,
-                sl.start_time as slot_start,
-                ROW_NUMBER() OVER (
-                    ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC
-                ) as q_rank
-            FROM appointments a
-            LEFT JOIN slots sl ON a.slot_id = sl.id
-            WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed', 'no_show')
-            AND (
-                ${service.queue_scope === 'PER_RESOURCE' ? 'a.resource_id' : 'a.service_id'} = $1::uuid
-            )
-            AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)
-         )
-         SELECT * FROM RankedQueue`,
-        filterParams
-    );
-
 
     const myEntry = rankedRows.find(r => r.id === appointmentId);
     const myRank = myEntry ? parseInt(myEntry.q_rank) : 0;
+    console.log(`[Diagnostic] My Rank: ${myRank}`);
 
-    // 4. Calculate Current Serving
-    // Only show a serving number if someone is ACTUALLY in 'serving' status.
-    // If not, we don't want to default to rank 1 (which causes "Serving Now" bug).
     const servingEntry = rankedRows.find(r => r.status === 'serving');
     let currentServingNumber = 0;
 
     if (servingEntry) {
         currentServingNumber = parseInt(servingEntry.q_rank);
+        console.log(`[Diagnostic] Current Serving: ${currentServingNumber}`);
     } else {
-        // If no one is serving, find the first person who is STILL WAITING.
-        // But we don't return this as "serving". We use it to calculate people ahead.
         const firstWaiting = rankedRows.find(r => ['pending', 'confirmed'].includes(r.status));
-        // If the first waiting person hasn't been called yet, "current serving" is effectively "just before them"
         currentServingNumber = firstWaiting ? Math.max(0, parseInt(firstWaiting.q_rank) - 1) : myRank;
+        console.log(`[Diagnostic] Current Serving (fallback): ${currentServingNumber}`);
     }
 
     const peopleAhead = Math.max(0, myRank - (servingEntry ? currentServingNumber : currentServingNumber + 1));
+    console.log(`[Diagnostic] People Ahead: ${peopleAhead}`);
 
     // 5. Calculate Estimated Wait Time
     let estimatedWaitMinutes = 0;
     const adminEstimate = service.estimated_service_time || 15;
     
-    // System Average Calculation
-    const systemAvg = await getSystemAverageSpeed(appointment.service_id, appointment.resource_id);
-    
-    if (peopleAhead <= 0) {
-        estimatedWaitMinutes = 0;
-    } else {
-        // Use admin estimate for the first 2 people, system average for the rest (if available)
-        const peopleForAdminEstimate = Math.min(peopleAhead, 2);
-        const peopleForSystemAverage = Math.max(0, peopleAhead - 2);
+    try {
+        const systemAvg = await getSystemAverageSpeed(appointment.service_id, appointment.resource_id);
+        console.log(`[Diagnostic] System Average: ${systemAvg}`);
         
-        const effectiveSystemAvg = systemAvg || adminEstimate;
-        
-        estimatedWaitMinutes = (peopleForAdminEstimate * adminEstimate) + (peopleForSystemAverage * effectiveSystemAvg);
+        if (peopleAhead <= 0) {
+            estimatedWaitMinutes = 0;
+        } else {
+            const peopleForAdminEstimate = Math.min(peopleAhead, 2);
+            const peopleForSystemAverage = Math.max(0, peopleAhead - 2);
+            const effectiveSystemAvg = systemAvg || adminEstimate;
+            estimatedWaitMinutes = (peopleForAdminEstimate * adminEstimate) + (peopleForSystemAverage * effectiveSystemAvg);
+        }
+    } catch (e) {
+        console.warn(`[Diagnostic] Wait time calculation error (non-fatal): ${e.message}`);
+        estimatedWaitMinutes = peopleAhead * adminEstimate;
     }
 
     return {
         queue_number: myRank,
         myRank: myRank,
-        current_serving_number: servingEntry ? currentServingNumber : 0, // 0 means no one is currently being served
+        current_serving_number: servingEntry ? currentServingNumber : 0,
         people_ahead: peopleAhead,
         estimated_wait_time: estimatedWaitMinutes,
         status: appointment.status,

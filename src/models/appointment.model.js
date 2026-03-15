@@ -128,34 +128,22 @@ const createAppointment = async (appointmentBody) => {
 };
 
 const getAppointmentById = async (id) => {
-    const result = await pool.query(
-        `WITH QueueRanks AS (
-            SELECT a.id, 
-                   ROW_NUMBER() OVER (
-                       PARTITION BY (
-                           CASE 
-                               WHEN s.queue_scope = 'PER_RESOURCE' THEN a.slot_id::text 
-                               ELSE (SELECT CONCAT(a.service_id, '_', sl.start_time) FROM slots sl WHERE sl.id = a.slot_id)
-                           END
-                       )
-                       ORDER BY a.created_at ASC
-                   ) as calculated_queue
+    try {
+        const result = await pool.query(
+            `SELECT a.*, 
+                    s.name as service_name, s.queue_scope,
+                    r.name as resource_name
             FROM appointments a
             LEFT JOIN services s ON a.service_id = s.id
-            WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
-         )
-         SELECT a.*, 
-                COALESCE(q.calculated_queue, 0) as queue_number,
-                s.name as service_name, s.queue_scope,
-                r.name as resource_name
-         FROM appointments a
-         LEFT JOIN QueueRanks q ON a.id = q.id
-         LEFT JOIN services s ON a.service_id = s.id
-         LEFT JOIN resources r ON a.resource_id = r.id
-         WHERE a.id = $1`,
-        [id]
-    );
-    return result.rows[0];
+            LEFT JOIN resources r ON a.resource_id = r.id
+            WHERE a.id = $1::uuid`,
+            [id]
+        );
+        return result.rows[0];
+    } catch (err) {
+        console.error(`[Model] getAppointmentById Error for ${id}:`, err.message);
+        throw err;
+    }
 };
 
 const getAppointmentsByUserId = async (userId) => {
