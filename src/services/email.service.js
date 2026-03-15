@@ -2,6 +2,9 @@ const nodemailer = require('nodemailer');
 const dns = require('dns');
 const config = require('../config/config');
 
+console.log('[EmailService] Initializing Transporter...');
+console.log(`[EmailService] Host: ${config.email.smtp.host}, Port: ${config.email.smtp.port}, Secure: ${config.email.smtp.port == 465}`);
+
 // Create transporter
 const transporter = nodemailer.createTransport({
     host: config.email.smtp.host,
@@ -19,23 +22,14 @@ const transporter = nodemailer.createTransport({
     greetingTimeout: 20000, // 20 seconds
     socketTimeout: 30000, // 30 seconds
     lookup: (hostname, options, callback) => {
-        console.log(`[Email-DNS] Resolving ${hostname} (Forcing IPv4)`);
+        console.log(`[Email-DNS-Diagnostic] Resolving: ${hostname}`);
         dns.lookup(hostname, { family: 4 }, (err, address, family) => {
             if (err) {
-                console.error(`[Email-DNS] Local lookup failed: ${err.message}. Retrying via resolve4...`);
-                // Fallback to direct DNS resolution if system lookup fails
-                dns.resolve4(hostname, (err4, addresses) => {
-                    if (err4) {
-                        console.error(`[Email-DNS] resolve4 failed: ${err4.message}`);
-                        return callback(err4);
-                    }
-                    console.log(`[Email-DNS] Resolved via resolve4: ${addresses[0]}`);
-                    callback(null, addresses[0], 4);
-                });
-            } else {
-                console.log(`[Email-DNS] Resolved via lookup: ${address}`);
-                callback(null, address, family);
+                console.error(`[Email-DNS-Diagnostic] Error: ${err.message}`);
+                return callback(err);
             }
+            console.log(`[Email-DNS-Diagnostic] SUCCESS: ${address} (Family: ${family})`);
+            callback(null, address, 4); // Always return family 4
         });
     },
     family: 4 // Force IPv4 — Render servers default to IPv6 which is unreachable for Gmail SMTP

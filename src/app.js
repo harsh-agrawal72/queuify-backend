@@ -84,21 +84,27 @@ if (config.env === 'production') {
 
 // Health check
 app.get('/health', (req, res) => {
-    const uptime = process.uptime();
-    const memory = process.memoryUsage();
-    const cpu = process.cpuUsage();
+    res.json({ status: 'healthy', uptime: process.uptime() });
+});
 
+// Diagnostic routes (Temporary)
+app.get('/v1/diag/email', (req, res) => {
     res.json({
-        status: 'healthy',
-        uptime: Math.floor(uptime),
-        serverTime: new Date().toISOString(),
-        memoryUsage: {
-            heapTotal: (memory.heapTotal / 1024 / 1024).toFixed(2) + ' MB',
-            heapUsed: (memory.heapUsed / 1024 / 1024).toFixed(2) + ' MB',
-            rss: (memory.rss / 1024 / 1024).toFixed(2) + ' MB'
-        },
-        cpuUsage: cpu,
-        nodeVersion: process.version
+        host: config.email.smtp.host,
+        port: config.email.smtp.port,
+        user: config.email.smtp.auth.user ? 'SET' : 'MISSING',
+        from: config.email.from
+    });
+});
+
+app.get('/v1/diag/dns', (req, res) => {
+    const dns = require('dns');
+    dns.lookup('smtp.gmail.com', { family: 4 }, (err, address) => {
+        res.json({
+            hostname: 'smtp.gmail.com',
+            ipv4: address || null,
+            error: err ? err.message : null
+        });
     });
 });
 
