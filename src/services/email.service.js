@@ -7,46 +7,21 @@ console.log(`${VERSION_TAG} EmailService Initializing...`);
 
 // We want to force IPv4 so aggressively that we resolve it ourselves
 // and pass the IP directly to Nodemailer.
-let smtpHost = config.email.smtp.host;
-let resolvedIp = smtpHost;
-
-try {
-    // DNS resolution is async, but we want to initialize the transporter.
-    // We'll update the transporter if resolution finishes, or just use a custom lookup.
-} catch (e) {}
-
 const transporter = nodemailer.createTransport({
-    // If it's a known host like gmail, we can be extra sure.
-    // We'll use the hostname but force the node network layer to ONLY use IPv4.
-    host: smtpHost,
-    port: config.email.smtp.port,
-    secure: config.email.smtp.port == 465,
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    family: 4,
     auth: {
         user: config.email.smtp.auth.user,
         pass: config.email.smtp.auth.pass,
     },
     tls: {
-        rejectUnauthorized: false,
-        servername: smtpHost // Required when forcing IPs or custom lookups
+        servername: "smtp.gmail.com"
     },
-    pool: true,
     connectionTimeout: 20000,
     greetingTimeout: 20000,
-    socketTimeout: 30000,
-    // THE NUCLEAR SETTINGS
-    family: 4, 
-    localAddress: '0.0.0.0', // FORCE local bond to IPv4 address 0.0.0.0 (any)
-    lookup: (hostname, options, callback) => {
-        console.log(`${VERSION_TAG} DNS Lookup: ${hostname}`);
-        dns.lookup(hostname, { family: 4 }, (err, address, family) => {
-            if (err) {
-                console.error(`${VERSION_TAG} DNS Error: ${err.message}`);
-                return callback(err);
-            }
-            console.log(`${VERSION_TAG} DNS Success: ${address}`);
-            callback(null, address, 4);
-        });
-    }
+    socketTimeout: 30000
 });
 
 // Verify connection
