@@ -10,7 +10,7 @@ console.log(`${VERSION_TAG} Initializing...`);
 const transporter = nodemailer.createTransport({
     host: config.email.smtp.host,
     port: config.email.smtp.port,
-    secure: config.email.smtp.port === 465, // true for 465, false for other ports
+    secure: Number(config.email.smtp.port) === 465, // true for 465
     auth: {
         user: config.email.smtp.auth.user,
         pass: config.email.smtp.auth.pass,
@@ -27,8 +27,9 @@ const transporter = nodemailer.createTransport({
 transporter.verify((error, success) => {
     if (error) {
         console.error(`${VERSION_TAG} Verify Failed:`, error.message);
+        console.log(`${VERSION_TAG} Attempted using Host: ${config.email.smtp.host}:${config.email.smtp.port} (Secure: ${Number(config.email.smtp.port) === 465})`);
     } else {
-        console.log(`${VERSION_TAG} SMTP Server Ready`);
+        console.log(`${VERSION_TAG} SMTP Server Ready on ${config.email.smtp.host}:${config.email.smtp.port}`);
     }
 });
 
