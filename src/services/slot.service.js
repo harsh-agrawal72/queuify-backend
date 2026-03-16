@@ -39,12 +39,15 @@ const createSlot = async (slotBody) => {
 
     // 3. Validate capacity
     const capacity = maxCapacity || resource.concurrent_capacity || 1;
+    // Capacity restriction removed as per user request
+    /*
     if (capacity > resource.concurrent_capacity) {
         throw new ApiError(
             httpStatus.BAD_REQUEST,
             `Slot capacity (${capacity}) cannot exceed resource capacity (${resource.concurrent_capacity})`
         );
     }
+    */
     if (capacity < 1) {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Capacity must be at least 1');
     }

@@ -557,7 +557,7 @@ const getAppointments = async (orgId, queryParams) => {
         LEFT JOIN slots s ON a.slot_id = s.id
         LEFT JOIN services svc ON a.service_id = svc.id
         LEFT JOIN resources r ON a.resource_id = r.id
-        WHERE a.org_id = $1
+        WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)
     `;
 
     const params = [orgId];
@@ -581,7 +581,7 @@ const getAppointments = async (orgId, queryParams) => {
     const res = await query(queryText, params);
 
     // Get total count for pagination (with same filters)
-    let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id WHERE a.org_id = $1';
+    let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)';
     const countParams = [orgId];
     let countParamCount = 1;
 
@@ -752,84 +752,101 @@ const deleteAppointment = async (orgId, appointmentId) => {
 
         const appointment = check.rows[0];
 
-        // If deleting a confirmed appointment, decrement slot count
-        if (appointment.status === 'confirmed') {
-            await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+        // --- STEP 1: If status is NOT cancelled, perform SOFT DELETE (mark as cancelled) ---
+        if (appointment.status !== 'cancelled') {
+            // If deleting a confirmed appointment, decrement slot count
+            if (appointment.status === 'confirmed') {
+                await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+            }
+
+            const res = await client.query(
+                `UPDATE appointments 
+                 SET status = 'cancelled', 
+                     cancelled_by = 'admin',
+                     deleted_at = NOW() 
+                 WHERE id = $1 AND org_id = $2 
+                 RETURNING *`,
+                [appointmentId, orgId]
+            );
+            const cancelledAppt = res.rows[0];
+
+            // Trigger auto-advancement
+            const { advanceQueueAutomatically } = require('./appointment.service');
+            await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+
+            // --- NOTIFICATIONS (Fire and Forget) ---
+            (async () => {
+                try {
+                    console.log(`[Email-Async] [Deletion] Starting for Appointment: ${appointmentId}`);
+                    const userRes = await pool.query('SELECT name, email, email_notification_enabled FROM users WHERE id = $1', [appointment.user_id]);
+                    const userData = userRes.rows[0];
+                    const orgRes = await pool.query('SELECT name, contact_email, email_notification FROM organizations WHERE id = $1', [orgId]);
+                    const org = orgRes.rows[0];
+
+                    if (userData && userData.email && userData.email_notification_enabled !== false) {
+                        await emailService.sendCancellationEmail(userData.email, {
+                            ...cancelledAppt,
+                            org_name: org.name,
+                            service_name: 'Your appointment'
+                        });
+                    }
+
+                    if (org && org.email_notification) {
+                        const admins = await userModel.getAdminsByOrg(orgId);
+                        const adminSubject = `Appointment Cancelled by Admin: ${cancelledAppt.token_number || '#' + appointmentId}`;
+                        const adminHtml = `
+                            <h2>Appointment Cancelled</h2>
+                            <p>The appointment for Token <strong>${cancelledAppt.token_number || '#' + appointmentId}</strong> has been cancelled by an administrator.</p>
+                            <p><strong>User:</strong> ${userData?.name || 'Unknown'} (${userData?.email || 'N/A'})</p>
+                        `;
+
+                        if (org.contact_email) {
+                            await emailService.sendEmail(org.contact_email, adminSubject, adminHtml);
+                        }
+                        for (const admin of admins) {
+                            if (admin.email !== org.contact_email) {
+                                const adminSubjectPersonalized = `Action Required: Appointment Cancelled`;
+                                const adminHtmlPersonalized = `
+                                    <h2>Appointment Cancelled</h2>
+                                    <p>Hello ${admin.name || 'Admin'},</p>
+                                    <p>The appointment for Token <strong>${cancelledAppt.token_number || '#' + appointmentId}</strong> has been cancelled by an administrator.</p>
+                                    <p><strong>User:</strong> ${userData?.name || 'Unknown'} (${userData?.email || 'N/A'})</p>
+                                `;
+                                await emailService.sendEmail(admin.email, adminSubjectPersonalized, adminHtmlPersonalized);
+                            }
+                        }
+                    }
+
+                    const notificationService = require('./notification.service');
+                    await notificationService.sendNotification(
+                        appointment.user_id,
+                        'Appointment Cancelled',
+                        `Your appointment has been cancelled by the administrator.`,
+                        'appointment',
+                        `/appointments`
+                    );
+                } catch (e) {
+                    console.error('Admin cancellation notification failed:', e);
+                }
+            })();
+
+            await client.query('COMMIT');
+            return cancelledAppt;
         }
 
-        // SOFT DELETE: Update status to cancelled and set deleted_at
+        // --- STEP 2: If status is ALREADY cancelled, perform PERMANENT DELETE (hide from dashboard) ---
         const res = await client.query(
             `UPDATE appointments 
-             SET status = 'cancelled', 
-                 cancelled_by = 'admin',
-                 deleted_at = NOW() 
+             SET is_deleted_permanent = TRUE,
+                 updated_at = NOW()
              WHERE id = $1 AND org_id = $2 
              RETURNING *`,
             [appointmentId, orgId]
         );
-        const cancelledAppt = res.rows[0];
-
-        // If status changed to cancelled, trigger auto-advancement
-        const { advanceQueueAutomatically } = require('./appointment.service');
-        await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
-
-        // --- NOTIFICATIONS (Fire and Forget) ---
-        (async () => {
-            try {
-                console.log(`[Email-Async] [Deletion] Starting for Appointment: ${appointmentId}`);
-                const userRes = await pool.query('SELECT name, email, email_notification_enabled FROM users WHERE id = $1', [appointment.user_id]);
-                const userData = userRes.rows[0];
-                const orgRes = await pool.query('SELECT name, contact_email, email_notification FROM organizations WHERE id = $1', [orgId]);
-                const org = orgRes.rows[0];
-
-                if (userData && userData.email && userData.email_notification_enabled !== false) {
-                    await emailService.sendCancellationEmail(userData.email, {
-                        ...cancelledAppt,
-                        org_name: org.name,
-                        service_name: 'Your appointment' // Generic if service name not joined
-                    });
-                }
-
-                // Notify Admins
-                if (org && org.email_notification) {
-                    const admins = await userModel.getAdminsByOrg(orgId);
-                    const adminSubject = `Appointment Cancelled by Admin: ${cancelledAppt.token_number || '#' + appointmentId}`;
-                    const adminHtml = `
-                        <h2>Appointment Cancelled</h2>
-                        <p>The appointment for Token <strong>${cancelledAppt.token_number || '#' + appointmentId}</strong> has been cancelled by an administrator.</p>
-                        <p><strong>User:</strong> ${userData?.name || 'Unknown'} (${userData?.email || 'N/A'})</p>
-                    `;
-
-                    if (org.contact_email) {
-                        await emailService.sendEmail(org.contact_email, adminSubject, adminHtml);
-                    }
-                    for (const admin of admins) {
-                        if (admin.email !== org.contact_email) {
-                            const adminSubjectPersonalized = `Action Required: Appointment Cancelled`;
-                            const adminHtmlPersonalized = `
-                                <h2>Appointment Cancelled</h2>
-                                <p>Hello ${admin.name || 'Admin'},</p>
-                                <p>The appointment for Token <strong>${cancelledAppt.token_number || '#' + appointmentId}</strong> has been cancelled by an administrator.</p>
-                                <p><strong>User:</strong> ${userData?.name || 'Unknown'} (${userData?.email || 'N/A'})</p>
-                            `;
-                            await emailService.sendEmail(admin.email, adminSubjectPersonalized, adminHtmlPersonalized);
-                        }
-                    }
-                }
-
-                const notificationService = require('./notification.service');
-                await notificationService.sendNotification(
-                    appointment.user_id,
-                    'Appointment Cancelled',
-                    `Your appointment has been cancelled by the administrator.`,
-                    'appointment',
-                    `/appointments`
-                );
-            } catch (e) { console.error('Admin cancellation notification failed:', e); }
-        })();
+        const hiddenAppt = res.rows[0];
 
         await client.query('COMMIT');
-        return cancelledAppt;
+        return hiddenAppt;
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;

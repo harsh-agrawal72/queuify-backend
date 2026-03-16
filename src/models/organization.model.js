@@ -55,7 +55,19 @@ const queryOrganizations = async (filter = {}) => {
 
     if (filter.search) {
         params.push(`%${filter.search}%`);
-        query += ` AND (o.name ILIKE $${params.length} OR o.org_code ILIKE $${params.length})`;
+        const searchIdx = params.length;
+        query += ` AND (
+            o.name ILIKE $${searchIdx} 
+            OR o.org_code ILIKE $${searchIdx}
+            OR EXISTS (
+                SELECT 1 FROM services s 
+                WHERE s.org_id = o.id AND s.name ILIKE $${searchIdx}
+            )
+            OR EXISTS (
+                SELECT 1 FROM resources res 
+                WHERE res.org_id = o.id AND res.name ILIKE $${searchIdx}
+            )
+        )`;
     }
 
     query += ' GROUP BY o.id ORDER BY o.created_at DESC';
