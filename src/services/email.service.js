@@ -8,16 +8,15 @@ console.log(`${VERSION_TAG} Initializing...`);
 
 // Clean and stable transporter
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    // family: 4, // Critical for Render to avoid IPv6 ENETUNREACH
+    host: config.email.smtp.host,
+    port: config.email.smtp.port,
+    secure: config.email.smtp.port === 465, // true for 465, false for other ports
     auth: {
         user: config.email.smtp.auth.user,
         pass: config.email.smtp.auth.pass,
     },
     tls: {
-        servername: "smtp.gmail.com" // Ensures SSL certificate matches the hostname
+        servername: config.email.smtp.host // Ensures SSL certificate matches the hostname
     },
     connectionTimeout: 60000,
     greetingTimeout: 30000,
