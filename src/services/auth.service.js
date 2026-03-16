@@ -143,6 +143,11 @@ const registerOrganization = async (orgBody, adminBody) => {
         orgId: org.id,
         is_email_verified: true
     });
+    
+    // Send Welcome Email
+    try {
+        await emailService.sendWelcomeEmail(user.email, user.name);
+    } catch (e) { console.error('Welcome email failed:', e); }
 
     return { user, org };
 };
@@ -202,6 +207,12 @@ const register = async (userBody) => {
         role: finalRole,
         orgId: finalOrgId,
     });
+
+    // Send Welcome Email
+    try {
+        await emailService.sendWelcomeEmail(user.email, user.name);
+    } catch (e) { console.error('Welcome email failed:', e); }
+
     return user;
 };
 
