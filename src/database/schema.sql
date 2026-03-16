@@ -133,7 +133,8 @@ CREATE TABLE appointments (
     cancelled_by VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    reminder_sent BOOLEAN DEFAULT FALSE
+    reminder_sent BOOLEAN DEFAULT FALSE,
+    is_deleted_permanent BOOLEAN DEFAULT FALSE
 );
 
 -- ═══════════════════════════════════════
