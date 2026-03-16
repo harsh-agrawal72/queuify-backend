@@ -1,5 +1,7 @@
 const nodemailer = require('nodemailer');
 const config = require('../config/config');
+const dns = require("dns");
+dns.setDefaultResultOrder("ipv4first");
 
 const VERSION_TAG = "[EMAIL-SERVICE]";
 console.log(`${VERSION_TAG} Initializing...`);
@@ -9,7 +11,7 @@ const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
     secure: true,
-    family: 4, // Critical for Render to avoid IPv6 ENETUNREACH
+    // family: 4, // Critical for Render to avoid IPv6 ENETUNREACH
     auth: {
         user: config.email.smtp.auth.user,
         pass: config.email.smtp.auth.pass,
