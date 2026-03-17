@@ -40,7 +40,8 @@ const sendEmail = async (to, subject, html) => {
                 ]
             });
 
-        console.log(`${VERSION_TAG} Email Sent successfully via Mailjet. ID: ${result.body.Messages[0].Status}`);
+        const message = result.body.Messages[0];
+        console.log(`${VERSION_TAG} Mailjet Delivery Status: ${message.Status} | MessageID: ${message.To[0].MessageID}`);
         return result;
     } catch (error) {
         console.error(`${VERSION_TAG} Email Error for ${to}:`, error.message);
