@@ -6,8 +6,8 @@ const path = require('path');
  * Handle image upload and model entry
  */
 const uploadImage = async (orgId, file, imageType) => {
-    // If it's a logo or cover, delete existing ones of that type
-    if (imageType === 'logo' || imageType === 'cover') {
+    // If it's a logo, cover, or document, delete existing ones of that type
+    if (['logo', 'cover', 'pan_card', 'aadhar_card'].includes(imageType)) {
         await organizationImageModel.deleteImagesByType(orgId, imageType);
     }
 

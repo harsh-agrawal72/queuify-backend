@@ -28,7 +28,9 @@ router.get('/:orgId/profile', auth('user', 'admin'), organizationProfileControll
 router.post('/images', auth('admin'), upload.fields([
     { name: 'logo', maxCount: 1 },
     { name: 'cover', maxCount: 1 },
-    { name: 'gallery', maxCount: 10 }
+    { name: 'gallery', maxCount: 10 },
+    { name: 'pan_card', maxCount: 1 },
+    { name: 'aadhar_card', maxCount: 1 }
 ]), organizationProfileController.uploadImages);
 
 router.delete('/images/:id', auth('admin'), organizationProfileController.deleteImage);
