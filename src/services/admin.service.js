@@ -793,26 +793,18 @@ const deleteAppointment = async (orgId, appointmentId) => {
 
                     if (org && org.email_notification) {
                         const admins = await userModel.getAdminsByOrg(orgId);
-                        const adminSubject = `Appointment Cancelled by Admin: ${cancelledAppt.token_number || '#' + appointmentId}`;
-                        const adminHtml = `
-                            <h2>Appointment Cancelled</h2>
-                            <p>The appointment for Token <strong>${cancelledAppt.token_number || '#' + appointmentId}</strong> has been cancelled by an administrator.</p>
-                            <p><strong>User:</strong> ${userData?.name || 'Unknown'} (${userData?.email || 'N/A'})</p>
-                        `;
+                        const apptDetails = {
+                            ...cancelledAppt,
+                            org_name: org.name,
+                            service_name: 'An appointment'
+                        };
 
                         if (org.contact_email) {
-                            await emailService.sendEmail(org.contact_email, adminSubject, adminHtml);
+                            await emailService.sendCancellationEmail(org.contact_email, apptDetails);
                         }
                         for (const admin of admins) {
                             if (admin.email !== org.contact_email) {
-                                const adminSubjectPersonalized = `Action Required: Appointment Cancelled`;
-                                const adminHtmlPersonalized = `
-                                    <h2>Appointment Cancelled</h2>
-                                    <p>Hello ${admin.name || 'Admin'},</p>
-                                    <p>The appointment for Token <strong>${cancelledAppt.token_number || '#' + appointmentId}</strong> has been cancelled by an administrator.</p>
-                                    <p><strong>User:</strong> ${userData?.name || 'Unknown'} (${userData?.email || 'N/A'})</p>
-                                `;
-                                await emailService.sendEmail(admin.email, adminSubjectPersonalized, adminHtmlPersonalized);
+                                await emailService.sendCancellationEmail(admin.email, apptDetails);
                             }
                         }
                     }
@@ -1034,15 +1026,11 @@ const inviteAdmin = async (adminBody, currentAdminId, orgId) => {
 
     // Generate token
     const invToken = await tokenService.generateToken(newAdmin.id, 'admin', orgId, '7d', undefined, { type: 'invite' });
-    const inviteLink = `http://localhost:5173/set-password?token=${invToken}`;
+    const inviteLink = `${require('../config/config').clientUrl}/set-password?token=${invToken}`;
 
     // Send email
     try {
-        await emailService.sendEmail(
-            email,
-            'You are invited as an Admin',
-            `<p>Click here to set your password: <a href="${inviteLink}">${inviteLink}</a></p>`
-        );
+        await emailService.sendAdminInvitationEmail(email, name, inviteLink);
     } catch (e) {
         console.error('Invite email failed', e);
     }

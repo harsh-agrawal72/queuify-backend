@@ -1,5 +1,6 @@
 const httpStatus = require('../utils/httpStatus');
 const organizationModel = require('../models/organization.model');
+const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
 
 /**

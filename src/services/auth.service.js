@@ -315,22 +315,7 @@ const forgotPassword = async (email) => {
     const resetPasswordToken = await tokenService.generateResetPasswordToken(email);
     const resetPasswordUrl = `${config.clientUrl}/reset-password?token=${resetPasswordToken}`;
 
-    // Send email
-    const subject = 'Reset Password';
-    const html = `
-        <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 12px;">
-            <h2 style="color: #4F46E5;">Reset Your Password</h2>
-            <p>You requested a password reset. Click the button below to reset it:</p>
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="${resetPasswordUrl}" style="display: inline-block; padding: 14px 28px; background-color: #4F46E5; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold;">Reset Password</a>
-            </div>
-            <p>This link will expire in 1 hour.</p>
-            <p style="color: #666; font-size: 14px;">If you did not request this, please ignore this email.</p>
-            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-            <p style="font-size: 12px; color: #999;">Queuify Manager Team</p>
-        </div>
-    `;
-    await emailService.sendEmail(email, subject, html);
+    await emailService.sendForgotPasswordEmail(email, resetPasswordUrl);
 };
 
 const setPassword = async (token, newPassword) => {

@@ -175,24 +175,7 @@ const createOrganization = async (orgBody, user) => {
         console.log('---------------------------------------------------');
 
         try {
-            await emailService.sendEmail(
-                admin_email,
-                'Welcome! Set up your Organization Password',
-                `
-                <div style="font-family: Arial, sans-serif;">
-                    <h2>Welcome to Queuify Manager</h2>
-                    <p>Hello ${admin_name},</p>
-                    <p>Your organization <strong>${name}</strong> has been created successfully.</p>
-                    <p>Please click the link below to set your password and access your admin dashboard:</p>
-                    <p>
-                        <a href="${inviteLink}" style="background-color: #4F46E5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Set Password</a>
-                    </p>
-                    <p>or copy this link: ${inviteLink}</p>
-                    <br>
-                    <p>This link will expire in 7 days.</p>
-                </div>
-                `
-            );
+            await emailService.sendOrgCreationEmail(admin_email, admin_name, name, inviteLink);
         } catch (emailErr) {
             console.error('Failed to send email, but logged link above.', emailErr);
         }
@@ -444,11 +427,7 @@ const inviteAdmin = async (adminBody, superadminId) => {
 
     // Send email (swallow error for demo)
     try {
-        await require('./email.service').sendEmail(
-            email,
-            'You are invited as an Admin',
-            `<p>Click here to set your password: <a href="${inviteLink}">${inviteLink}</a></p>`
-        );
+        await emailService.sendAdminInvitationEmail(email, name, inviteLink);
     } catch (e) {
         console.error('Invite email failed', e);
     }
@@ -469,11 +448,7 @@ const resendInvite = async (adminId, superadminId) => {
     await pool.query('UPDATE users SET invited_at = NOW() WHERE id = $1', [adminId]);
 
     try {
-        await require('./email.service').sendEmail(
-            admin.email,
-            'Invitation Resent',
-            `<p>Click here to set your password: <a href="${inviteLink}">${inviteLink}</a></p>`
-        );
+        await emailService.sendAdminInvitationEmail(admin.email, admin.name, inviteLink);
     } catch (e) {
         console.error('Resend email failed', e);
     }
