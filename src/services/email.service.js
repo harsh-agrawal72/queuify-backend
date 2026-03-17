@@ -1,54 +1,49 @@
-const nodemailer = require('nodemailer');
+const Mailjet = require('node-mailjet');
 const config = require('../config/config');
 
 const VERSION_TAG = "[EMAIL-SERVICE]";
-console.log(`${VERSION_TAG} Restoring Nodemailer (Robust Mode)...`);
+console.log(`${VERSION_TAG} Initializing Mailjet...`);
 
-// Optimized transporter for Render
-const transporter = nodemailer.createTransport({
-    pool: true, // Reuse connections
-    host: config.email.smtp.host,
-    port: config.email.smtp.port,
-    secure: Number(config.email.smtp.port) === 465, 
-    family: 4, // Force IPv4 to avoid ENETUNREACH on IPv6
-    auth: {
-        user: config.email.smtp.auth.user,
-        pass: config.email.smtp.auth.pass,
-    },
-    tls: {
-                rejectUnauthorized: false // Helps with some network environments
-    },
-    connectionTimeout: 60000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000
-});
-
-// Verify connection
-transporter.verify((error, success) => {
-    if (error) {
-        console.error(`${VERSION_TAG} Verify Failed:`, error.message);
-    } else {
-        console.log(`${VERSION_TAG} SMTP Server Ready (Pooled & IPv4)`);
-    }
-});
+let mailjet;
+if (config.email.mailjet.apiKey && config.email.mailjet.apiSecret) {
+    mailjet = Mailjet.apiConnect(
+        config.email.mailjet.apiKey,
+        config.email.mailjet.apiSecret
+    );
+    console.log(`${VERSION_TAG} Mailjet API Keys Set`);
+} else {
+    console.warn(`${VERSION_TAG} Mailjet API Keys Missing!`);
+}
 
 const sendEmail = async (to, subject, html) => {
     try {
+        if (!mailjet) throw new Error("Mailjet not initialized");
         console.log(`${VERSION_TAG} Sending email to: ${to}`);
 
-        const msg = {
-            from: `"Queuify Manager" <${config.email.from}>`,
-            to,
-            subject,
-            html
-        };
+        const result = await mailjet
+            .post("send", { version: 'v3.1' })
+            .request({
+                Messages: [
+                    {
+                        From: {
+                            Email: config.email.from,
+                            Name: "Queuify Manager"
+                        },
+                        To: [
+                            {
+                                Email: to
+                            }
+                        ],
+                        Subject: subject,
+                        HTMLPart: html
+                    }
+                ]
+            });
 
-        const info = await transporter.sendMail(msg);
-        console.log(`${VERSION_TAG} Email Sent: ${info.messageId}`);
-        return info;
+        console.log(`${VERSION_TAG} Email Sent successfully via Mailjet. ID: ${result.body.Messages[0].Status}`);
+        return result;
     } catch (error) {
         console.error(`${VERSION_TAG} Email Error for ${to}:`, error.message);
-        if (error.code) console.error(`${VERSION_TAG} SMTP Code: ${error.code}`);
         throw error;
     }
 };
