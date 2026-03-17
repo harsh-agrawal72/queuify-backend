@@ -1,6 +1,12 @@
 const httpStatus = require('../utils/httpStatus');
 const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
+const bcrypt = require('bcryptjs');
+const tokenService = require('./token.service');
+const activityService = require('./activity.service');
+const emailService = require('./email.service');
+const userModel = require('../models/user.model');
+const pkg = require('../../package.json');
 
 const getGlobalOverview = async () => {
     // 1. Organization Stats
@@ -121,8 +127,7 @@ const unverifyOrganization = async (orgId) => {
     return { message: 'Organization verification removed' };
 };
 
-const tokenService = require('./token.service');
-const activityService = require('./activity.service');
+// Mid-file requires moved to top
 
 const createOrganization = async (orgBody, user) => {
     // Expect snake_case from input
@@ -148,7 +153,7 @@ const createOrganization = async (orgBody, user) => {
         // 2. Create Admin User
         // Generate secure random temp password (will be hashed)
         const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);
-        const hashedPassword = await require('bcryptjs').hash(tempPassword, 8);
+        const hashedPassword = await bcrypt.hash(tempPassword, 8);
 
         // We use client query to ensure atomicity
         const userRes = await client.query(
@@ -170,7 +175,7 @@ const createOrganization = async (orgBody, user) => {
         console.log('---------------------------------------------------');
 
         try {
-            await require('./email.service').sendEmail(
+            await emailService.sendEmail(
                 admin_email,
                 'Welcome! Set up your Organization Password',
                 `
@@ -260,7 +265,7 @@ const impersonateOrgAdmin = async (orgId, superadminId) => {
     }
 
     // Update last login for the impersonated user so they show active in lists
-    await require('../models/user.model').updateUserLastLogin(user.id);
+    await userModel.updateUserLastLogin(user.id);
 
     // Generate token with impersonation flag
     const tokens = await tokenService.generateAuthTokens(user, { impersonated: true, original_superadmin_id: superadminId });
@@ -697,7 +702,7 @@ const getSystemHealth = async () => {
             status: 'healthy',
             uptime: Math.floor(process.uptime()),
             serverTime: new Date().toISOString(),
-            version: require('../../package.json').version,
+            version: pkg.version,
             memory: {
                 heapUsed: (memory.heapUsed / 1024 / 1024).toFixed(2),
                 heapTotal: (memory.heapTotal / 1024 / 1024).toFixed(2),
@@ -804,5 +809,7 @@ module.exports = {
     resendInvite,
     updateAdminStatus,
     deleteAdmin,
+    verifyOrganization,
+    unverifyOrganization,
     getRecentActivity: activityService.getRecentActivity
 };
