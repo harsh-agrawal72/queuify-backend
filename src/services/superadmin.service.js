@@ -87,8 +87,38 @@ const getGlobalOverview = async () => {
 };
 
 const getOrganizations = async () => {
-    const res = await pool.query('SELECT * FROM organizations ORDER BY created_at DESC');
+    const res = await pool.query(`
+        SELECT 
+            o.*, 
+            p.description, p.city, p.state, p.pincode, p.contact_phone as profile_phone, 
+            p.contact_email as profile_email, p.website_url, p.facebook_url, 
+            p.instagram_url, p.linkedin_url, p.gst_number, p.registration_number,
+            p.established_year, p.total_staff, p.verified,
+            (
+                SELECT json_agg(json_build_object(
+                    'id', i.id, 
+                    'image_type', i.image_type, 
+                    'mime_type', i.mime_type
+                ))
+                FROM organization_images i 
+                WHERE i.org_id = o.id
+            ) as images
+        FROM organizations o
+        LEFT JOIN organization_profiles p ON o.id = p.org_id
+        ORDER BY o.created_at DESC
+    `);
     return res.rows;
+};
+
+const verifyOrganization = async (orgId) => {
+    // Ensure profile exists
+    await pool.query('INSERT INTO organization_profiles (org_id, verified) VALUES ($1, true) ON CONFLICT (org_id) DO UPDATE SET verified = true, updated_at = NOW()', [orgId]);
+    return { message: 'Organization verified successfully' };
+};
+
+const unverifyOrganization = async (orgId) => {
+    await pool.query('UPDATE organization_profiles SET verified = false, updated_at = NOW() WHERE org_id = $1', [orgId]);
+    return { message: 'Organization verification removed' };
 };
 
 const tokenService = require('./token.service');

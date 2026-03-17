@@ -121,6 +121,16 @@ const activateOrganization = catchAsync(async (req, res) => {
     res.send(org);
 });
 
+const verifyOrganization = catchAsync(async (req, res) => {
+    const result = await superadminService.verifyOrganization(req.params.orgId);
+    res.send(result);
+});
+
+const unverifyOrganization = catchAsync(async (req, res) => {
+    const result = await superadminService.unverifyOrganization(req.params.orgId);
+    res.send(result);
+});
+
 const getRecentActivity = catchAsync(async (req, res) => {
     const logs = await superadminService.getRecentActivity();
     res.send(logs);
@@ -150,5 +160,7 @@ module.exports = {
     inviteAdmin,
     resendInvite,
     updateAdminStatus,
-    deleteAdmin
+    deleteAdmin,
+    verifyOrganization,
+    unverifyOrganization
 };

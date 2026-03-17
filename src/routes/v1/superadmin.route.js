@@ -24,6 +24,8 @@ router.post('/organizations/:orgId/impersonate', superadminController.impersonat
 
 router.patch('/organizations/:orgId/suspend', superadminController.suspendOrganization);
 router.patch('/organizations/:orgId/activate', superadminController.activateOrganization);
+router.patch('/organizations/:orgId/verify', superadminController.verifyOrganization);
+router.patch('/organizations/:orgId/unverify', superadminController.unverifyOrganization);
 
 router.route('/admins')
     .get(superadminController.getAdmins)

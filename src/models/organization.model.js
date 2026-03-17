@@ -35,11 +35,13 @@ const getOrganizationById = async (id) => {
 const queryOrganizations = async (filter = {}) => {
     let query = `
         SELECT o.*, 
+               p.verified as is_verified,
                logo.image_url as logo_url,
                logo.id as logo_image_id,
                COALESCE(AVG(r.rating), 0) as avg_rating, 
                COUNT(r.id) as total_reviews
         FROM organizations o
+        LEFT JOIN organization_profiles p ON o.id = p.org_id
         LEFT JOIN reviews r ON o.id = r.org_id
         LEFT JOIN (
             SELECT org_id, image_url, id 
@@ -77,7 +79,7 @@ const queryOrganizations = async (filter = {}) => {
         )`;
     }
 
-    query += ' GROUP BY o.id, logo.image_url, logo.id ORDER BY o.created_at DESC';
+    query += ' GROUP BY o.id, p.verified, logo.image_url, logo.id ORDER BY o.created_at DESC';
     const result = await pool.query(query, params);
     return result.rows;
 };
