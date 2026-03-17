@@ -1,21 +1,20 @@
-const sgMail = require('@sendgrid/mail');
+const { Resend } = require('resend');
 const config = require('../config/config');
 
 const VERSION_TAG = "[EMAIL-SERVICE]";
-console.log(`${VERSION_TAG} Initializing SendGrid...`);
+console.log(`${VERSION_TAG} Initializing Resend...`);
 
-if (config.email.sendgridApiKey) {
-    sgMail.setApiKey(config.email.sendgridApiKey);
-    console.log(`${VERSION_TAG} SendGrid API Key Set`);
+let resend;
+if (config.email.resendApiKey) {
+    resend = new Resend(config.email.resendApiKey);
+    console.log(`${VERSION_TAG} Resend API Key Set`);
 } else {
-    console.warn(`${VERSION_TAG} SendGrid API Key Missing!`);
+    console.warn(`${VERSION_TAG} Resend API Key Missing!`);
 }
 
-// Minimal verification - SendGrid doesn't have a direct "verify" like Nodemailer,
-// but we can check if the API key is provided.
 const verifyConnection = () => {
-    if (!config.email.sendgridApiKey) {
-        console.error(`${VERSION_TAG} SendGrid Configuration Failed: API Key is missing.`);
+    if (!config.email.resendApiKey) {
+        console.error(`${VERSION_TAG} Resend Configuration Failed: API Key is missing.`);
         return false;
     }
     return true;
@@ -24,24 +23,24 @@ verifyConnection();
 
 const sendEmail = async (to, subject, html) => {
     try {
+        if (!resend) throw new Error("Resend not initialized");
         console.log(`${VERSION_TAG} Sending email to: ${to}`);
 
-        const msg = {
-            from: config.email.from, // Must be verified in SendGrid
+        const result = await resend.emails.send({
+            from: `Queuify Manager <onboarding@resend.dev>`, // Default test sender for Resend
             to,
             subject,
-            html
-        };
+            html,
+        });
 
-        const result = await sgMail.send(msg);
+        if (result.error) {
+            throw new Error(result.error.message);
+        }
 
-        console.log(`${VERSION_TAG} Email Sent successfully via SendGrid`);
+        console.log(`${VERSION_TAG} Email Sent successfully via Resend. ID: ${result.data?.id}`);
         return result;
     } catch (error) {
         console.error(`${VERSION_TAG} Email Error for ${to}:`, error.message);
-        if (error.response) {
-            console.error(`${VERSION_TAG} SendGrid Response Error:`, error.response.body);
-        }
     }
 };
 

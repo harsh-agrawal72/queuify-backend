@@ -15,7 +15,7 @@ const envVarsSchema = Joi.object()
         POSTGRES_DB: Joi.string().required().description('PostgreSQL database name'),
         JWT_SECRET: Joi.string().required().description('JWT secret key'),
         JWT_ACCESS_EXPIRATION_MINUTES: Joi.number().default(30).description('minutes after which access tokens expire'),
-        SENDGRID_API_KEY: Joi.string().description('SendGrid API Key'),
+        RESEND_API_KEY: Joi.string().description('Resend API Key'),
         EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
         CLIENT_URL: Joi.string().required().description('Client url'),
         GOOGLE_CLIENT_ID: Joi.string().required().description('Google Client ID'),
@@ -46,7 +46,7 @@ module.exports = {
         accessExpirationMinutes: envVars.JWT_ACCESS_EXPIRATION_MINUTES,
     },
     email: {
-        sendgridApiKey: envVars.SENDGRID_API_KEY,
+        resendApiKey: envVars.RESEND_API_KEY,
         from: envVars.EMAIL_FROM,
     },
     clientUrl: envVars.CLIENT_URL,
