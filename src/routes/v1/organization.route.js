@@ -35,6 +35,10 @@ router.post('/images', auth('admin'), upload.fields([
 
 router.delete('/images/:id', auth('admin'), organizationProfileController.deleteImage);
 
+// Email Verification
+router.post('/request-verification', auth('admin'), organizationController.requestEmailVerification);
+router.get('/verify-email', organizationController.verifyEmail);
+
 // Only Superadmin can create, view all, or update status of organizations
 router.route('/')
     .post(auth('superadmin'), validate(organizationValidation.createOrganization), organizationController.createOrganization)

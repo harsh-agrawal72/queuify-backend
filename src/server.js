@@ -53,7 +53,7 @@ const connectDB = async () => {
         // Apply any pending schema columns (e.g. email_notification_enabled) gracefully
         try {
             console.log('Checking and applying schema migrations if needed...');
-            const migrations = ['fix_500_errors.sql', 'fix_email_notifications.sql'];
+            const migrations = ['fix_500_errors.sql', 'fix_email_notifications.sql', 'add_org_email_verified.sql'];
             for (const migration of migrations) {
                 const sqlPath = path.join(__dirname, 'database', 'migrations', migration);
                 if (fs.existsSync(sqlPath)) {

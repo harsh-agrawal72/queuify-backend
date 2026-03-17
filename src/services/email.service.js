@@ -150,6 +150,24 @@ module.exports = {
         `;
         await sendEmail(to, subject, html);
     },
+
+    sendOrgVerificationEmail: async (to, token) => {
+        const subject = 'Verify Your Organization Email';
+        const verificationUrl = `${config.clientUrl}/verify-org-email?token=${token}`;
+        const html = `
+            <div style="font-family: Arial, sans-serif; max-width:600px; margin:auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; color: #1e293b;">
+                <h2 style="color:#4f46e5; margin-top: 0;">Verify Your Email</h2>
+                <p>Please click the button below to verify your organization's contact email address.</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="${verificationUrl}" style="background-color: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Verify Email Address</a>
+                </div>
+                <p style="font-size: 14px; color: #64748b;">If the button doesn't work, copy and paste this link into your browser:</p>
+                <p style="font-size: 12px; color: #64748b; word-break: break-all;">${verificationUrl}</p>
+                <p style="font-size: 14px; color: #64748b; margin-top: 20px;">This link will expire in 24 hours.</p>
+            </div>
+        `;
+        await sendEmail(to, subject, html);
+    },
     
     sendWelcomeEmail: async (to, name) => {
         const subject = 'Welcome to Queuify!';

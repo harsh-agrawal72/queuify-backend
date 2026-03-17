@@ -70,10 +70,59 @@ const getOrganizationBySlug = async (slug) => {
     };
 };
 
+const tokenService = require('./token.service');
+const emailService = require('./email.service');
+
+/**
+ * Request email verification
+ * @param {string} orgId
+ * @returns {Promise}
+ */
+const requestEmailVerification = async (orgId) => {
+    const org = await getOrganizationById(orgId);
+    if (!org.contact_email) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Organization has no contact email set');
+    }
+
+    const verificationToken = tokenService.generateToken(
+        null, // No user sub
+        'admin', // Admin role required to verify
+        orgId,
+        '24h',
+        undefined,
+        { type: 'verifyOrgEmail', orgId }
+    );
+
+    await emailService.sendOrgVerificationEmail(org.contact_email, verificationToken);
+};
+
+/**
+ * Verify organization email
+ * @param {string} token
+ * @returns {Promise<Object>}
+ */
+const verifyEmail = async (token) => {
+    try {
+        const payload = await tokenService.verifyToken(token, 'verifyOrgEmail');
+        const { orgId } = payload;
+
+        await pool.query(
+            'UPDATE organizations SET email_verified = TRUE WHERE id = $1',
+            [orgId]
+        );
+
+        return { message: 'Email verified successfully', orgId };
+    } catch (error) {
+        throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid or expired verification token');
+    }
+};
+
 module.exports = {
     createOrganization,
     queryOrganizations,
     getOrganizationById,
     getOrganizationBySlug,
-    updateOrganizationStatus
+    updateOrganizationStatus,
+    requestEmailVerification,
+    verifyEmail
 };

@@ -1,5 +1,6 @@
 const organizationProfileModel = require('../models/organization_profile.model');
 const organizationImageModel = require('../models/organization_image.model');
+const organizationModel = require('../models/organization.model');
 
 /**
  * Calculate profile completion percentage (Trust Score)
@@ -45,6 +46,7 @@ const config = require('../config/config');
  * Get full organization profile with images and trust score
  */
 const getFullProfile = async (orgId) => {
+    const org = await organizationModel.getOrganizationById(orgId);
     const profile = await organizationProfileModel.getProfileByOrgId(orgId) || {};
     const rawImages = await organizationImageModel.getImagesByOrgId(orgId);
     const trustScore = calculateTrustScore(profile, rawImages);
@@ -72,7 +74,8 @@ const getFullProfile = async (orgId) => {
         ...profile,
         images,
         trustScore,
-        isVerified: trustScore >= 80 || profile.verified
+        isVerified: trustScore >= 80 || profile.verified,
+        email_verified: org?.email_verified || false
     };
 };
 

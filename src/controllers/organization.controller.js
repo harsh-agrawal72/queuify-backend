@@ -96,6 +96,24 @@ const getOrgImage = catchAsync(async (req, res) => {
     res.send(image_data);
 });
 
+const requestEmailVerification = catchAsync(async (req, res) => {
+    const orgId = req.user.org_id;
+    if (!orgId) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'User not associated with an organization');
+    }
+    await organizationService.requestEmailVerification(orgId);
+    res.status(httpStatus.OK).send({ message: 'Verification email sent' });
+});
+
+const verifyEmail = catchAsync(async (req, res) => {
+    const { token } = req.query;
+    if (!token) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Token is required');
+    }
+    const result = await organizationService.verifyEmail(token);
+    res.status(httpStatus.OK).send(result);
+});
+
 module.exports = {
     createOrganization,
     getOrganizations, // Now supports search query
@@ -103,5 +121,7 @@ module.exports = {
     updateOrganizationStatus,
     getPublicOrganizations,
     getOrganizationBySlug,
-    getOrgImage
+    getOrgImage,
+    requestEmailVerification,
+    verifyEmail
 };
