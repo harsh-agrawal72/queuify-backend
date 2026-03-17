@@ -77,7 +77,7 @@ const queryOrganizations = async (filter = {}) => {
         )`;
     }
 
-    query += ' GROUP BY o.id ORDER BY o.created_at DESC';
+    query += ' GROUP BY o.id, logo.image_url, logo.id ORDER BY o.created_at DESC';
     const result = await pool.query(query, params);
     return result.rows;
 };
