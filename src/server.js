@@ -53,9 +53,15 @@ const connectDB = async () => {
         // Apply any pending schema columns (e.g. email_notification_enabled) gracefully
         try {
             console.log('Checking and applying schema migrations if needed...');
-            const sqlPath = path.join(__dirname, 'database', 'migrations', 'fix_500_errors.sql');
-            const sqlQuery = fs.readFileSync(sqlPath, { encoding: 'utf-8' });
-            await client.query(sqlQuery);
+            const migrations = ['fix_500_errors.sql', 'fix_email_notifications.sql'];
+            for (const migration of migrations) {
+                const sqlPath = path.join(__dirname, 'database', 'migrations', migration);
+                if (fs.existsSync(sqlPath)) {
+                    const sqlQuery = fs.readFileSync(sqlPath, { encoding: 'utf-8' });
+                    await client.query(sqlQuery);
+                    console.log(`Migration ${migration} validated successfully!`);
+                }
+            }
             console.log('All DB Schema columns validated successfully!');
         } catch (migErr) {
             console.error('Migration notice:', migErr.message);

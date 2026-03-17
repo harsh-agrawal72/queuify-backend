@@ -167,7 +167,7 @@ const createOrganization = async (orgBody, user) => {
         const invToken = await tokenService.generateToken(newAdmin.id, 'admin', newOrg.id, expiresIn, undefined, { type: 'invite' });
 
         // 4. Send Invitation Email
-        const inviteLink = `http://localhost:5173/set-password?token=${invToken}`;
+        const inviteLink = `${config.clientUrl}/set-password?token=${invToken}`;
 
         console.log('---------------------------------------------------');
         console.log('INVITATION LINK (Fallback):');
@@ -440,7 +440,7 @@ const inviteAdmin = async (adminBody, superadminId) => {
 
     // Generate token
     const invToken = await tokenService.generateToken(newAdmin.id, 'admin', orgId, '7d', undefined, { type: 'invite' });
-    const inviteLink = `http://localhost:5173/set-password?token=${invToken}`;
+    const inviteLink = `${config.clientUrl}/set-password?token=${invToken}`;
 
     // Send email (swallow error for demo)
     try {
@@ -464,7 +464,7 @@ const resendInvite = async (adminId, superadminId) => {
     const admin = res.rows[0];
 
     const invToken = await tokenService.generateToken(admin.id, 'admin', admin.org_id, '7d', undefined, { type: 'invite' });
-    const inviteLink = `http://localhost:5173/set-password?token=${invToken}`;
+    const inviteLink = `${config.clientUrl}/set-password?token=${invToken}`;
 
     await pool.query('UPDATE users SET invited_at = NOW() WHERE id = $1', [adminId]);
 

@@ -33,12 +33,17 @@ const bookAppointment = async (appointmentBody) => {
                 }
 
                 // 1. Notify User (respecting org-wide toggle AND user preference)
-                if (org && org.email_notification && user && user.email && user.email_notification_enabled !== false) {
+                const userEmailEnabled = user && user.email_notification_enabled !== false;
+                const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
+
+                if (orgEmailEnabled && userEmailEnabled && user && user.email) {
                     console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
                     await emailService.sendBookingConfirmation(user.email, appointmentWithDetails);
+                } else {
+                    console.log(`[Booking-Async] Skipping user email. OrgEnabled: ${orgEmailEnabled}, UserEnabled: ${userEmailEnabled}`);
                 }
 
-                if (org && org.new_booking_notification) {
+                if (org && (org.new_booking_notification === true || org.new_booking_notification === null)) {
                     await notificationService.sendNotification(
                         appointment.user_id,
                         'Booking Confirmed',
@@ -49,7 +54,8 @@ const bookAppointment = async (appointmentBody) => {
                 }
 
                 // 2. Notify Admins
-                if (org && org.new_booking_notification) {
+                const orgBookingNotify = org && (org.new_booking_notification === true || org.new_booking_notification === null);
+                if (orgBookingNotify) {
                     const admins = await userModel.getAdminsByOrg(appointment.org_id);
                     const adminMessage = `New booking received from ${user?.name || 'User'} for ${appointmentWithDetails.service_name}. Token: ${appointmentWithDetails.token_number}`;
 
@@ -66,15 +72,9 @@ const bookAppointment = async (appointmentBody) => {
                     }
 
                     // Email Notification to Org Contact
-                    if (org.email_notification && org.contact_email) {
+                    if (orgEmailEnabled && org.contact_email) {
                         console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
-                        const subject = `New Booking: ${appointmentWithDetails.token_number}`;
-                        const html = `<h2>New Appointment Booking</h2>
-                            <p>A new appointment has been booked at your organization.</p>
-                            <p><strong>User:</strong> ${user?.name || 'N/A'}</p>
-                            <p><strong>Service:</strong> ${appointmentWithDetails.service_name}</p>
-                            <p><strong>Token:</strong> ${appointmentWithDetails.token_number}</p>`;
-                        await emailService.sendEmail(org.contact_email, subject, html);
+                        await emailService.sendAdminBookingNotification(org.contact_email, appointmentWithDetails);
                     }
                 }
             } catch (e) {
