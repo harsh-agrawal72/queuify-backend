@@ -14,8 +14,19 @@ const getOrganizations = catchAsync(async (req, res) => {
         type: req.query.type,
         status: req.user.role === 'user' ? 'active' : req.query.status
     };
+    const config = require('../config/config');
     const result = await organizationService.queryOrganizations(filter);
-    res.send(result);
+    const resultWithLogo = result.map(o => {
+        let logo_url = o.logo_url;
+        if (!logo_url && o.logo_image_id) {
+            logo_url = `/v1/organizations/image/${o.logo_image_id}`;
+        }
+        if (logo_url && !logo_url.startsWith('http')) {
+            logo_url = `${config.baseUrl}${logo_url}`;
+        }
+        return { ...o, logo_url };
+    });
+    res.send(resultWithLogo);
 });
 
 const getOrganization = catchAsync(async (req, res) => {
@@ -39,15 +50,27 @@ const getPublicOrganizations = catchAsync(async (req, res) => {
     };
     const orgs = await organizationService.queryOrganizations(filter);
     // Return safe data for public
-    const publicList = orgs.map(o => ({
-        id: o.id,
-        name: o.name,
-        slug: o.slug,
-        org_code: o.org_code,
-        type: o.type,
-        avg_rating: Number(Number(o.avg_rating || 0).toFixed(1)),
-        total_reviews: parseInt(o.total_reviews || 0)
-    }));
+    const config = require('../config/config');
+    const publicList = orgs.map(o => {
+        let logo_url = o.logo_url;
+        if (!logo_url && o.logo_image_id) {
+            logo_url = `/v1/organizations/image/${o.logo_image_id}`;
+        }
+        if (logo_url && !logo_url.startsWith('http')) {
+            logo_url = `${config.baseUrl}${logo_url}`;
+        }
+
+        return {
+            id: o.id,
+            name: o.name,
+            slug: o.slug,
+            org_code: o.org_code,
+            type: o.type,
+            logo_url: logo_url,
+            avg_rating: Number(Number(o.avg_rating || 0).toFixed(1)),
+            total_reviews: parseInt(o.total_reviews || 0)
+        };
+    });
     res.send(publicList);
 });
 

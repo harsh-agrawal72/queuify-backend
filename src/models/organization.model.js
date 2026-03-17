@@ -35,10 +35,17 @@ const getOrganizationById = async (id) => {
 const queryOrganizations = async (filter = {}) => {
     let query = `
         SELECT o.*, 
+               logo.image_url as logo_url,
+               logo.id as logo_image_id,
                COALESCE(AVG(r.rating), 0) as avg_rating, 
                COUNT(r.id) as total_reviews
         FROM organizations o
         LEFT JOIN reviews r ON o.id = r.org_id
+        LEFT JOIN (
+            SELECT org_id, image_url, id 
+            FROM organization_images 
+            WHERE image_type = 'logo'
+        ) logo ON o.id = logo.org_id
         WHERE 1=1
     `;
     const params = [];
