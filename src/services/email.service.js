@@ -1,61 +1,51 @@
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 const config = require('../config/config');
-const dns = require("dns");
-dns.setDefaultResultOrder("ipv4first");
 
 const VERSION_TAG = "[EMAIL-SERVICE]";
-console.log(`${VERSION_TAG} Initializing...`);
+console.log(`${VERSION_TAG} Initializing SendGrid...`);
 
-// Clean and stable transporter
-const transporter = nodemailer.createTransport({
-    host: config.email.smtp.host,
-    port: config.email.smtp.port,
-    secure: Number(config.email.smtp.port) === 465, // true for 465
-    family: 4, // Force IPv4
-    auth: {
-        user: config.email.smtp.auth.user,
-        pass: config.email.smtp.auth.pass,
-    },
-    tls: {
-        servername: config.email.smtp.host // Ensures SSL certificate matches the hostname
-    },
-    connectionTimeout: 60000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000
-});
+if (config.email.sendgridApiKey) {
+    sgMail.setApiKey(config.email.sendgridApiKey);
+    console.log(`${VERSION_TAG} SendGrid API Key Set`);
+} else {
+    console.warn(`${VERSION_TAG} SendGrid API Key Missing!`);
+}
 
-// Verify connection
-transporter.verify((error, success) => {
-    if (error) {
-        console.error(`${VERSION_TAG} Verify Failed:`, error.message);
-        console.log(`${VERSION_TAG} Attempted using Host: ${config.email.smtp.host}:${config.email.smtp.port} (Secure: ${Number(config.email.smtp.port) === 465})`);
-    } else {
-        console.log(`${VERSION_TAG} SMTP Server Ready on ${config.email.smtp.host}:${config.email.smtp.port}`);
+// Minimal verification - SendGrid doesn't have a direct "verify" like Nodemailer,
+// but we can check if the API key is provided.
+const verifyConnection = () => {
+    if (!config.email.sendgridApiKey) {
+        console.error(`${VERSION_TAG} SendGrid Configuration Failed: API Key is missing.`);
+        return false;
     }
-});
+    return true;
+};
+verifyConnection();
 
 const sendEmail = async (to, subject, html) => {
     try {
         console.log(`${VERSION_TAG} Sending email to: ${to}`);
 
         const msg = {
-            from: `"Queuify Manager" <${config.email.from}>`,
+            from: config.email.from, // Must be verified in SendGrid
             to,
             subject,
             html
         };
 
-        const info = await transporter.sendMail(msg);
+        const result = await sgMail.send(msg);
 
-        console.log(`${VERSION_TAG} Email Sent: ${info.messageId}`);
+        console.log(`${VERSION_TAG} Email Sent successfully via SendGrid`);
+        return result;
     } catch (error) {
         console.error(`${VERSION_TAG} Email Error for ${to}:`, error.message);
-        if (error.code) console.error(`${VERSION_TAG} SMTP Code: ${error.code}`);
+        if (error.response) {
+            console.error(`${VERSION_TAG} SendGrid Response Error:`, error.response.body);
+        }
     }
 };
 
 module.exports = {
-    transport: transporter,
     sendEmail,
 
     sendBookingConfirmation: async (to, appointment) => {
