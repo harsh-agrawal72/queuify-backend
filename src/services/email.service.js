@@ -27,7 +27,7 @@ const sendEmail = async (to, subject, html) => {
         console.log(`${VERSION_TAG} Sending email to: ${to}`);
 
         const result = await resend.emails.send({
-            from: `Queuify Manager <${config.email.from}>`,
+            from: `Queuify Manager <onboarding@resend.dev>`,
             to,
             subject,
             html,
