@@ -181,9 +181,9 @@ const createOrganization = async (orgBody, user) => {
         }
 
         await client.query('COMMIT');
-
-        // activityService.logActivity(user?.id, 'ORG_CREATED', { orgId: newOrg.id, name }, '::1');
-
+ 
+        activityService.logActivity(user?.id, 'ORG_CREATED', { orgId: newOrg.id, name }, '::1');
+ 
         return { ...newOrg, admin: { id: newAdmin.id, email: newAdmin.email } };
 
     } catch (e) {
