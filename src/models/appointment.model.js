@@ -1,12 +1,24 @@
 const { pool } = require('../config/db');
 
 const createAppointment = async (appointmentBody) => {
-    const { orgId, userId, serviceId, resourceId, slotId } = appointmentBody;
+    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time } = appointmentBody;
 
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
+
+        // 0. Prevent duplicate bookings for the same user and same slot
+        if (slotId) {
+            const duplicateCheck = await client.query(
+                `SELECT id FROM appointments 
+                 WHERE user_id = $1 AND slot_id = $2 AND status IN ('confirmed', 'pending', 'serving')`,
+                [userId, slotId]
+            );
+            if (duplicateCheck.rows.length > 0) {
+                throw new Error("You have already booked this slot. Please check your active bookings.");
+            }
+        }
 
         // 1. Fetch service details and LOCK the service row
         const svcRes = await client.query(
@@ -56,13 +68,15 @@ const createAppointment = async (appointmentBody) => {
             }
         }
 
-        // 3. Create appointment
         const appointmentRes = await client.query(
             `INSERT INTO appointments (
                 org_id, slot_id, user_id, service_id, resource_id, 
-                status
-            ) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-            [orgId, slotId || null, userId, serviceId, resourceId || null, 'confirmed']
+                status, pref_resource, pref_time
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            [
+                orgId, slotId || null, userId, serviceId, resourceId || null, 
+                'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE'
+            ]
         );
 
         const appointmentId = appointmentRes.rows[0].id;

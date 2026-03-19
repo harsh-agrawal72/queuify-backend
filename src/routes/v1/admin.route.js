@@ -47,4 +47,6 @@ router.post('/admins/invite', validate(adminValidation.inviteAdmin), adminContro
 
 router.delete('/admins/:adminId', validate(adminValidation.deleteAdmin), adminController.deleteAdmin);
 
+router.post('/rebalance/:resourceId', adminController.rebalanceSlots);
+
 module.exports = router;

@@ -1,6 +1,6 @@
 const httpStatus = require('../utils/httpStatus');
 const catchAsync = require('../utils/catchAsync');
-const { adminService } = require('../services');
+const { adminService, reassignmentService } = require('../services');
 
 const getOverview = catchAsync(async (req, res) => {
     const stats = await adminService.getOverview(req.user.org_id);
@@ -61,12 +61,14 @@ const getAppointments = catchAsync(async (req, res) => {
 });
 
 const updateAppointmentStatus = catchAsync(async (req, res) => {
-    const appointment = await adminService.updateAppointmentStatus(req.user.org_id, req.params.appointmentId, req.body.status);
+    const { status, reason } = req.body;
+    const appointment = await adminService.updateAppointmentStatus(req.user.org_id, req.params.appointmentId, status, reason);
     res.json({ success: true, data: appointment });
 });
 
 const deleteAppointment = catchAsync(async (req, res) => {
-    const appointment = await adminService.deleteAppointment(req.user.org_id, req.params.appointmentId);
+    const { reason } = req.body;
+    const appointment = await adminService.deleteAppointment(req.user.org_id, req.params.appointmentId, reason);
     res.json({ success: true, data: appointment });
 });
 
@@ -114,6 +116,18 @@ const deleteOrganization = catchAsync(async (req, res) => {
     res.status(200).json({ success: true, message: 'Organization deleted successfully' });
 });
 
+const rebalanceSlots = catchAsync(async (req, res) => {
+    const { resourceId } = req.params;
+    const { date } = req.query; // YYYY-MM-DD
+    
+    if (!resourceId || !date) {
+        return res.status(400).json({ message: 'resourceId and date are required' });
+    }
+
+    const result = await reassignmentService.rebalanceResourceSlots(resourceId, date);
+    res.json({ success: true, ...result });
+});
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -134,5 +148,6 @@ module.exports = {
     getAdmins,
     inviteAdmin,
     deleteAdmin,
-    deleteOrganization
+    deleteOrganization,
+    rebalanceSlots
 };

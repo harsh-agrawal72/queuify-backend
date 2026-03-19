@@ -118,11 +118,18 @@ module.exports = {
         const subject = 'Appointment Cancelled - Queuify';
         const serviceName = appointment.service_name || appointment.serviceName || 'Service';
         const orgName = appointment.org_name || appointment.orgName || 'Organization';
+        const reason = appointment.cancellation_reason || 'No specific reason provided.';
         const html = wrapInProfessionalLayout(`
             <h2 style="color:#ef4444; margin-top: 0;">Appointment Cancelled</h2>
             <p>Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been cancelled.</p>
+            
             <div class="info-box" style="border-left: 4px solid #ef4444;">
-                <p style="margin: 0; color: #7f1d1d;">If you have any questions or would like to reschedule, please contact the organization directly or visit the dashboard.</p>
+                <p style="margin: 0; font-weight: 700; color: #991b1b;">Reason for Cancellation:</p>
+                <p style="margin: 5px 0 0 0; color: #7f1d1d; font-style: italic;">"${reason}"</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <p>If you have any questions or would like to reschedule, please contact the organization directly or visit the dashboard.</p>
             </div>
             <p>Thank you for your understanding.</p>
         `);
@@ -281,5 +288,88 @@ module.exports = {
             <p style="font-size: 12px; color: #64748b;">This message was generated from the Queuify contact form.</p>
         `);
         await sendEmail(adminEmail, emailSubject, html);
+    },
+
+    sendReassignmentEmail: async (to, appointment, newSlot) => {
+        const subject = 'Appointment Reassigned - Queuify';
+        const serviceName = appointment.service_name || 'Service';
+        const orgName = appointment.org_name || 'Organization';
+        const newTime = newSlot.start_time;
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="color:#4f46e5; margin-top: 0;">Appointment Reassigned</h2>
+            <p>Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been reassigned due to a schedule change.</p>
+            
+            <div class="info-box" style="border-left: 4px solid #4f46e5;">
+                <p style="margin: 0; font-weight: 600;">New Appointment Details:</p>
+                <p style="margin: 10px 0 0 0;"><strong>New Time:</strong> ${new Date(newTime).toLocaleString()}</p>
+                <p style="margin: 5px 0 0 0;"><strong>Doctor/Resource:</strong> ${newSlot.resource_name || 'Available Staff'}</p>
+            </div>
+            
+            <p>Your token number and other details remain active. If this time doesn't work for you, please visit your dashboard to reschedule.</p>
+        `);
+        await sendEmail(to, subject, html);
+    },
+
+    sendWaitlistEmail: async (to, appointment) => {
+        const subject = 'Urgent Status: Waitlisted - Queuify';
+        const serviceName = appointment.service_name || 'Service';
+        const orgName = appointment.org_name || 'Organization';
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="color:#f59e0b; margin-top: 0;">Urgent: Waitlisted</h2>
+            <p>We're sorry, but your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been affected by a schedule change and we couldn't automatically reassign it for today.</p>
+            
+            <div class="info-box" style="background-color: #fffbeb; border-left: 4px solid #f59e0b;">
+                <p style="margin: 0; font-weight: 600;">Status: High Priority Waitlist</p>
+                <p style="margin: 10px 0 0 0;">Since you marked this as **Urgent Today**, our staff will try their best to accommodate you. Please wait for a manual update or contact the organization.</p>
+            </div>
+            
+            <p>We apologize for the inconvenience.</p>
+        `);
+        await sendEmail(to, subject, html);
+    },
+
+    sendRescheduleEmail: async (to, appointment) => {
+        const subject = 'Action Required: Reschedule Your Appointment - Queuify';
+        const serviceName = appointment.service_name || 'Service';
+        const orgName = appointment.org_name || 'Organization';
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="color:#6366f1; margin-top: 0;">Schedule Interrupted</h2>
+            <p>Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been affected by a schedule change.</p>
+            
+            <div class="info-box">
+                <p style="margin: 0;">Please visit the Queuify dashboard to choose a new time slot that works for you.</p>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${config.clientUrl}/dashboard" class="button">Go to Dashboard</a>
+            </div>
+        `);
+        await sendEmail(to, subject, html);
+    },
+
+    sendRebalanceNotificationEmail: async (to, appointment, newSlot) => {
+        const subject = 'Appointment Schedule Update - Queuify';
+        const serviceName = appointment.service_name || 'Service';
+        const orgName = appointment.org_name || 'Organization';
+        const newTime = newSlot.start_time;
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="color:#4f46e5; margin-top: 0;">Schedule Optimized</h2>
+            <p>Hello <strong>${appointment.user_name}</strong>,</p>
+            <p>To ensure a smoother experience and reduced wait times at <strong>${orgName}</strong>, we have optimized today's schedule.</p>
+            <p>Your appointment for <strong>${serviceName}</strong> has been moved to a new time slot:</p>
+            
+            <div class="info-box" style="border-left: 4px solid #4f46e5;">
+                <p style="margin: 0; font-weight: 600;">Updated Appointment Details:</p>
+                <p style="margin: 10px 0 0 0;"><strong>New Time:</strong> ${new Date(newTime).toLocaleString([], { hour: '2-digit', minute: '2-digit', weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                <p style="margin: 5px 0 0 0;"><strong>Token:</strong> ${appointment.token_number}</p>
+            </div>
+            
+            <p>Everything else remains the same. We apologize for any inconvenience caused by this adjustment.</p>
+        `);
+        await sendEmail(to, subject, html);
     }
 };

@@ -161,7 +161,7 @@ const registerOrganization = async (orgBody, adminBody) => {
  * - Admin registration remains for specific flows (requires orgName)
  */
 const register = async (userBody) => {
-    const { name, email, password, role, orgName } = userBody;
+    const { name, email, password, role, orgName, phone } = userBody;
 
     if (await userModel.isEmailTaken(email)) {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Email already taken');
@@ -206,6 +206,7 @@ const register = async (userBody) => {
         password: hashedPassword,
         role: finalRole,
         orgId: finalOrgId,
+        phone: phone || null
     });
 
     // Send Welcome Email

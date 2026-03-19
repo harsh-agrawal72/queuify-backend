@@ -135,7 +135,13 @@ const updateProfile = async (userId, updateBody) => {
         idx++;
     }
 
-    query += ' WHERE id = $1 RETURNING id, name, email, role, email_notification_enabled, notification_enabled, created_at';
+    if (updateBody.phone !== undefined) {
+        query += `, phone = $${idx}`;
+        params.push(updateBody.phone);
+        idx++;
+    }
+
+    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, email_notification_enabled, notification_enabled, created_at';
 
     try {
         const result = await pool.query(query, params);

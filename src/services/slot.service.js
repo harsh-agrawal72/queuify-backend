@@ -2,6 +2,7 @@ const httpStatus = require('../utils/httpStatus');
 const { pool } = require('../config/db');
 const slotModel = require('../models/slot.model');
 const ApiError = require('../utils/ApiError');
+const reassignmentService = require('./reassignment.service');
 
 /**
  * Create a slot
@@ -129,6 +130,9 @@ const deleteSlot = async (slotId, orgId) => {
             `UPDATE slots SET is_active = FALSE WHERE id = $1 AND org_id = $2`,
             [slotId, orgId]
         );
+
+        // Run reassignment logic
+        await reassignmentService.reassignAppointments(slotId);
 
         await client.query('COMMIT');
         return result.rows[0];

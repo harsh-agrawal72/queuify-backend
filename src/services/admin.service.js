@@ -548,6 +548,7 @@ const getAppointments = async (orgId, queryParams) => {
             a.queue_number,
             u.name as user_name, 
             u.email as user_email, 
+            u.phone as user_phone,
             s.start_time, 
             s.end_time,
             svc.name as service_name,
@@ -625,25 +626,30 @@ const getAppointments = async (orgId, queryParams) => {
     };
 };
 
-const updateAppointmentStatus = async (orgId, appointmentId, status) => {
+const updateAppointmentStatus = async (orgId, appointmentId, status, reason = null) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, slot_id, status, user_id FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
+        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
 
-        // If cancelling an appointment, decrement slot count
-        if (status === 'cancelled' && appointment.status !== 'cancelled') {
-            await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+        // If cancelling an appointment, decrement slot count and save reason
+        let updateQuery = `UPDATE appointments SET status = $1, updated_at = NOW()`;
+        const updateParams = [status, appointmentId];
+
+        if (status === 'cancelled') {
+            updateQuery = `UPDATE appointments SET status = $1, cancelled_by = 'admin', cancellation_reason = $3, updated_at = NOW()`;
+            updateParams.push(reason);
+            
+            if (appointment.status !== 'cancelled') {
+                await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+            }
         }
 
-        const res = await client.query(
-            `UPDATE appointments SET status = $1${status === 'cancelled' ? ", cancelled_by = 'admin'" : ''}, updated_at = NOW() WHERE id = $2 RETURNING *`,
-            [status, appointmentId]
-        );
+        const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
         const updatedAppointment = res.rows[0];
 
         // If status changed to completed, cancelled, or no_show, trigger auto-advancement
@@ -742,12 +748,12 @@ const updateAppointmentStatus = async (orgId, appointmentId, status) => {
     }
 };
 
-const deleteAppointment = async (orgId, appointmentId) => {
+const deleteAppointment = async (orgId, appointmentId, reason = null) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, slot_id, status, user_id, token_number FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
+        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, token_number FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
@@ -755,7 +761,7 @@ const deleteAppointment = async (orgId, appointmentId) => {
         // --- STEP 1: If status is NOT cancelled, perform SOFT DELETE (mark as cancelled) ---
         if (appointment.status !== 'cancelled') {
             // If deleting a confirmed appointment, decrement slot count
-            if (appointment.status === 'confirmed') {
+            if (appointment.status === 'confirmed' || appointment.status === 'pending') {
                 await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
             }
 
@@ -763,10 +769,11 @@ const deleteAppointment = async (orgId, appointmentId) => {
                 `UPDATE appointments 
                  SET status = 'cancelled', 
                      cancelled_by = 'admin',
+                     cancellation_reason = $3,
                      deleted_at = NOW() 
                  WHERE id = $1 AND org_id = $2 
                  RETURNING *`,
-                [appointmentId, orgId]
+                [appointmentId, orgId, reason]
             );
             const cancelledAppt = res.rows[0];
 
