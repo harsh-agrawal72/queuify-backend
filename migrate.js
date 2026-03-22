@@ -28,6 +28,26 @@ async function migrate() {
         `);
         console.log('Updated check_org_id constraint');
 
+        // 4. Add preferred_date to appointments
+        await client.query(`
+            ALTER TABLE appointments ADD COLUMN IF NOT EXISTS preferred_date DATE
+        `);
+        console.log('Added preferred_date column');
+
+        // 5. Initialize preferred_date for existing data
+        await client.query(`
+            UPDATE appointments a
+            SET preferred_date = DATE(s.start_time)
+            FROM slots s
+            WHERE a.slot_id = s.id AND a.preferred_date IS NULL
+        `);
+        await client.query(`
+            UPDATE appointments
+            SET preferred_date = DATE(created_at)
+            WHERE preferred_date IS NULL
+        `);
+        console.log('Initialized preferred_date for existing data');
+
         await client.query('COMMIT');
         console.log('Migration complete!');
         process.exit(0);
