@@ -6,6 +6,8 @@ const bookAppointment = {
         slotId: Joi.string().uuid().optional(),
         serviceId: Joi.string().uuid().required(),
         resourceId: Joi.string().uuid().optional(),
+        pref_resource: Joi.string().valid('ANY', 'SPECIFIC').optional(),
+        pref_time: Joi.string().valid('URGENT', 'FLEXIBLE').optional(),
     }),
 };
 
