@@ -94,26 +94,18 @@ const createAppointment = async (appointmentBody) => {
         }
 
         // 5. Calculate Dynamic Rank (Queue Number)
-        // Partition logic depends on queue_scope
+        // Partition logic depends on queue_scope and preferred_date
         let partitionBy, filterClause, filterParams;
 
         if (service.queue_scope === 'PER_RESOURCE') {
-            partitionBy = slotId ? 'slot_id' : 'service_id, resource_id, DATE(created_at)';
-            filterClause = slotId ? 'slot_id = $1' : 'service_id = $1 AND resource_id = $2 AND DATE(created_at) = CURRENT_DATE';
-            filterParams = slotId ? [slotId] : [serviceId, resourceId];
+            partitionBy = 'service_id, resource_id, preferred_date';
+            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3';
+            filterParams = [serviceId, resourceId, preferredDate];
         } else {
-            // CENTRAL Queue: Shared across resources for same time/slot
-            if (slotId) {
-                // Get slot start time for stable partitioning across resources
-                const { rows: [slotInfo] } = await client.query('SELECT start_time FROM slots WHERE id = $1', [slotId]);
-                partitionBy = 'service_id, (SELECT start_time FROM slots WHERE id = slot_id)';
-                filterClause = 'service_id = $1 AND (SELECT start_time FROM slots WHERE id = slot_id) = $2';
-                filterParams = [serviceId, slotInfo.start_time];
-            } else {
-                partitionBy = 'service_id, DATE(created_at)';
-                filterClause = 'service_id = $1 AND DATE(created_at) = CURRENT_DATE';
-                filterParams = [serviceId];
-            }
+            // CENTRAL Queue: Shared across resources for the same intended date
+            partitionBy = 'service_id, preferred_date';
+            filterClause = 'service_id = $1 AND preferred_date = $2';
+            filterParams = [serviceId, preferredDate];
         }
 
         const queueRes = await client.query(
