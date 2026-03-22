@@ -17,6 +17,7 @@ const init = (httpServer) => {
         socket.on('join_org', (orgId) => socket.join(`org_${orgId}`));
         socket.on('join_service', (serviceId) => socket.join(`service_${serviceId}`));
         socket.on('join_resource', (resourceId) => socket.join(`resource_${resourceId}`));
+        socket.on('join_user', (userId) => socket.join(`user_${userId}`));
 
         socket.on('disconnect', () => {
             console.log('Client disconnected:', socket.id);

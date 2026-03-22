@@ -330,6 +330,16 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
     // If status changed to completed, cancelled, or no_show, trigger auto-advancement
     if (['completed', 'cancelled', 'no_show'].includes(status)) {
         await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+        
+        // Also trigger waitlist fill if space opened up
+        if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
+            try {
+                const { fillSlotFromWaitlist } = require('./reassignment.service');
+                await fillSlotFromWaitlist(appointment.slot_id);
+            } catch (e) {
+                console.error('[StatusUpdate-WaitlistFill] Failed silently:', e.message);
+            }
+        }
     }
 
     try {

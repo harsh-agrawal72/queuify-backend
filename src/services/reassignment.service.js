@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const emailService = require('./email.service');
+const socket = require('../socket/index');
 
 /**
  * Reassign appointments from a deleted/inactive slot
@@ -94,6 +95,15 @@ const reassignAppointments = async (slotId) => {
 
                 reassigned = true;
                 console.log(`[Reassignment] Appt ${appt.id} reassigned to slot ${altSlot.id} (${altSlot.resource_name})`);
+            
+                // Emit Socket Update
+                try {
+                    socket.getIO().to(`user_${appt.user_id}`).emit('appointment_updated', {
+                        appointmentId: appt.id,
+                        type: 'reassignment',
+                        status: 'confirmed'
+                    });
+                } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
                 
                 // Notify user
                 try {
@@ -128,6 +138,15 @@ const reassignAppointments = async (slotId) => {
                     } catch (emailErr) {
                         console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
                     }
+
+                    // Emit Socket Update
+                    try {
+                        socket.getIO().to(`user_${appt.user_id}`).emit('appointment_updated', {
+                            appointmentId: appt.id,
+                            type: 'reassignment_failed',
+                            status: 'pending'
+                        });
+                    } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
                 }
             }
         }
@@ -173,32 +192,37 @@ const fillSlotFromWaitlist = async (slotId) => {
             return;
         }
 
-        // 2. Find eligible appointments (Order: Urgent > Pending)
-        // Match appointments that the slot's resource provides services for
-        const eligibleQuery = await client.query(
-            `SELECT a.*, u.email as user_email, u.name as user_name,
-                    s.name as service_name, o.name as org_name
-             FROM appointments a
-             JOIN users u ON a.user_id = u.id
-             JOIN services s ON a.service_id = s.id
-             JOIN organizations o ON a.org_id = o.id
-             WHERE a.status IN ('waitlisted_urgent', 'pending')
-               AND a.org_id = $1
-               AND a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
-               AND (
-                    a.pref_resource = 'ANY' 
-                    OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
-               )
-               AND (
-                   (a.status = 'waitlisted_urgent' AND DATE($3) = a.preferred_date) -- Urgent must be same day as original intent
-                   OR (a.status = 'pending') -- Pending is flexible
-               )
-             ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
-             LIMIT 1 FOR UPDATE SKIP LOCKED`,
-            [slot.org_id, slot.resource_id, slot.start_time]
-        );
+        // 2. Loop until slot is full or no more eligible appointments
+        let filledCount = 0;
+        const remainingCapacity = slot.max_capacity - slot.booked_count;
 
-        if (eligibleQuery.rows.length > 0) {
+        while (filledCount < remainingCapacity) {
+            const eligibleQuery = await client.query(
+                `SELECT a.*, u.email as user_email, u.name as user_name,
+                        s.name as service_name, o.name as org_name
+                 FROM appointments a
+                 JOIN users u ON a.user_id = u.id
+                 JOIN services s ON a.service_id = s.id
+                 JOIN organizations o ON a.org_id = o.id
+                 WHERE a.status IN ('waitlisted_urgent', 'waitlisted', 'pending')
+                   AND a.org_id = $1
+                   AND a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
+                   AND (
+                        a.pref_resource = 'ANY' 
+                        OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
+                   )
+                   AND (
+                       (a.status = 'waitlisted_urgent' AND DATE($3) = a.preferred_date) 
+                       OR (a.status = 'waitlisted')
+                       OR (a.status = 'pending') 
+                   )
+                 ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.status = 'waitlisted') DESC, a.created_at ASC
+                 LIMIT 1 FOR UPDATE SKIP LOCKED`,
+                [slot.org_id, slot.resource_id, slot.start_time]
+            );
+
+            if (eligibleQuery.rows.length === 0) break;
+
             const appt = eligibleQuery.rows[0];
             
             // 3. Promote!
@@ -217,11 +241,21 @@ const fillSlotFromWaitlist = async (slotId) => {
 
             // 4. Notify
             try {
-                // Re-using reassignment email as it conveys the same "schedule change/update" message perfectly
                 await emailService.sendReassignmentEmail(appt.user_email, appt, slot);
             } catch (err) {
                 console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
             }
+
+            // Emit Socket Update
+            try {
+                socket.getIO().to(`user_${appt.user_id}`).emit('appointment_updated', {
+                    appointmentId: appt.id,
+                    type: 'waitlist_promotion',
+                    status: 'confirmed'
+                });
+            } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
+
+            filledCount++;
         }
 
         await client.query('COMMIT');
@@ -271,7 +305,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
              JOIN organizations o ON a.org_id = o.id
              WHERE a.slot_id = ANY($1) 
                AND a.status = 'confirmed'
-             ORDER BY a.token_number ASC`,
+             ORDER BY a.created_at ASC`,
             [slotIds]
         );
         const appointments = apptsRes.rows;
@@ -306,7 +340,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             let minOccupancy = Infinity;
 
             for (const s of slotDistribution) {
-                if (s.currentBooked < s.max_capacity) {
+                if (s.max_capacity > 0) {
                     const occupancy = s.currentBooked / s.max_capacity;
                     if (occupancy < minOccupancy) {
                         minOccupancy = occupancy;
@@ -347,6 +381,15 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             } catch (err) {
                 console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
             }
+
+            // Emit Socket Update
+            try {
+                socket.getIO().to(`user_${update.appt.user_id}`).emit('appointment_updated', {
+                    appointmentId: update.apptId,
+                    type: 'rebalance',
+                    status: 'confirmed'
+                });
+            } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
         }
 
         // 5. Update slot booked counts in DB
@@ -365,11 +408,16 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         };
 
     } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('[Rebalance] Error:', error.message);
-        throw error;
+        if (client) await client.query('ROLLBACK');
+        console.error('[Rebalance-CRITICAL] Error Details:', {
+            message: error.message,
+            stack: error.stack,
+            resourceId,
+            date
+        });
+        throw new Error(`Rebalance Failed: ${error.message}`);
     } finally {
-        client.release();
+        if (client) client.release();
     }
 };
 
