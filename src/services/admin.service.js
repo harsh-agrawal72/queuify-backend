@@ -428,7 +428,19 @@ const createSlot = async (orgId, slotBody) => {
         RETURNING *`,
         [orgId, start_time, end_time, max_capacity, targetResourceId]
     );
-    return res.rows[0];
+    const newSlot = res.rows[0];
+
+    // Trigger waitlist filling for the new slot
+    try {
+        const { fillSlotFromWaitlist } = require('./reassignment.service');
+        // We do this in a "fire and forget" or at least follow-up manner to not block slot creation
+        // although here it's fine to wait since it's an admin action.
+        await fillSlotFromWaitlist(newSlot.id);
+    } catch (e) {
+        console.error('[Admin-Create-WaitlistFill] Failed silently:', e.message);
+    }
+
+    return newSlot;
 };
 
 const updateSlot = async (orgId, slotId, updateBody) => {
@@ -472,7 +484,19 @@ const updateSlot = async (orgId, slotId, updateBody) => {
          RETURNING *`,
         [start_time || null, end_time || null, max_capacity || null, slotId, orgId]
     );
-    return res.rows[0];
+    const updatedSlot = res.rows[0];
+
+    // Trigger waitlist filling if capacity increased
+    if (max_capacity !== undefined && max_capacity > currentSlot.booked_count) {
+        try {
+            const { fillSlotFromWaitlist } = require('./reassignment.service');
+            await fillSlotFromWaitlist(updatedSlot.id);
+        } catch (e) {
+            console.error('[Admin-Update-WaitlistFill] Failed silently:', e.message);
+        }
+    }
+
+    return updatedSlot;
 };
 
 const hardDeleteSlot = async (orgId, slotId) => {

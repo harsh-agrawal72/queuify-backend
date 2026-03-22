@@ -1,22 +1,22 @@
 const { pool } = require('../config/db');
 
 const createAppointment = async (appointmentBody) => {
-    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time } = appointmentBody;
+    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false } = appointmentBody;
 
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
 
-        // 0. Prevent duplicate bookings for the same user and same slot
-        if (slotId) {
+        // 0. Prevent duplicate bookings for the same user and same slot (unless bypassed)
+        if (slotId && !bypassDuplicate) {
             const duplicateCheck = await client.query(
                 `SELECT id FROM appointments 
                  WHERE user_id = $1 AND slot_id = $2 AND status IN ('confirmed', 'pending', 'serving')`,
                 [userId, slotId]
             );
             if (duplicateCheck.rows.length > 0) {
-                throw new Error("You have already booked this slot. Please check your active bookings.");
+                throw new Error("DUPLICATE_BOOKING_WARNING");
             }
         }
 
@@ -68,14 +68,23 @@ const createAppointment = async (appointmentBody) => {
             }
         }
 
+        // Fetch slot start_time to set preferred_date (even if slotId is null later, we need the intended date)
+        let preferredDate = null;
+        if (slotId) {
+            const slotInfo = await client.query('SELECT start_time FROM slots WHERE id = $1', [slotId]);
+            if (slotInfo.rows.length > 0) {
+                preferredDate = new Date(slotInfo.rows[0].start_time).toISOString().split('T')[0];
+            }
+        }
+
         const appointmentRes = await client.query(
             `INSERT INTO appointments (
                 org_id, slot_id, user_id, service_id, resource_id, 
-                status, pref_resource, pref_time
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                status, pref_resource, pref_time, preferred_date
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
             [
                 orgId, slotId || null, userId, serviceId, resourceId || null, 
-                'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE'
+                'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate
             ]
         );
 

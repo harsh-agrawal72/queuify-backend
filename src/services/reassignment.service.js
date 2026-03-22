@@ -11,7 +11,7 @@ const reassignAppointments = async (slotId) => {
         await client.query('BEGIN');
 
         // 1. Get original slot info for context
-        const origSlotRes = await client.query('SELECT start_time, resource_id, service_id, org_id FROM slots WHERE id = $1', [slotId]);
+        const origSlotRes = await client.query('SELECT start_time, resource_id, org_id FROM slots WHERE id = $1', [slotId]);
         if (origSlotRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return;
@@ -45,7 +45,9 @@ const reassignAppointments = async (slotId) => {
             const isSpecific = appt.pref_resource === 'SPECIFIC';
 
             // 3. Construct the alternative slot query based on preferences
-            let searchFilter = `s.service_id = $1 AND s.org_id = $2 AND s.is_active = TRUE AND s.id != $3 AND s.booked_count < s.max_capacity`;
+            // Join with resource_services because slots table doesn't have service_id
+            let searchFilter = `EXISTS (SELECT 1 FROM resource_services rs WHERE rs.resource_id = s.resource_id AND rs.service_id = $1) 
+                                AND s.org_id = $2 AND s.is_active = TRUE AND s.id != $3 AND s.booked_count < s.max_capacity`;
             const params = [appt.service_id, appt.org_id, slotId];
 
             if (isSpecific) {
@@ -172,7 +174,7 @@ const fillSlotFromWaitlist = async (slotId) => {
         }
 
         // 2. Find eligible appointments (Order: Urgent > Pending)
-        // Respect pref_resource: if SPECIFIC, must match THIS slot's resource
+        // Match appointments that the slot's resource provides services for
         const eligibleQuery = await client.query(
             `SELECT a.*, u.email as user_email, u.name as user_name,
                     s.name as service_name, o.name as org_name
@@ -181,19 +183,19 @@ const fillSlotFromWaitlist = async (slotId) => {
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
              WHERE a.status IN ('waitlisted_urgent', 'pending')
-               AND a.service_id = $1
-               AND a.org_id = $2
+               AND a.org_id = $1
+               AND a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
                AND (
                     a.pref_resource = 'ANY' 
-                    OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $3)
+                    OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
                )
                AND (
-                   (a.status = 'waitlisted_urgent' AND DATE($4) = DATE($5)) -- Urgent must be same day
+                   (a.status = 'waitlisted_urgent' AND DATE($3) = a.preferred_date) -- Urgent must be same day as original intent
                    OR (a.status = 'pending') -- Pending is flexible
                )
              ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
              LIMIT 1 FOR UPDATE SKIP LOCKED`,
-            [slot.service_id, slot.org_id, slot.resource_id, slot.start_time, new Date()]
+            [slot.org_id, slot.resource_id, slot.start_time]
         );
 
         if (eligibleQuery.rows.length > 0) {

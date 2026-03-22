@@ -84,6 +84,9 @@ const bookAppointment = async (appointmentBody) => {
 
         return result;
     } catch (error) {
+        if (error.message === 'DUPLICATE_BOOKING_WARNING') {
+            throw new ApiError(httpStatus.CONFLICT, 'DUPLICATE_BOOKING_WARNING');
+        }
         if (error.message === 'Slot not found') {
             throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found');
         }
