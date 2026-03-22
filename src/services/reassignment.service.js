@@ -10,7 +10,15 @@ const reassignAppointments = async (slotId) => {
     try {
         await client.query('BEGIN');
 
-        // 1. Get all affected appointments
+        // 1. Get original slot info for context
+        const origSlotRes = await client.query('SELECT start_time, resource_id, service_id, org_id FROM slots WHERE id = $1', [slotId]);
+        if (origSlotRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return;
+        }
+        const origSlot = origSlotRes.rows[0];
+
+        // 2. Get all affected appointments
         const apptsQuery = await client.query(
             `SELECT a.*, u.email as user_email, u.name as user_name,
                     s.name as service_name, o.name as org_name
@@ -28,66 +36,78 @@ const reassignAppointments = async (slotId) => {
             return;
         }
 
-        console.log(`[Reassignment] Processing ${appointments.length} appointments for slot ${slotId}`);
+        console.log(`[Reassignment] Processing ${appointments.length} appointments for defunct slot ${slotId}`);
 
         for (const appt of appointments) {
             let reassigned = false;
+            const isUrgent = appt.pref_time === 'URGENT';
+            const isSpecific = appt.pref_resource === 'SPECIFIC';
 
-            // 2. Logic based on preference
-            if (appt.pref_resource === 'ANY') {
-                // Try to find alternative slot for same service, same organization, same day
-                const altSlotQuery = await client.query(
-                    `SELECT s.*, r.name as resource_name 
-                     FROM slots s
-                     JOIN resources r ON s.resource_id = r.id
-                     WHERE s.service_id = $1 
-                       AND s.org_id = $2
-                       AND s.is_active = TRUE
-                       AND DATE(s.start_time) = DATE((SELECT start_time FROM slots WHERE id = $3))
-                       AND s.id != $3
-                       AND s.booked_count < s.max_capacity
-                     ORDER BY (s.booked_count::float / s.max_capacity::float) ASC, 
-                              ABS(EXTRACT(EPOCH FROM (s.start_time - (SELECT start_time FROM slots WHERE id = $3)))) ASC
-                     LIMIT 1 FOR UPDATE`,
-                    [appt.service_id, appt.org_id, slotId]
+            // 3. Construct the alternative slot query based on preferences
+            let searchFilter = `s.service_id = $1 AND s.org_id = $2 AND s.is_active = TRUE AND s.id != $3 AND s.booked_count < s.max_capacity`;
+            const params = [appt.service_id, appt.org_id, slotId];
+
+            if (isSpecific) {
+                searchFilter += ` AND s.resource_id = $${params.length + 1}`;
+                params.push(origSlot.resource_id);
+            }
+
+            if (isUrgent) {
+                searchFilter += ` AND DATE(s.start_time) = DATE($${params.length + 1})`;
+                params.push(origSlot.start_time);
+            } else {
+                // For flexible, we prefer same day but allow FUTURE days
+                searchFilter += ` AND DATE(s.start_time) >= DATE($${params.length + 1})`;
+                params.push(origSlot.start_time);
+            }
+
+            const altSlotQuery = await client.query(
+                `SELECT s.*, r.name as resource_name 
+                 FROM slots s
+                 JOIN resources r ON s.resource_id = r.id
+                 WHERE ${searchFilter}
+                 ORDER BY (DATE(s.start_time) = DATE($${params.length})) DESC, 
+                          (s.booked_count::float / s.max_capacity::float) ASC, 
+                          ABS(EXTRACT(EPOCH FROM (s.start_time - $${params.length}))) ASC
+                 LIMIT 1 FOR UPDATE`,
+                params
+            );
+
+            if (altSlotQuery.rows.length > 0) {
+                const altSlot = altSlotQuery.rows[0];
+                
+                // Update appointment
+                await client.query(
+                    `UPDATE appointments SET slot_id = $1, resource_id = $2, status = 'confirmed' 
+                     WHERE id = $3`,
+                    [altSlot.id, altSlot.resource_id, appt.id]
                 );
 
-                if (altSlotQuery.rows.length > 0) {
-                    const altSlot = altSlotQuery.rows[0];
-                    
-                    // Update appointment
-                    await client.query(
-                        `UPDATE appointments SET slot_id = $1, resource_id = $2, status = 'confirmed' 
-                         WHERE id = $3`,
-                        [altSlot.id, altSlot.resource_id, appt.id]
-                    );
+                // Update slot booked count
+                await client.query(
+                    `UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1`,
+                    [altSlot.id]
+                );
 
-                    // Update slot booked count
-                    await client.query(
-                        `UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1`,
-                        [altSlot.id]
-                    );
-
-                    reassigned = true;
-                    console.log(`[Reassignment] Appt ${appt.id} reassigned to slot ${altSlot.id}`);
-                    
-                    // Notify user
-                    try {
-                        await emailService.sendReassignmentEmail(appt.user_email, appt, altSlot);
-                    } catch (emailErr) {
-                        console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
-                    }
+                reassigned = true;
+                console.log(`[Reassignment] Appt ${appt.id} reassigned to slot ${altSlot.id} (${altSlot.resource_name})`);
+                
+                // Notify user
+                try {
+                    await emailService.sendReassignmentEmail(appt.user_email, appt, altSlot);
+                } catch (emailErr) {
+                    console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
                 }
             }
 
             if (!reassigned) {
-                // 3. Fallback: Waitlist or Reschedule
-                if (appt.pref_time === 'URGENT') {
+                // 4. Fallback: Waitlist or Reschedule
+                if (isUrgent) {
                     await client.query(
                         `UPDATE appointments SET status = 'waitlisted_urgent', slot_id = NULL WHERE id = $1`,
                         [appt.id]
                     );
-                    console.log(`[Reassignment] Appt ${appt.id} marked as WAITLISTED_URGENT`);
+                    console.log(`[Reassignment] Appt ${appt.id} marked as WAITLISTED_URGENT (No slots today)`);
                     try {
                         await emailService.sendWaitlistEmail(appt.user_email, appt);
                     } catch (emailErr) {
@@ -114,6 +134,96 @@ const reassignAppointments = async (slotId) => {
         await client.query('ROLLBACK');
         console.error('[Reassignment] Error:', error.message);
         throw error;
+    } finally {
+        client.release();
+    }
+};
+
+/**
+ * Triggered when a slot becomes available (cancellation, reassignment)
+ * Pulls someone from the waitlist into this slot if they match preferences.
+ * @param {string} slotId 
+ */
+const fillSlotFromWaitlist = async (slotId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Get slot info
+        const slotRes = await client.query(
+            `SELECT s.*, r.name as resource_name 
+             FROM slots s 
+             JOIN resources r ON s.resource_id = r.id 
+             WHERE s.id = $1 AND s.is_active = TRUE FOR UPDATE`, 
+            [slotId]
+        );
+        if (slotRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return;
+        }
+        const slot = slotRes.rows[0];
+
+        if (slot.booked_count >= slot.max_capacity) {
+            console.log(`[Waitlist-Fill] Slot ${slotId} is already full. Skipping.`);
+            await client.query('ROLLBACK');
+            return;
+        }
+
+        // 2. Find eligible appointments (Order: Urgent > Pending)
+        // Respect pref_resource: if SPECIFIC, must match THIS slot's resource
+        const eligibleQuery = await client.query(
+            `SELECT a.*, u.email as user_email, u.name as user_name,
+                    s.name as service_name, o.name as org_name
+             FROM appointments a
+             JOIN users u ON a.user_id = u.id
+             JOIN services s ON a.service_id = s.id
+             JOIN organizations o ON a.org_id = o.id
+             WHERE a.status IN ('waitlisted_urgent', 'pending')
+               AND a.service_id = $1
+               AND a.org_id = $2
+               AND (
+                    a.pref_resource = 'ANY' 
+                    OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $3)
+               )
+               AND (
+                   (a.status = 'waitlisted_urgent' AND DATE($4) = DATE($5)) -- Urgent must be same day
+                   OR (a.status = 'pending') -- Pending is flexible
+               )
+             ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
+             LIMIT 1 FOR UPDATE SKIP LOCKED`,
+            [slot.service_id, slot.org_id, slot.resource_id, slot.start_time, new Date()]
+        );
+
+        if (eligibleQuery.rows.length > 0) {
+            const appt = eligibleQuery.rows[0];
+            
+            // 3. Promote!
+            await client.query(
+                `UPDATE appointments SET status = 'confirmed', slot_id = $1, resource_id = $2 
+                 WHERE id = $3`,
+                [slot.id, slot.resource_id, appt.id]
+            );
+
+            await client.query(
+                `UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1`,
+                [slot.id]
+            );
+
+            console.log(`[Waitlist-Fill] Appt ${appt.id} promoted from ${appt.status} to confirmed for slot ${slotId}`);
+
+            // 4. Notify
+            try {
+                // Re-using reassignment email as it conveys the same "schedule change/update" message perfectly
+                await emailService.sendReassignmentEmail(appt.user_email, appt, slot);
+            } catch (err) {
+                console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
+            }
+        }
+
+        await client.query('COMMIT');
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[Waitlist-Fill] Error:', error.message);
     } finally {
         client.release();
     }

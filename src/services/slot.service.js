@@ -68,6 +68,9 @@ const createSlot = async (slotBody) => {
         resourceId,
     });
 
+    // 6. Proactively fill from waitlist if any
+    await reassignmentService.fillSlotFromWaitlist(slot.id);
+
     return slot;
 };
 

@@ -652,11 +652,16 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
         const updatedAppointment = res.rows[0];
 
-        // If status changed to completed, cancelled, or no_show, trigger auto-advancement
+        // If status changed to completed, cancelled, or no_show, trigger auto-advancement and waitlist filling
         if (['completed', 'cancelled', 'no_show'].includes(status)) {
             // Use local require to avoid circular dependency
             const { advanceQueueAutomatically } = require('./appointment.service');
+            const reassignmentService = require('./reassignment.service');
             await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+            
+            if (status === 'cancelled') {
+                await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+            }
         }
 
         // --- NOTIFICATIONS (Fire and Forget) ---
@@ -777,9 +782,11 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
             );
             const cancelledAppt = res.rows[0];
 
-            // Trigger auto-advancement
+            // Trigger auto-advancement and waitlist filling
             const { advanceQueueAutomatically } = require('./appointment.service');
+            const reassignmentService = require('./reassignment.service');
             await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+            await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
 
             // --- NOTIFICATIONS (Fire and Forget) ---
             (async () => {

@@ -104,6 +104,10 @@ const cancelAppointment = async (appointmentId, userId) => {
     try {
         const appointment = await appointmentModel.cancelAppointment(appointmentId, userId);
 
+        // Trigger waitlist filling after space opens up
+        const reassignmentService = require('./reassignment.service');
+        reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+
         try {
             const io = socket.getIO();
             io.to(appointment.org_id).emit('queue_update', {
