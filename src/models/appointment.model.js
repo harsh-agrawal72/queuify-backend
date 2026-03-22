@@ -78,14 +78,9 @@ const createAppointment = async (appointmentBody) => {
         }
 
         const appointmentRes = await client.query(
-            `INSERT INTO appointments (
-                org_id, slot_id, user_id, service_id, resource_id, 
-                status, pref_resource, pref_time, preferred_date
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-            [
-                orgId, slotId || null, userId, serviceId, resourceId || null, 
-                'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate
-            ]
+            `INSERT INTO appointments (org_id, slot_id, user_id, service_id, resource_id, status, pref_resource, pref_time, preferred_date) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+            [orgId, slotId || null, userId, serviceId, resourceId || null, 'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate]
         );
 
         const appointmentId = appointmentRes.rows[0].id;
