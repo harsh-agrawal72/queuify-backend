@@ -373,5 +373,6 @@ const rebalanceResourceSlots = async (resourceId, date) => {
 
 module.exports = {
     reassignAppointments,
-    rebalanceResourceSlots
+    rebalanceResourceSlots,
+    fillSlotFromWaitlist
 };

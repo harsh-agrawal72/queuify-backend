@@ -105,8 +105,12 @@ const cancelAppointment = async (appointmentId, userId) => {
         const appointment = await appointmentModel.cancelAppointment(appointmentId, userId);
 
         // Trigger waitlist filling after space opens up
-        const reassignmentService = require('./reassignment.service');
-        reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+        try {
+            const reassignmentService = require('./reassignment.service');
+            reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+        } catch (e) {
+            console.error('[Cancel-WaitlistFill] Failed silently:', e.message);
+        }
 
         try {
             const io = socket.getIO();

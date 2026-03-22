@@ -659,7 +659,11 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
             
             if (status === 'cancelled') {
-                await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+                try {
+                    await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+                } catch (e) {
+                    console.error('[Admin-WaitlistFill] Failed silently:', e.message);
+                }
             }
         }
 
@@ -785,7 +789,11 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
             const { advanceQueueAutomatically } = require('./appointment.service');
             const reassignmentService = require('./reassignment.service');
             await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
-            await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+            try {
+                await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+            } catch (e) {
+                console.error('[Admin-Delete-WaitlistFill] Failed silently:', e.message);
+            }
 
             // --- NOTIFICATIONS (Fire and Forget) ---
             (async () => {
