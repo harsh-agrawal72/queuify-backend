@@ -17,6 +17,7 @@ const reassignAppointments = async (slotId) => {
             return;
         }
         const origSlot = origSlotRes.rows[0];
+        console.log(`[Reassignment] Original Slot: ${origSlot.start_time}, Resource: ${origSlot.resource_id}`);
 
         // 2. Get all affected appointments
         const apptsQuery = await client.query(
@@ -130,6 +131,7 @@ const reassignAppointments = async (slotId) => {
         }
 
         await client.query('COMMIT');
+        console.log(`[Reassignment] Completed for slot ${slotId}`);
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('[Reassignment] Error:', error.message);

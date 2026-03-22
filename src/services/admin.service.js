@@ -579,51 +579,50 @@ const getAppointments = async (orgId, queryParams) => {
     queryText += ` ORDER BY a.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
     params.push(limit, offset);
 
-    const res = await query(queryText, params);
+    try {
+        const res = await query(queryText, params);
 
-    // Get total count for pagination (with same filters)
-    let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)';
-    const countParams = [orgId];
-    let countParamCount = 1;
+        // Get total count for pagination (with same filters)
+        let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)';
+        const countParams = [orgId];
+        let countParamCount = 1;
 
-    if (status) {
-        countParamCount++;
-        countQuery += ` AND a.status = $${countParamCount}`;
-        countParams.push(status);
-    }
-
-    if (search) {
-        countParamCount++;
-        countQuery += ` AND (u.name ILIKE $${countParamCount} OR CAST(a.token_number AS TEXT) ILIKE $${countParamCount})`;
-        countParams.push(`%${search}%`);
-    }
-
-    const countRes = await query(countQuery, countParams);
-
-    // Post-process to ensure token format if missing
-    // Format: ORGCODE-YYYYMMDD-XXX
-    // Since we don't have Org Code easily here without another query, we'll use a fallback or skip. 
-    // The requirement says: "If token_number does not exist: Generate token format: ORGCODE-YYYYMMDD-XXX"
-    // Ideally this should be saved in DB. If it's just for display:
-    const formattedAppointments = res.rows.map(apt => {
-        let displayToken = apt.token_number;
-        if (!displayToken) {
-            // Fallback generation for display only
-            const dateStr = new Date(apt.created_at).toISOString().slice(0, 10).replace(/-/g, '');
-            const suffix = apt.id.slice(-3).toUpperCase(); // Last 3 chars of ID
-            displayToken = `TOKEN-${dateStr}-${suffix}`;
+        if (status) {
+            countParamCount++;
+            countQuery += ` AND a.status = $${countParamCount}`;
+            countParams.push(status);
         }
-        return {
-            ...apt,
-            token_number: displayToken
-        };
-    });
 
-    return {
-        appointments: formattedAppointments,
-        totalPages: Math.ceil(parseInt(countRes.rows[0].count) / limit),
-        currentPage: parseInt(page)
-    };
+        if (search) {
+            countParamCount++;
+            countQuery += ` AND (u.name ILIKE $${countParamCount} OR CAST(a.token_number AS TEXT) ILIKE $${countParamCount})`;
+            countParams.push(`%${search}%`);
+        }
+
+        const countRes = await query(countQuery, countParams);
+
+        const formattedAppointments = res.rows.map(apt => {
+            let displayToken = apt.token_number;
+            if (!displayToken) {
+                const dateStr = new Date(apt.created_at).toISOString().slice(0, 10).replace(/-/g, '');
+                const suffix = apt.id.slice(-3).toUpperCase();
+                displayToken = `TOKEN-${dateStr}-${suffix}`;
+            }
+            return {
+                ...apt,
+                token_number: displayToken
+            };
+        });
+
+        return {
+            appointments: formattedAppointments,
+            totalPages: Math.ceil(parseInt(countRes.rows[0].count) / limit),
+            currentPage: parseInt(page)
+        };
+    } catch (e) {
+        console.error('[admin.service.getAppointments] Database Error:', e);
+        throw e;
+    }
 };
 
 const updateAppointmentStatus = async (orgId, appointmentId, status, reason = null) => {

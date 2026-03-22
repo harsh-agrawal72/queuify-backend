@@ -118,13 +118,16 @@ const deleteSlot = async (slotId, orgId) => {
         await client.query('BEGIN');
 
         const result = await client.query(
-            `SELECT id, org_id FROM slots WHERE id = $1 AND org_id = $2`,
+            `SELECT id, org_id, start_time FROM slots WHERE id = $1 AND org_id = $2`,
             [slotId, orgId]
         );
 
         if (result.rowCount === 0) {
             throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found or access denied');
         }
+
+        const slot = result.rows[0];
+        const isPast = new Date(slot.start_time) < new Date();
 
         // In the "Full Soft Delete Mechanism", we allow marking a slot as inactive 
         // even if it has appointments, so we preserve historical data while 
@@ -134,11 +137,17 @@ const deleteSlot = async (slotId, orgId) => {
             [slotId, orgId]
         );
 
-        // Run reassignment logic
-        await reassignmentService.reassignAppointments(slotId);
+        // Run reassignment logic ONLY for future or today's slots
+        // Past slots don't need reassignment as they already happened
+        if (!isPast) {
+            console.log(`[deleteSlot] Triggering reassignment for future/current slot ${slotId}`);
+            await reassignmentService.reassignAppointments(slotId);
+        } else {
+            console.log(`[deleteSlot] Skipping reassignment for past slot ${slotId}`);
+        }
 
         await client.query('COMMIT');
-        return result.rows[0];
+        return slot;
 
     } catch (err) {
         await client.query('ROLLBACK');
