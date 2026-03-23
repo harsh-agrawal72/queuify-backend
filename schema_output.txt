@@ -1,0 +1,35 @@
+--- APPOINTMENTS ---
+cancelled_by: character varying
+completed_at: timestamp with time zone
+created_at: timestamp with time zone
+customer_name: character varying
+customer_phone: character varying
+deleted_at: timestamp without time zone
+id: uuid
+is_deleted_permanent: boolean
+org_id: uuid
+pref_resource: character varying
+pref_time: character varying
+preferred_date: date
+queue_number: integer
+reminder_sent: boolean
+resource_id: uuid
+service_id: uuid
+serving_started_at: timestamp with time zone
+slot_id: uuid
+status: USER-DEFINED
+token_number: character varying
+updated_at: timestamp with time zone
+user_id: uuid
+
+--- SERVICES ---
+created_at: timestamp with time zone
+description: text
+estimated_service_time: integer
+id: uuid
+is_active: boolean
+name: character varying
+org_id: uuid
+queue_scope: USER-DEFINED
+queue_type: USER-DEFINED
+updated_at: timestamp with time zone

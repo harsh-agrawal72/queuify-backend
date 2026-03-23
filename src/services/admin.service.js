@@ -938,9 +938,9 @@ const getLiveQueue = async (orgId, date) => {
             a.slot_id,
             sl.start_time as slot_start,
             sl.end_time as slot_end,
-            COALESCE(u.name, a.customer_name) as user_name,
+            COALESCE(u.name, a.customer_name, 'Guest') as user_name,
             COALESCE(u.email, 'Walk-in') as user_email,
-            COALESCE(u.phone, a.customer_phone) as user_phone,
+            COALESCE(u.phone, a.customer_phone, 'Not Provided') as user_phone,
             s.name as service_name,
             s.queue_scope,
             r.name as resource_name,
@@ -1194,11 +1194,12 @@ const getPredictiveInsights = async (orgId) => {
             
             const duration = parseFloat(row.avg_duration_minutes);
             const efficiency = (serviceAvg > 0 && duration > 0) ? (serviceAvg / duration) : 1;
+            const efficiency_score = Math.min(Math.round(efficiency * 100), 200); // Cap at 200% for sanity
             return {
                 resource_name: row.resource_name || 'Unassigned',
                 service_name: row.service_name,
                 avg_time: Math.round(parseFloat(row.avg_duration_minutes)),
-                efficiency_score: Math.round(efficiency * 100),
+                efficiency_score: efficiency_score,
                 completions: parseInt(row.completion_count)
             };
         });
@@ -1211,6 +1212,7 @@ const getPredictiveInsights = async (orgId) => {
             FROM appointments
             WHERE org_id = $1::uuid 
             AND status = 'completed'
+            AND serving_started_at IS NOT NULL
             AND serving_started_at > NOW() - interval '30 days'
             GROUP BY hour
             ORDER BY volume DESC
