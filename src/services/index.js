@@ -11,6 +11,10 @@ const appointmentService = require('./appointment.service');
 const superadminService = require('./superadmin.service');
 const planService = require('./plan.service');
 const activityService = require('./activity.service');
+const notificationService = require('./notification.service');
+const reassignmentService = require('./reassignment.service');
+const organizationImageService = require('./organization_image.service');
+const organizationProfileService = require('./organization_profile.service');
 
 module.exports = {
     authService,
@@ -25,5 +29,9 @@ module.exports = {
     appointmentService,
     superadminService,
     planService,
-    activityService
+    activityService,
+    notificationService,
+    reassignmentService,
+    organizationImageService,
+    organizationProfileService
 };
