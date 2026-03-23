@@ -7,8 +7,20 @@ const userModel = require('../models/user.model');
 
 // Helper to query DB
 const query = (text, params) => {
-    console.log("Executing query:", text, params);
     return pool.query(text, params);
+};
+
+// Cache for column names to avoid excessive information_schema queries
+const columnCache = {};
+const getColumnNames = async (tableName) => {
+    if (columnCache[tableName]) return columnCache[tableName];
+    const res = await pool.query(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = $1",
+        [tableName]
+    );
+    const cols = res.rows.map(r => r.column_name);
+    columnCache[tableName] = cols;
+    return cols;
 };
 
 const getOverview = async (orgId) => {
@@ -562,17 +574,25 @@ const getAppointments = async (orgId, queryParams) => {
     const { page = 1, limit = 10, status, search, resourceId, date } = queryParams;
     const offset = (page - 1) * limit;
 
+    const apptCols = await getColumnNames('appointments');
+    const hasCustomerName = apptCols.includes('customer_name');
+    const hasCustomerPhone = apptCols.includes('customer_phone');
+    const hasTokenNumber = apptCols.includes('token_number');
+    const hasQueueNumber = apptCols.includes('queue_number');
+    const hasCancelledBy = apptCols.includes('cancelled_by');
+    const hasIsDeletedPerf = apptCols.includes('is_deleted_permanent');
+
     let queryText = `
         SELECT 
             a.id, 
             a.status, 
-            a.cancelled_by,
+            ${hasCancelledBy ? 'a.cancelled_by,' : "NULL as cancelled_by,"}
             a.created_at, 
-            a.token_number,
-            a.queue_number,
-            COALESCE(u.name, a.customer_name) as user_name, 
+            ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
+            ${hasQueueNumber ? 'a.queue_number,' : "NULL as queue_number,"}
+            COALESCE(u.name, ${hasCustomerName ? 'a.customer_name' : 'NULL'}, 'Guest') as user_name, 
             COALESCE(u.email, 'Walk-in') as user_email, 
-            COALESCE(u.phone, a.customer_phone) as user_phone,
+            COALESCE(u.phone, ${hasCustomerPhone ? 'a.customer_phone' : 'NULL'}, 'Not Provided') as user_phone,
             s.start_time, 
             s.end_time,
             svc.name as service_name,
@@ -582,9 +602,9 @@ const getAppointments = async (orgId, queryParams) => {
         LEFT JOIN slots s ON a.slot_id = s.id
         LEFT JOIN services svc ON a.service_id = svc.id
         LEFT JOIN resources r ON a.resource_id = r.id
-        WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)
+        WHERE a.org_id = $1 
+        ${hasIsDeletedPerf ? 'AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)' : ''}
     `;
-
     const params = [orgId];
     let paramCount = 1;
 
@@ -612,7 +632,12 @@ const getAppointments = async (orgId, queryParams) => {
 
     if (search) {
         paramCount++;
-        queryText += ` AND (u.name ILIKE $${paramCount} OR a.customer_name ILIKE $${paramCount} OR a.customer_phone ILIKE $${paramCount} OR CAST(a.token_number AS TEXT) ILIKE $${paramCount})`;
+        const searchParts = [`u.name ILIKE $${paramCount}`, `u.email ILIKE $${paramCount}`];
+        if (hasCustomerName) searchParts.push(`a.customer_name ILIKE $${paramCount}`);
+        if (hasCustomerPhone) searchParts.push(`a.customer_phone ILIKE $${paramCount}`);
+        if (hasTokenNumber) searchParts.push(`CAST(a.token_number AS TEXT) ILIKE $${paramCount}`);
+
+        queryText += ` AND (${searchParts.join(' OR ')})`;
         params.push(`%${search}%`);
     }
 
@@ -623,7 +648,7 @@ const getAppointments = async (orgId, queryParams) => {
         const res = await query(queryText, params);
 
         // Get total count for pagination (with same filters)
-        let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id LEFT JOIN slots s ON a.slot_id = s.id WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)';
+        let countQuery = `SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id LEFT JOIN slots s ON a.slot_id = s.id WHERE a.org_id = $1 ${hasIsDeletedPerf ? 'AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)' : ''}`;
         const countParams = [orgId];
         let countParamCount = 1;
 
@@ -926,21 +951,26 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
 const getLiveQueue = async (orgId, date) => {
     const queryDate = date || new Date().toISOString().split('T')[0];
 
+    const apptCols = await getColumnNames('appointments');
+    const hasTokenNumber = apptCols.includes('token_number');
+    const hasCustomerName = apptCols.includes('customer_name');
+    const hasCustomerPhone = apptCols.includes('customer_phone');
+
     const appointmentsRes = await pool.query(
         `SELECT
             a.id,
             a.user_id,
             a.status,
             a.created_at,
-            a.token_number,
+            ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
             a.service_id,
             a.resource_id,
             a.slot_id,
             sl.start_time as slot_start,
             sl.end_time as slot_end,
-            COALESCE(u.name, a.customer_name, 'Guest') as user_name,
+            COALESCE(u.name, ${hasCustomerName ? 'a.customer_name' : 'NULL'}, 'Guest') as user_name,
             COALESCE(u.email, 'Walk-in') as user_email,
-            COALESCE(u.phone, a.customer_phone, 'Not Provided') as user_phone,
+            COALESCE(u.phone, ${hasCustomerPhone ? 'a.customer_phone' : 'NULL'}, 'Not Provided') as user_phone,
             s.name as service_name,
             s.queue_scope,
             r.name as resource_name,
@@ -1064,13 +1094,21 @@ const globalSearch = async (orgId, searchQuery) => {
         );
 
         // Search Appointments (by Patient Name, Email, or Token)
+        const apptCols = await getColumnNames('appointments');
+        const hasTokenNumber = apptCols.includes('token_number');
+        
+        const searchConditions = [`u.name ILIKE $2`, `u.email ILIKE $2`];
+        if (hasTokenNumber) {
+            searchConditions.push(`CAST(a.token_number AS TEXT) ILIKE $2`);
+        }
+
         const appointmentsPromise = client.query(
-            `SELECT a.id, a.token_number, a.status, a.created_at, 
+            `SELECT a.id, ${hasTokenNumber ? 'a.token_number,' : 'NULL as token_number,'} a.status, a.created_at, 
                     u.name as patient_name, u.email as patient_email
              FROM appointments a
             LEFT JOIN users u ON a.user_id = u.id
              WHERE a.org_id = $1 
-               AND (u.name ILIKE $2 OR CAST(a.token_number AS TEXT) ILIKE $2 OR u.email ILIKE $2)
+               AND (${searchConditions.join(' OR ')})
              ORDER BY a.created_at DESC LIMIT 5`,
             [orgId, term]
         );
