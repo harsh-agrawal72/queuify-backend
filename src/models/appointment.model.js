@@ -173,8 +173,7 @@ const getAppointmentsByUserId = async (userId) => {
             WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
          )
          SELECT a.*, 
-                s.org_id,
-                COALESCE(q.calculated_queue, 0) as queue_number,
+                COALESCE(q.calculated_queue, 0) as live_queue_number,
                 s.name as service_name, r.name as resource_name,
                 o.name as org_name, o.address as org_address,
                 sl.start_time, sl.end_time,
@@ -186,7 +185,7 @@ const getAppointmentsByUserId = async (userId) => {
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
          LEFT JOIN reviews rv ON a.id = rv.appointment_id
-         WHERE a.user_id = $1 
+         WHERE a.user_id = $1::uuid 
          ORDER BY a.created_at DESC`,
         [userId]
     );
@@ -206,7 +205,7 @@ const getAppointmentsByOrgId = async (orgId) => {
             WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
          )
          SELECT a.*, 
-                COALESCE(q.calculated_queue, 0) as queue_number,
+                COALESCE(q.calculated_queue, 0) as live_queue_number,
                 u.name as user_name, u.email as user_email,
                 s.name as service_name, r.name as resource_name,
                 sl.start_time, sl.end_time,
@@ -218,7 +217,7 @@ const getAppointmentsByOrgId = async (orgId) => {
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
          LEFT JOIN reviews rv ON a.id = rv.appointment_id
-         WHERE a.org_id = $1
+         WHERE a.org_id = $1::uuid
          ORDER BY a.created_at DESC`,
         [orgId]
     );

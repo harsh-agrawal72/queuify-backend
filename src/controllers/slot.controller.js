@@ -39,7 +39,8 @@ const getSlots = catchAsync(async (req, res) => {
 const getAvailableSlots = catchAsync(async (req, res) => {
     const filters = {
         serviceId: req.query.serviceId || undefined,
-        resourceId: req.query.resourceId || undefined
+        resourceId: req.query.resourceId || undefined,
+        date: req.query.date || undefined,
     };
     console.log('[getAvailableSlots] orgId:', req.params.orgId, 'filters:', filters);
     const slots = await slotService.getAvailableSlots(req.params.orgId, filters);

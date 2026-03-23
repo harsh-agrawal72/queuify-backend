@@ -958,7 +958,7 @@ const getLiveQueue = async (orgId, date) => {
          JOIN services s ON a.service_id = s.id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
-         WHERE a.org_id = $1
+         WHERE a.org_id = $1::uuid
          AND (
              (a.slot_id IS NOT NULL AND sl.start_time >= $2::date AND sl.start_time < $2::date + interval '1 day')
              OR (a.slot_id IS NULL AND a.created_at >= $2::date AND a.created_at < $2::date + interval '1 day')
@@ -1178,7 +1178,7 @@ const getPredictiveInsights = async (orgId) => {
             FROM appointments a
             JOIN services svc ON a.service_id = svc.id
             LEFT JOIN resources r ON a.resource_id = r.id
-            WHERE a.org_id = $1 
+            WHERE a.org_id = $1::uuid 
             AND a.status = 'completed'
             AND a.serving_started_at IS NOT NULL 
             AND a.completed_at IS NOT NULL
@@ -1192,7 +1192,8 @@ const getPredictiveInsights = async (orgId) => {
                 .filter(r => r.service_id === row.service_id)
                 .reduce((acc, r, _, arr) => acc + (parseFloat(r.avg_duration_minutes) / arr.length), 0);
             
-            const efficiency = serviceAvg > 0 ? (serviceAvg / parseFloat(row.avg_duration_minutes)) : 1;
+            const duration = parseFloat(row.avg_duration_minutes);
+            const efficiency = (serviceAvg > 0 && duration > 0) ? (serviceAvg / duration) : 1;
             return {
                 resource_name: row.resource_name || 'Unassigned',
                 service_name: row.service_name,
@@ -1208,7 +1209,7 @@ const getPredictiveInsights = async (orgId) => {
                 EXTRACT(HOUR FROM serving_started_at) as hour,
                 COUNT(*) as volume
             FROM appointments
-            WHERE org_id = $1 
+            WHERE org_id = $1::uuid 
             AND status = 'completed'
             AND serving_started_at > NOW() - interval '30 days'
             GROUP BY hour

@@ -97,6 +97,10 @@ const getAvailableSlots = async (orgId, filters = {}) => {
         query += ` AND resource_id = $${idx++}`;
         params.push(filters.resourceId);
     }
+    if (filters.date) {
+        query += ` AND DATE(start_time AT TIME ZONE 'UTC') = $${idx++}`;
+        params.push(filters.date);
+    }
 
     query += ' ORDER BY start_time ASC';
 
