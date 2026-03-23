@@ -914,8 +914,8 @@ const getLiveQueue = async (orgId, date) => {
             ROW_NUMBER() OVER (
                 PARTITION BY (
                     CASE 
-                        WHEN s.queue_scope = 'PER_RESOURCE' THEN a.resource_id::text 
-                        ELSE a.service_id::text
+                        WHEN s.queue_scope = 'PER_RESOURCE' THEN CONCAT(a.resource_id::text, '_', a.slot_id::text)
+                        ELSE CONCAT(a.service_id::text, '_', a.slot_id::text)
                     END
                 )
                 ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC

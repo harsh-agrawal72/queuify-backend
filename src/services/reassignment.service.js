@@ -195,6 +195,7 @@ const fillSlotFromWaitlist = async (slotId) => {
         // 2. Loop until slot is full or no more eligible appointments
         let filledCount = 0;
         const remainingCapacity = slot.max_capacity - slot.booked_count;
+        console.log(`[Waitlist-Fill] Slot ${slotId} has ${remainingCapacity} spots left. Checking waitlist...`);
 
         while (filledCount < remainingCapacity) {
             const eligibleQuery = await client.query(
@@ -212,16 +213,21 @@ const fillSlotFromWaitlist = async (slotId) => {
                         OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
                    )
                    AND (
-                       (a.status = 'waitlisted_urgent' AND DATE($3) = a.preferred_date) 
-                       OR (a.status = 'waitlisted')
-                       OR (a.status = 'pending') 
+                       -- For urgent, we must match the date exactly.
+                       -- Using string comparison is more robust against timezone shifts than DATE(timestamp)
+                       (a.status = 'waitlisted_urgent' AND a.preferred_date = $3) 
+                       -- For pending/waitlisted, we pick them up for any future or same-day slot
+                       OR (a.status IN ('waitlisted', 'pending') AND a.preferred_date <= $3)
                    )
                  ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.status = 'waitlisted') DESC, a.created_at ASC
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,
-                [slot.org_id, slot.resource_id, slot.start_time]
+                [slot.org_id, slot.resource_id, new Date(slot.start_time).toISOString().split('T')[0]]
             );
 
-            if (eligibleQuery.rows.length === 0) break;
+            if (eligibleQuery.rows.length === 0) {
+                console.log(`[Waitlist-Fill] No more eligible appointments found for slot ${slotId}`);
+                break;
+            }
 
             const appt = eligibleQuery.rows[0];
             
@@ -304,7 +310,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
              WHERE a.slot_id = ANY($1) 
-               AND a.status = 'confirmed'
+               AND a.status IN ('confirmed', 'pending')
              ORDER BY a.created_at ASC`,
             [slotIds]
         );
@@ -340,8 +346,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             let minOccupancy = Infinity;
 
             for (const s of slotDistribution) {
-                if (s.max_capacity > 0) {
-                    const occupancy = s.currentBooked / s.max_capacity;
+                const capacity = parseInt(s.max_capacity) || 1; 
+                if (capacity > 0) {
+                    const occupancy = s.currentBooked / capacity;
                     if (occupancy < minOccupancy) {
                         minOccupancy = occupancy;
                         bestSlot = s;

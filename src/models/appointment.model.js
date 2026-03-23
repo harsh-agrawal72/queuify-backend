@@ -98,14 +98,14 @@ const createAppointment = async (appointmentBody) => {
         let partitionBy, filterClause, filterParams;
 
         if (service.queue_scope === 'PER_RESOURCE') {
-            partitionBy = 'service_id, resource_id, preferred_date';
-            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3';
-            filterParams = [serviceId, resourceId, preferredDate];
+            partitionBy = 'service_id, resource_id, preferred_date, slot_id';
+            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND slot_id = $4';
+            filterParams = [serviceId, resourceId, preferredDate, slotId];
         } else {
-            // CENTRAL Queue: Shared across resources for the same intended date
-            partitionBy = 'service_id, preferred_date';
-            filterClause = 'service_id = $1 AND preferred_date = $2';
-            filterParams = [serviceId, preferredDate];
+            // CENTRAL Queue: Shared across resources for the same intended date, but still partitioned by slot
+            partitionBy = 'service_id, preferred_date, slot_id';
+            filterClause = 'service_id = $1 AND preferred_date = $2 AND slot_id = $3';
+            filterParams = [serviceId, preferredDate, slotId];
         }
 
         const queueRes = await client.query(
@@ -165,12 +165,7 @@ const getAppointmentsByUserId = async (userId) => {
         `WITH QueueRanks AS (
             SELECT a.id, 
                    ROW_NUMBER() OVER (
-                       PARTITION BY (
-                           CASE 
-                               WHEN s.queue_scope = 'PER_RESOURCE' THEN a.slot_id::text 
-                               ELSE (SELECT CONCAT(a.service_id, '_', sl.start_time) FROM slots sl WHERE sl.id = a.slot_id)
-                           END
-                       )
+                       PARTITION BY a.slot_id
                        ORDER BY a.created_at ASC
                    ) as calculated_queue
             FROM appointments a
@@ -201,12 +196,7 @@ const getAppointmentsByOrgId = async (orgId) => {
         `WITH QueueRanks AS (
             SELECT a.id, 
                    ROW_NUMBER() OVER (
-                       PARTITION BY (
-                           CASE 
-                               WHEN s.queue_scope = 'PER_RESOURCE' THEN a.slot_id::text 
-                               ELSE (SELECT CONCAT(a.service_id, '_', sl.start_time) FROM slots sl WHERE sl.id = a.slot_id)
-                           END
-                       )
+                       PARTITION BY a.slot_id
                        ORDER BY a.created_at ASC
                    ) as calculated_queue
             FROM appointments a
