@@ -19,6 +19,7 @@ router.delete('/org', adminController.deleteOrganization);
 router.get('/today-queue', adminController.getTodayQueue);
 router.get('/analytics', adminController.getAnalytics);
 router.get('/live-queue', adminController.getLiveQueue);
+router.get('/predictive-insights', adminController.getPredictiveInsights);
 router.get('/notifications', adminController.getNotifications);
 router.post('/notifications/mark-read', adminController.markAllNotificationsAsRead);
 
@@ -33,7 +34,8 @@ router.route('/slots/:slotId')
     .delete(validate(adminValidation.deleteSlot), adminController.deleteSlot);
 
 router.route('/appointments')
-    .get(adminController.getAppointments);
+    .get(adminController.getAppointments)
+    .post(validate(adminValidation.createManualAppointment), adminController.createManualAppointment);
 
 router.route('/appointments/:appointmentId')
     .patch(validate(adminValidation.updateAppointmentStatus), adminController.updateAppointmentStatus)

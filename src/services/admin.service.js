@@ -559,7 +559,7 @@ const hardDeleteSlot = async (orgId, slotId) => {
 };
 
 const getAppointments = async (orgId, queryParams) => {
-    const { page = 1, limit = 10, status, search } = queryParams;
+    const { page = 1, limit = 10, status, search, resourceId, date } = queryParams;
     const offset = (page - 1) * limit;
 
     let queryText = `
@@ -570,9 +570,9 @@ const getAppointments = async (orgId, queryParams) => {
             a.created_at, 
             a.token_number,
             a.queue_number,
-            u.name as user_name, 
-            u.email as user_email, 
-            u.phone as user_phone,
+            COALESCE(u.name, a.customer_name) as user_name, 
+            COALESCE(u.email, 'Walk-in') as user_email, 
+            COALESCE(u.phone, a.customer_phone) as user_phone,
             s.start_time, 
             s.end_time,
             svc.name as service_name,
@@ -594,9 +594,25 @@ const getAppointments = async (orgId, queryParams) => {
         params.push(status);
     }
 
+    if (resourceId) {
+        paramCount++;
+        queryText += ` AND a.resource_id = $${paramCount}`;
+        params.push(resourceId);
+    }
+
+    if (date) {
+        paramCount++;
+        // Use DATE() to compare only the date part of start_time (if slot exists) or created_at (if waitlist)
+        queryText += ` AND (
+            (a.slot_id IS NOT NULL AND DATE(s.start_time) = $${paramCount}) OR
+            (a.slot_id IS NULL AND DATE(a.created_at) = $${paramCount})
+        )`;
+        params.push(date);
+    }
+
     if (search) {
         paramCount++;
-        queryText += ` AND (u.name ILIKE $${paramCount} OR CAST(a.token_number AS TEXT) ILIKE $${paramCount})`;
+        queryText += ` AND (u.name ILIKE $${paramCount} OR a.customer_name ILIKE $${paramCount} OR a.customer_phone ILIKE $${paramCount} OR CAST(a.token_number AS TEXT) ILIKE $${paramCount})`;
         params.push(`%${search}%`);
     }
 
@@ -607,7 +623,7 @@ const getAppointments = async (orgId, queryParams) => {
         const res = await query(queryText, params);
 
         // Get total count for pagination (with same filters)
-        let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)';
+        let countQuery = 'SELECT COUNT(*) FROM appointments a LEFT JOIN users u ON a.user_id = u.id LEFT JOIN slots s ON a.slot_id = s.id WHERE a.org_id = $1 AND (a.is_deleted_permanent IS FALSE OR a.is_deleted_permanent IS NULL)';
         const countParams = [orgId];
         let countParamCount = 1;
 
@@ -617,9 +633,24 @@ const getAppointments = async (orgId, queryParams) => {
             countParams.push(status);
         }
 
+        if (resourceId) {
+            countParamCount++;
+            countQuery += ` AND a.resource_id = $${countParamCount}`;
+            countParams.push(resourceId);
+        }
+
+        if (date) {
+            countParamCount++;
+            countQuery += ` AND (
+                (a.slot_id IS NOT NULL AND DATE(s.start_time) = $${countParamCount}) OR
+                (a.slot_id IS NULL AND DATE(a.created_at) = $${countParamCount})
+            )`;
+            countParams.push(date);
+        }
+
         if (search) {
             countParamCount++;
-            countQuery += ` AND (u.name ILIKE $${countParamCount} OR CAST(a.token_number AS TEXT) ILIKE $${countParamCount})`;
+            countQuery += ` AND (u.name ILIKE $${countParamCount} OR a.customer_name ILIKE $${countParamCount} OR CAST(a.token_number AS TEXT) ILIKE $${countParamCount})`;
             countParams.push(`%${search}%`);
         }
 
@@ -907,7 +938,9 @@ const getLiveQueue = async (orgId, date) => {
             a.slot_id,
             sl.start_time as slot_start,
             sl.end_time as slot_end,
-            u.name as user_name,
+            COALESCE(u.name, a.customer_name) as user_name,
+            COALESCE(u.email, 'Walk-in') as user_email,
+            COALESCE(u.phone, a.customer_phone) as user_phone,
             s.name as service_name,
             s.queue_scope,
             r.name as resource_name,
@@ -921,7 +954,7 @@ const getLiveQueue = async (orgId, date) => {
                 ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC
             ) as queue_number
          FROM appointments a
-         JOIN users u ON a.user_id = u.id
+         LEFT JOIN users u ON a.user_id = u.id
          JOIN services s ON a.service_id = s.id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
@@ -965,6 +998,25 @@ const getLiveQueue = async (orgId, date) => {
     });
 
     return queues;
+};
+
+const createManualAppointment = async (orgId, appointmentData) => {
+    const { appointmentModel } = require('../models');
+    
+    // Generate a token number if not provided
+    if (!appointmentData.token_number) {
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const suffix = Math.random().toString(36).substring(2, 5).toUpperCase();
+        appointmentData.token_number = `WALK-${dateStr}-${suffix}`;
+    }
+
+    const result = await appointmentModel.createAppointment({
+        ...appointmentData,
+        orgId,
+        bypassDuplicate: true // Manual entries by admin bypass duplicate checks
+    });
+
+    return result;
 };
 
 const getNotifications = async (userId) => {
@@ -1016,7 +1068,7 @@ const globalSearch = async (orgId, searchQuery) => {
             `SELECT a.id, a.token_number, a.status, a.created_at, 
                     u.name as patient_name, u.email as patient_email
              FROM appointments a
-             JOIN users u ON a.user_id = u.id
+            LEFT JOIN users u ON a.user_id = u.id
              WHERE a.org_id = $1 
                AND (u.name ILIKE $2 OR CAST(a.token_number AS TEXT) ILIKE $2 OR u.email ILIKE $2)
              ORDER BY a.created_at DESC LIMIT 5`,
@@ -1112,6 +1164,97 @@ const deleteAdmin = async (adminIdToDelete, currentAdminId, orgId) => {
 };
 
 
+const getPredictiveInsights = async (orgId) => {
+    try {
+        // 1. Calculate Average Service Duration (last 30 days)
+        const avgDurationRes = await query(`
+            SELECT 
+                a.service_id,
+                a.resource_id,
+                svc.name as service_name,
+                r.name as resource_name,
+                AVG(EXTRACT(EPOCH FROM (a.completed_at - a.serving_started_at)) / 60) as avg_duration_minutes,
+                COUNT(*) as completion_count
+            FROM appointments a
+            JOIN services svc ON a.service_id = svc.id
+            LEFT JOIN resources r ON a.resource_id = r.id
+            WHERE a.org_id = $1 
+            AND a.status = 'completed'
+            AND a.serving_started_at IS NOT NULL 
+            AND a.completed_at IS NOT NULL
+            AND a.completed_at > NOW() - interval '30 days'
+            GROUP BY a.service_id, a.resource_id, svc.name, r.name
+        `, [orgId]);
+
+        // 2. Resource Efficiency (Efficiency vs Service Average)
+        const resourceEfficiency = avgDurationRes.rows.map(row => {
+            const serviceAvg = avgDurationRes.rows
+                .filter(r => r.service_id === row.service_id)
+                .reduce((acc, r, _, arr) => acc + (parseFloat(r.avg_duration_minutes) / arr.length), 0);
+            
+            const efficiency = serviceAvg > 0 ? (serviceAvg / parseFloat(row.avg_duration_minutes)) : 1;
+            return {
+                resource_name: row.resource_name || 'Unassigned',
+                service_name: row.service_name,
+                avg_time: Math.round(parseFloat(row.avg_duration_minutes)),
+                efficiency_score: Math.round(efficiency * 100),
+                completions: parseInt(row.completion_count)
+            };
+        });
+
+        // 3. Peak Hour Loads (Based on actual service start times)
+        const peakHoursRes = await query(`
+            SELECT 
+                EXTRACT(HOUR FROM serving_started_at) as hour,
+                COUNT(*) as volume
+            FROM appointments
+            WHERE org_id = $1 
+            AND status = 'completed'
+            AND serving_started_at > NOW() - interval '30 days'
+            GROUP BY hour
+            ORDER BY volume DESC
+            LIMIT 3
+        `, [orgId]);
+
+        // 4. Smart Wait Time Model (Current Queues)
+        const currentQueues = await getLiveQueue(orgId);
+        const waitTimePredictions = currentQueues.map(q => {
+            const waitingCount = q.appointments.filter(a => a.status === 'confirmed' || a.status === 'pending').length;
+            
+            // Find specific average for this resource/service
+            const stats = avgDurationRes.rows.find(r => 
+                r.service_id === q.service_id && (q.resource_id ? r.resource_id === q.resource_id : true)
+            );
+            
+            const avgMins = stats ? parseFloat(stats.avg_duration_minutes) : 15; // fallback to 15m
+            const predictedWait = waitingCount * avgMins;
+
+            return {
+                queue_name: q.resource_name || q.name,
+                waiting_count: waitingCount,
+                avg_service_time: Math.round(avgMins),
+                predicted_total_wait: Math.round(predictedWait),
+                confidence: stats ? (parseInt(stats.completion_count) > 10 ? 'High' : 'Medium') : 'Low'
+            };
+        });
+
+        return {
+            averageDurations: avgDurationRes.rows.map(r => ({
+                service: r.service_name,
+                resource: r.resource_name,
+                minutes: Math.round(parseFloat(r.avg_duration_minutes))
+            })),
+            resourceEfficiency,
+            peakHours: peakHoursRes.rows,
+            currentPredictions: waitTimePredictions,
+            lastAnalysis: new Date().toISOString()
+        };
+    } catch (error) {
+        console.error('getPredictiveInsights error:', error);
+        throw error;
+    }
+};
+
 const deleteOrganization = async (orgId) => {
     const client = await pool.connect();
     try {
@@ -1160,6 +1303,9 @@ module.exports = {
     getAdmins,
     inviteAdmin,
     deleteAdmin,
-    deleteOrganization
+    deleteOrganization,
+    rebalanceSlots,
+    getPredictiveInsights,
+    createManualAppointment
 };
 

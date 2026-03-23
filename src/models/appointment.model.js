@@ -1,7 +1,7 @@
 const { pool } = require('../config/db');
 
 const createAppointment = async (appointmentBody) => {
-    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false } = appointmentBody;
+    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false, customer_name, customer_phone } = appointmentBody;
 
     const client = await pool.connect();
 
@@ -9,7 +9,7 @@ const createAppointment = async (appointmentBody) => {
         await client.query('BEGIN');
 
         // 0. Prevent duplicate bookings for the same user and same slot (unless bypassed)
-        if (slotId && !bypassDuplicate) {
+        if (slotId && !bypassDuplicate && userId) {
             const duplicateCheck = await client.query(
                 `SELECT id FROM appointments 
                  WHERE user_id = $1 AND slot_id = $2 AND status IN ('confirmed', 'pending', 'serving')`,
@@ -78,9 +78,9 @@ const createAppointment = async (appointmentBody) => {
         }
 
         const appointmentRes = await client.query(
-            `INSERT INTO appointments (org_id, slot_id, user_id, service_id, resource_id, status, pref_resource, pref_time, preferred_date) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-            [orgId, slotId || null, userId, serviceId, resourceId || null, 'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate]
+            `INSERT INTO appointments (org_id, slot_id, user_id, service_id, resource_id, status, pref_resource, pref_time, preferred_date, customer_name, customer_phone) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+            [orgId, slotId || null, userId || null, serviceId, resourceId || null, 'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate, customer_name || null, customer_phone || null]
         );
 
         const appointmentId = appointmentRes.rows[0].id;
@@ -244,13 +244,14 @@ const cancelAppointment = async (id, userId) => {
     try {
         await client.query('BEGIN');
 
-        const appt = await client.query(
-            'SELECT * FROM appointments WHERE id = $1 AND user_id = $2',
+        const apptRes = await client.query(
+            'SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE',
             [id, userId]
         );
 
-        if (appt.rows.length === 0) throw new Error('Appointment not found');
-        if (appt.rows[0].status === 'cancelled') throw new Error('Already cancelled');
+        if (apptRes.rows.length === 0) throw new Error('Appointment not found');
+        const appt = apptRes.rows[0];
+        if (appt.status === 'cancelled') throw new Error('Already cancelled');
 
         await client.query(
             "UPDATE appointments SET status = 'cancelled', cancelled_by = 'user' WHERE id = $1",
@@ -258,15 +259,132 @@ const cancelAppointment = async (id, userId) => {
         );
 
         // Decrement booked count
-        await client.query(
-            'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1',
-            [appt.rows[0].slot_id]
-        );
+        if (appt.slot_id) {
+            await client.query(
+                'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1',
+                [appt.slot_id]
+            );
+        }
 
         await client.query('COMMIT');
-        return { ...appt.rows[0], status: 'cancelled' };
+        return { ...appt, status: 'cancelled' };
     } catch (e) {
         await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin = false, orgId = null) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Fetch and Lock existing appointment
+        let apptRes;
+        if (isAdmin) {
+            apptRes = await client.query(
+                'SELECT * FROM appointments WHERE id = $1 AND org_id = $2 FOR UPDATE',
+                [appointmentId, orgId]
+            );
+        } else {
+            apptRes = await client.query(
+                'SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE',
+                [appointmentId, userId]
+            );
+        }
+        if (apptRes.rows.length === 0) throw new Error('Appointment not found');
+        const appt = apptRes.rows[0];
+
+        if (!['pending', 'confirmed'].includes(appt.status)) {
+            throw new Error(`Cannot reschedule appointment in ${appt.status} status`);
+        }
+
+        if (appt.slot_id === newSlotId) {
+            throw new Error('Already booked for this slot');
+        }
+
+        // 2. Fetch and Lock new slot
+        const slotRes = await client.query(
+            'SELECT * FROM slots WHERE id = $1 AND is_active = TRUE FOR UPDATE',
+            [newSlotId]
+        );
+        const newSlot = slotRes.rows[0];
+        if (!newSlot) throw new Error('New slot not found or inactive');
+
+        // 3. Service Verification
+        if (newSlot.service_id !== appt.service_id) {
+            throw new Error('Cannot reschedule to a different service');
+        }
+
+        // 4. Capacity Check
+        if (newSlot.booked_count >= newSlot.max_capacity) {
+            throw new Error('New slot is fully booked');
+        }
+
+        // 5. Decrement old slot occupancy
+        if (appt.slot_id) {
+            await client.query(
+                'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1',
+                [appt.slot_id]
+            );
+        }
+
+        // 6. Increment new slot occupancy
+        await client.query(
+            'UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1',
+            [newSlotId]
+        );
+
+        const newPreferredDate = new Date(newSlot.start_time).toISOString().split('T')[0];
+
+        // 7. Update Appointment
+        const updatedApptRes = await client.query(
+            `UPDATE appointments 
+             SET slot_id = $1, resource_id = $2, preferred_date = $3, created_at = NOW() 
+             WHERE id = $4 RETURNING *`,
+            [newSlotId, newSlot.resource_id, newPreferredDate, appointmentId]
+        );
+        const updatedAppt = updatedApptRes.rows[0];
+
+        // 8. Calculate New Rank
+        const svcRes = await client.query('SELECT queue_scope FROM services WHERE id = $1', [appt.service_id]);
+        const service = svcRes.rows[0];
+
+        let partitionBy, filterClause, filterParams;
+        if (service.queue_scope === 'PER_RESOURCE') {
+            partitionBy = 'service_id, resource_id, preferred_date, slot_id';
+            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND slot_id = $4';
+            filterParams = [updatedAppt.service_id, updatedAppt.resource_id, newPreferredDate, newSlotId];
+        } else {
+            partitionBy = 'service_id, preferred_date, slot_id';
+            filterClause = 'service_id = $1 AND preferred_date = $2 AND slot_id = $3';
+            filterParams = [updatedAppt.service_id, newPreferredDate, newSlotId];
+        }
+
+        const queueRes = await client.query(
+            `WITH RankedQueue AS (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY created_at ASC) as q_rank
+                FROM appointments
+                WHERE status IN ('pending', 'confirmed', 'serving', 'completed')
+                AND ${filterClause}
+             )
+             SELECT q_rank FROM RankedQueue WHERE id = $${filterParams.length + 1}`,
+            [...filterParams, appointmentId]
+        );
+
+        const rank = queueRes.rows.length > 0 ? parseInt(queueRes.rows[0].q_rank) : 0;
+
+        await client.query('COMMIT');
+
+        return {
+            appointment: updatedAppt,
+            queue_number: rank
+        };
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error('Error in rescheduleAppointment:', e);
         throw e;
     } finally {
         client.release();

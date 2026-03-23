@@ -8,7 +8,8 @@ const createResource = catchAsync(async (req, res) => {
 });
 
 const getResources = catchAsync(async (req, res) => {
-    const resources = await resourceService.getResources(req.user.org_id);
+    const activeOnly = req.query.activeOnly === 'true';
+    const resources = await resourceService.getResources(req.user.org_id, activeOnly);
     res.send(resources);
 });
 

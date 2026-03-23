@@ -19,6 +19,14 @@ const init = (httpServer) => {
         socket.on('join_resource', (resourceId) => socket.join(`resource_${resourceId}`));
         socket.on('join_user', (userId) => socket.join(`user_${userId}`));
 
+        // Chat Rooms
+        socket.on('join_chat', (conversationId) => socket.join(`chat_${conversationId}`));
+        socket.on('leave_chat', (conversationId) => socket.leave(`chat_${conversationId}`));
+        socket.on('chat_typing', (data) => {
+            // data = { conversationId, senderType, isTyping }
+            socket.to(`chat_${data.conversationId}`).emit('chat_typing_update', data);
+        });
+
         socket.on('disconnect', () => {
             console.log('Client disconnected:', socket.id);
         });

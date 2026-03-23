@@ -60,6 +60,24 @@ module.exports = {
             // Pass to global error handler but log locally first
             throw error;
         }
+    }),
+    rescheduleAppointment: catchAsync(async (req, res) => {
+        const isAdmin = req.user.role === 'admin';
+        const orgId = isAdmin ? req.user.org_id : null;
+        
+        const result = await appointmentService.rescheduleAppointment(
+            req.params.appointmentId,
+            req.user.id,
+            req.body.newSlotId,
+            isAdmin,
+            orgId
+        );
+        res.send({
+            success: true,
+            message: 'Appointment rescheduled successfully',
+            appointment: result.appointment,
+            queueNumber: result.queue_number
+        });
     })
 };
 

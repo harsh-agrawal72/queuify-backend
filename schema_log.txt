@@ -1,0 +1,20 @@
+id | uuid | Nullable: NO
+org_id | uuid | Nullable: NO
+slot_id | uuid | Nullable: YES
+user_id | uuid | Nullable: NO
+status | USER-DEFINED | Nullable: NO
+created_at | timestamp with time zone | Nullable: YES
+updated_at | timestamp with time zone | Nullable: YES
+reminder_sent | boolean | Nullable: YES
+service_id | uuid | Nullable: YES
+resource_id | uuid | Nullable: YES
+deleted_at | timestamp without time zone | Nullable: YES
+token_number | character varying | Nullable: YES
+queue_number | integer | Nullable: YES
+cancelled_by | character varying | Nullable: YES
+serving_started_at | timestamp with time zone | Nullable: YES
+completed_at | timestamp with time zone | Nullable: YES
+is_deleted_permanent | boolean | Nullable: YES
+pref_resource | character varying | Nullable: YES
+pref_time | character varying | Nullable: YES
+preferred_date | date | Nullable: YES

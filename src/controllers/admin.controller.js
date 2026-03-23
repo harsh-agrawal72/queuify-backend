@@ -128,6 +128,16 @@ const rebalanceSlots = catchAsync(async (req, res) => {
     res.json({ success: true, ...result });
 });
 
+const getPredictiveInsights = catchAsync(async (req, res) => {
+    const insights = await adminService.getPredictiveInsights(req.user.org_id);
+    res.send(insights);
+});
+
+const createManualAppointment = catchAsync(async (req, res) => {
+    const appointment = await adminService.createManualAppointment(req.user.org_id, req.body);
+    res.status(httpStatus.CREATED).json({ success: true, data: appointment });
+});
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -149,5 +159,7 @@ module.exports = {
     inviteAdmin,
     deleteAdmin,
     deleteOrganization,
-    rebalanceSlots
+    rebalanceSlots,
+    getPredictiveInsights,
+    createManualAppointment
 };

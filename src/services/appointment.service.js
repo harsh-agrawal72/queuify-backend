@@ -446,8 +446,9 @@ const getSystemAverageSpeed = async (serviceId, resourceId = null) => {
          AND status = 'completed'
          AND serving_started_at IS NOT NULL
          AND completed_at IS NOT NULL
+         AND completed_at > NOW() - interval '30 days'
          ORDER BY completed_at DESC
-         LIMIT 10`,
+         LIMIT 50`,
         params
     );
 
@@ -592,6 +593,74 @@ const getQueueStatus = async (appointmentId) => {
     }
 };
 
+/**
+ * Reschedule an appointment
+ * @param {string} appointmentId
+ * @param {string} userId
+ * @param {string} newSlotId
+ * @returns {Promise<Object>}
+ */
+const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin = false, orgId = null) => {
+    try {
+        const result = await appointmentModel.rescheduleAppointment(appointmentId, userId, newSlotId, isAdmin, orgId);
+        const { appointment, queue_number } = result;
+
+        // Trigger waitlist/rebalance logic if needed - optional enhancement
+
+        // Socket update
+        try {
+            const io = socket.getIO();
+            io.to(appointment.org_id).emit('queue_update', {
+                type: 'reschedule',
+                appointmentId: appointment.id,
+                newSlotId: appointment.slot_id
+            });
+        } catch (e) { console.error('Socket emit failed:', e); }
+
+        // Notifications (Fire and Forget)
+        (async () => {
+            try {
+                const appointmentWithDetails = await appointmentModel.getAppointmentById(appointment.id);
+                const user = await userModel.getUserById(appointment.user_id);
+                const orgRes = await pool.query('SELECT contact_email, email_notification FROM organizations WHERE id = $1', [appointment.org_id]);
+                const org = orgRes.rows[0];
+
+                if (user && user.email && user.email_notification_enabled !== false) {
+                    await emailService.sendBookingConfirmation(user.email, appointmentWithDetails); // Reuse booking confirmation for new time
+                }
+
+                await notificationService.sendNotification(
+                    appointment.user_id,
+                    'Appointment Rescheduled',
+                    `Your appointment has been moved to ${new Date(appointmentWithDetails.slot_start).toLocaleString()}. Token: ${appointmentWithDetails.token_number}`,
+                    'appointment',
+                    `/appointments`
+                );
+
+                // Notify Admins
+                const admins = await userModel.getAdminsByOrg(appointment.org_id);
+                for (const admin of admins) {
+                    await notificationService.sendNotification(
+                        admin.id,
+                        'Appointment Rescheduled',
+                        `${user?.name || 'User'} has rescheduled their appointment to a new slot.`,
+                        'appointment',
+                        `/admin/appointments?search=${appointment.id}`
+                    );
+                }
+            } catch (e) { console.error('[Reschedule-Async] Error:', e); }
+        })();
+
+        return result;
+    } catch (error) {
+        if (error.message === 'Appointment not found') throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+        if (error.message === 'New slot not found or inactive') throw new ApiError(httpStatus.NOT_FOUND, 'New slot not found or inactive');
+        if (error.message === 'New slot is fully booked') throw new ApiError(httpStatus.BAD_REQUEST, 'New slot is fully booked');
+        if (error.message.includes('Cannot reschedule')) throw new ApiError(httpStatus.BAD_REQUEST, error.message);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Rescheduling failed: ' + error.message);
+    }
+};
+
 module.exports = {
     bookAppointment,
     cancelAppointment,
@@ -599,5 +668,6 @@ module.exports = {
     getUserAppointments,
     getQueueStatus,
     advanceQueueAutomatically,
-    getSystemAverageSpeed
+    getSystemAverageSpeed,
+    rescheduleAppointment
 };

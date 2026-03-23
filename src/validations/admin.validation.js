@@ -56,6 +56,16 @@ const deleteAdmin = {
     }),
 };
 
+const createManualAppointment = {
+    body: Joi.object().keys({
+        customer_name: Joi.string().required(),
+        customer_phone: Joi.string().required(),
+        serviceId: Joi.string().uuid().required(),
+        resourceId: Joi.string().uuid().optional(),
+        slotId: Joi.string().uuid().optional(),
+    }),
+};
+
 module.exports = {
     createSlot,
     updateSlot,
@@ -64,4 +74,5 @@ module.exports = {
     deleteAppointment,
     inviteAdmin,
     deleteAdmin,
+    createManualAppointment,
 };

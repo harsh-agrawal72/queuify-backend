@@ -24,6 +24,10 @@ router
     .route('/:appointmentId/status')
     .patch(auth('admin'), validate(appointmentValidation.updateStatus), appointmentController.updateStatus);
 
+router
+    .route('/:appointmentId/reschedule')
+    .patch(auth('user'), validate(appointmentValidation.rescheduleAppointment), appointmentController.rescheduleAppointment);
+
 router.get('/:appointmentId/queue', auth(), appointmentController.getQueueStatus);
 
 
