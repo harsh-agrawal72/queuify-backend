@@ -675,7 +675,11 @@ const getAppointments = async (orgId, queryParams) => {
 
         if (search) {
             countParamCount++;
-            countQuery += ` AND (u.name ILIKE $${countParamCount} OR a.customer_name ILIKE $${countParamCount} OR CAST(a.token_number AS TEXT) ILIKE $${countParamCount})`;
+            const countSearchParts = [`u.name ILIKE $${countParamCount}`, `u.email ILIKE $${countParamCount}`];
+            if (hasCustomerName) countSearchParts.push(`a.customer_name ILIKE $${countParamCount}`);
+            if (hasTokenNumber) countSearchParts.push(`CAST(a.token_number AS TEXT) ILIKE $${countParamCount}`);
+            
+            countQuery += ` AND (${countSearchParts.join(' OR ')})`;
             countParams.push(`%${search}%`);
         }
 
@@ -719,6 +723,14 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         let updateQuery = `UPDATE appointments SET status = $1, updated_at = NOW()`;
         const updateParams = [status, appointmentId];
 
+        if (status === 'serving') {
+            updateQuery = `UPDATE appointments SET status = $1, serving_started_at = NOW(), updated_at = NOW()`;
+        }
+
+        if (status === 'completed') {
+            updateQuery = `UPDATE appointments SET status = $1, completed_at = NOW(), updated_at = NOW()`;
+        }
+
         if (status === 'cancelled') {
             updateQuery = `UPDATE appointments SET status = $1, cancelled_by = 'admin', cancellation_reason = $3, updated_at = NOW()`;
             updateParams.push(reason);
@@ -751,8 +763,18 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         (async () => {
             try {
                 console.log(`[Email-Async] [StatusUpdate] Starting for Appointment: ${appointmentId}, New Status: ${status}`);
+                const apptCols = await getColumnNames('appointments');
+                const hasCustomerName = apptCols.includes('customer_name');
+                const hasCustomerPhone = apptCols.includes('customer_phone');
+                const hasTokenNumber = apptCols.includes('token_number');
+
                 const appointmentDetails = await pool.query(`
-                    SELECT a.*, u.name as user_name, u.email as user_email, u.email_notification_enabled,
+                    SELECT a.id, a.status, a.user_id, a.org_id, a.service_id, a.slot_id, a.created_at,
+                           ${hasTokenNumber ? 'a.token_number,' : 'NULL as token_number,'}
+                           COALESCE(u.name, ${hasCustomerName ? 'a.customer_name' : 'NULL'}, 'Guest') as user_name, 
+                           COALESCE(u.email, 'Walk-in') as user_email, 
+                           COALESCE(u.phone, ${hasCustomerPhone ? 'a.customer_phone' : 'NULL'}, 'Not Provided') as user_phone,
+                           u.email_notification_enabled,
                            o.name as org_name, s.name as service_name
                     FROM appointments a
                     LEFT JOIN users u ON a.user_id = u.id
