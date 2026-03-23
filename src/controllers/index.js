@@ -8,6 +8,7 @@ const slotController = require('./slot.controller');
 const appointmentController = require('./appointment.controller');
 const superadminController = require('./superadmin.controller');
 const planController = require('./plan.controller');
+const chatController = require('./chat.controller');
 
 module.exports = {
     authController,
@@ -19,5 +20,6 @@ module.exports = {
     slotController,
     appointmentController,
     superadminController,
-    planController
+    planController,
+    chatController
 };

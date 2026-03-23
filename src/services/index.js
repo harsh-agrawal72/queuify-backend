@@ -15,6 +15,7 @@ const notificationService = require('./notification.service');
 const reassignmentService = require('./reassignment.service');
 const organizationImageService = require('./organization_image.service');
 const organizationProfileService = require('./organization_profile.service');
+const chatService = require('./chat.service');
 
 module.exports = {
     authService,
@@ -33,5 +34,6 @@ module.exports = {
     notificationService,
     reassignmentService,
     organizationImageService,
-    organizationProfileService
+    organizationProfileService,
+    chatService
 };
