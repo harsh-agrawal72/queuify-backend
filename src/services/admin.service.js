@@ -1304,7 +1304,6 @@ module.exports = {
     inviteAdmin,
     deleteAdmin,
     deleteOrganization,
-    rebalanceSlots,
     getPredictiveInsights,
     createManualAppointment
 };

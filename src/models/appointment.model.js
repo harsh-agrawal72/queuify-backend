@@ -143,7 +143,7 @@ const getAppointmentById = async (id) => {
             `SELECT a.*, 
                     s.name as service_name, s.queue_scope,
                     r.name as resource_name,
-                    o.name as org_name, o.contact_email as org_contact_email,
+                    o.name as org_name, o.contact_email as org_contact_email, o.address as org_address,
                     u.name as user_name, u.email as user_email
             FROM appointments a
             LEFT JOIN services s ON a.service_id = s.id
@@ -176,11 +176,13 @@ const getAppointmentsByUserId = async (userId) => {
                 s.org_id,
                 COALESCE(q.calculated_queue, 0) as queue_number,
                 s.name as service_name, r.name as resource_name,
+                o.name as org_name, o.address as org_address,
                 sl.start_time, sl.end_time,
                 rv.id as review_id, rv.rating as review_rating
          FROM appointments a
          LEFT JOIN QueueRanks q ON a.id = q.id
          LEFT JOIN services s ON a.service_id = s.id
+         LEFT JOIN organizations o ON a.org_id = o.id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
          LEFT JOIN reviews rv ON a.id = rv.appointment_id
