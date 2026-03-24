@@ -305,9 +305,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             return { message: 'Not enough slots to rebalance', movedCount: 0 };
         }
 
-        // 2. Get all eligible appointments
-        // We include those already in these slots AND those for this resource on this date with NO slot
-        const slotIds = slots.map(s => s.id);
+        // 2. Get all eligible appointments for this resource on this date
+        // We broadly include all confirmed/pending appointments for this resource on this date
+        // to ensure orphans from deleted/inactive slots are also picked up.
         const apptsRes = await client.query(
             `SELECT a.id, a.slot_id, a.user_id, u.email as user_email, u.name as user_name,
                     o.name as org_name, s.name as service_name
@@ -317,23 +317,23 @@ const rebalanceResourceSlots = async (resourceId, date) => {
              JOIN organizations o ON a.org_id = o.id
              WHERE a.resource_id = $1
                AND a.status IN ('confirmed', 'pending')
-               AND (
-                   a.slot_id = ANY($2)
-                   OR (a.slot_id IS NULL AND a.preferred_date = $3)
-               )
+               AND a.preferred_date = $2
              ORDER BY a.created_at ASC`,
-            [resourceId, slotIds, date]
+            [resourceId, date]
         );
         const appointments = apptsRes.rows;
 
-        console.log(`[Rebalance] Found ${appointments.length} eligible appointments`);
-
-        if (appointments.length === 0) {
-            console.log('[Rebalance] Early exit: No appointments to rebalance.');
-            await client.query('COMMIT');
-            return { message: 'No appointments to rebalance', movedCount: 0 };
+        console.log(`[Rebalance] Found ${appointments.length} eligible appointments for date ${date}`);
+        
+        if (appointments.length > 0) {
+            console.log(`[Rebalance] Appt IDs: ${appointments.map(a => a.id).join(', ')}`);
         }
 
+        if (appointments.length === 0) {
+            console.log('[Rebalance] Early exit: No appointments found for this resource/date.');
+            await client.query('COMMIT');
+            return { message: 'No appointments to rebalance', movedCount: 0, totalProcessed: 0 };
+        }
         // 3. Fair Redistribution Logic
         // Reset all slots booked_count temporarily in memory for distribution
         const slotDistribution = slots.map(s => ({ 
@@ -362,7 +362,10 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             // Fallback (redundant with current loop but safe)
             if (!bestSlot) bestSlot = slotDistribution[0];
 
+            console.log(`[Rebalance] Appt ${appt.id}: Old Slot ${appt.slot_id} -> Best Slot ${bestSlot.id}`);
+
             if (appt.slot_id !== bestSlot.id) {
+                console.log(`[Rebalance] !! MOVE DETECTED !! Appt ${appt.id} moving to ${bestSlot.id}`);
                 updates.push({
                     apptId: appt.id,
                     oldSlotId: appt.slot_id,
