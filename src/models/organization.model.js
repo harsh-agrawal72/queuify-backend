@@ -33,13 +33,16 @@ const getOrganizationById = async (id) => {
  * @param {Object} filter - { search: string }
  */
 const queryOrganizations = async (filter = {}) => {
-    let query = `
-        SELECT o.*, 
-               p.verified as is_verified,
-               logo.image_url as logo_url,
-               logo.id as logo_image_id,
-               COALESCE(AVG(r.rating), 0) as avg_rating, 
-               COUNT(r.id) as total_reviews
+    let selectFields = `
+        o.*, 
+        p.description, p.verified as is_verified, p.address as profile_address, 
+        p.images as profile_images, 
+        logo.image_url as logo_url, 
+        logo.id as logo_image_id,
+        COALESCE(AVG(r.rating), 0) as avg_rating, 
+        COUNT(r.id) as total_reviews
+    `;
+    let fromClause = `
         FROM organizations o
         LEFT JOIN organization_profiles p ON o.id = p.org_id
         LEFT JOIN reviews r ON o.id = r.org_id
@@ -48,24 +51,24 @@ const queryOrganizations = async (filter = {}) => {
             FROM organization_images 
             WHERE image_type = 'logo'
         ) logo ON o.id = logo.org_id
-        WHERE 1=1
     `;
+    let whereClause = ` WHERE 1=1 `;
     const params = [];
 
     if (filter.status) {
         params.push(filter.status);
-        query += ` AND o.status = $${params.length}`;
+        whereClause += ` AND o.status = $${params.length}`;
     }
 
     if (filter.type) {
         params.push(filter.type);
-        query += ` AND o.type = $${params.length}`;
+        whereClause += ` AND o.type = $${params.length}`;
     }
 
     if (filter.search) {
         params.push(`%${filter.search}%`);
         const searchIdx = params.length;
-        query += ` AND (
+        whereClause += ` AND (
             o.name ILIKE $${searchIdx} 
             OR o.org_code ILIKE $${searchIdx}
             OR o.type ILIKE $${searchIdx}
@@ -94,7 +97,7 @@ const queryOrganizations = async (filter = {}) => {
         const cIdx = params.length - 1;
         const sIdx = params.length;
 
-        query += `
+        selectFields += `
             , (
                 CASE WHEN p.pincode = $${pIdx} THEN 10 ELSE 0 END +
                 CASE WHEN p.city ILIKE $${cIdx} THEN 5 ELSE 0 END +
@@ -104,7 +107,10 @@ const queryOrganizations = async (filter = {}) => {
         orderBy = `proximity_score DESC, o.created_at DESC`;
     }
 
-    query += ` 
+    const query = `
+        SELECT ${selectFields}
+        ${fromClause}
+        ${whereClause}
         GROUP BY 
             o.id, p.id, p.description, p.verified, p.address, p.images, p.city, p.state, p.pincode,
             logo.image_url, logo.id

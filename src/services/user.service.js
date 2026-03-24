@@ -240,7 +240,7 @@ const saveProfileImage = async (userId, file) => {
     
     // Update users.profile_picture_url with a public-facing URL
     // We use a relative URL that the frontend can append to its base URL
-    const imageUrl = `/v1/users/profile/image/${result.rows[0].id}`;
+    const imageUrl = `/v1/user/profile/image/${result.rows[0].id}`;
     await pool.query('UPDATE users SET profile_picture_url = $1 WHERE id = $2', [imageUrl, userId]);
     
     return { id: result.rows[0].id, url: imageUrl };
