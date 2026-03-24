@@ -75,11 +75,11 @@ const createAppointment = async (appointmentBody) => {
         if (slotId) {
             const slotInfo = await client.query('SELECT start_time FROM slots WHERE id = $1', [slotId]);
             if (slotInfo.rows.length > 0) {
-                preferredDate = new Date(slotInfo.rows[0].start_time).toISOString().split('T')[0];
+                preferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(slotInfo.rows[0].start_time));
             }
         } else {
             // Default to today for manual walk-ins / unassigned entries
-            preferredDate = new Date().toISOString().split('T')[0];
+            preferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
         }
 
         const appointmentRes = await client.query(
@@ -368,7 +368,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
             [newSlotId]
         );
 
-        const newPreferredDate = new Date(newSlot.start_time).toISOString().split('T')[0];
+        const newPreferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(newSlot.start_time));
 
         // 7. Update Appointment
         const updatedApptRes = await client.query(

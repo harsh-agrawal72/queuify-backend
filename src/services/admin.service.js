@@ -390,7 +390,10 @@ const getAnalytics = async (orgId, filters = {}) => {
         // Insights
         insights,
         // Meta
-        dateRange: { start: startDate.toISOString().split('T')[0], end: endDateEnd.toISOString().split('T')[0] },
+        dateRange: { 
+            start: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(startDate), 
+            end: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(endDateEnd) 
+        },
         orgName: (await query('SELECT name FROM organizations WHERE id = $1', [orgId])).rows[0]?.name || 'Organization',
         orgType: (await query('SELECT industry_type FROM organizations WHERE id = $1', [orgId])).rows[0]?.industry_type || 'Other'
     };
@@ -976,7 +979,7 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
 };
 
 const getLiveQueue = async (orgId, date) => {
-    const queryDate = date || new Date().toISOString().split('T')[0];
+    const queryDate = date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 
     const apptCols = await getColumnNames('appointments');
     const hasTokenNumber = apptCols.includes('token_number');
@@ -1058,7 +1061,8 @@ const getLiveQueue = async (orgId, date) => {
 };
 
 const createManualAppointment = async (orgId, appointmentData) => {
-    const { appointmentModel } = require('../models');
+    const appointmentModel = require('../models/appointment.model');
+    console.log('[createManualAppointment] Incoming Data:', JSON.stringify(appointmentData, null, 2));
     
     // Generate a token number if not provided
     if (!appointmentData.token_number) {

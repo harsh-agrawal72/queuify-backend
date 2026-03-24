@@ -58,8 +58,8 @@ const deleteAdmin = {
 
 const createManualAppointment = {
     body: Joi.object().keys({
-        customerName: Joi.string().required(),
-        customerPhone: Joi.string().required(),
+        customer_name: Joi.string().required(),
+        customer_phone: Joi.string().required(),
         serviceId: Joi.string().uuid().required(),
         resourceId: Joi.string().uuid().required(),
         slotId: Joi.string().uuid().allow('', null).optional(),

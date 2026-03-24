@@ -20,7 +20,7 @@ const reassignAppointments = async (slotId) => {
         const origSlot = origSlotRes.rows[0];
         console.log(`[Reassignment] Original Slot: ${origSlot.start_time}, Resource: ${origSlot.resource_id}`);
 
-        // 2. Get all affected appointments
+        // 2. Get all affected appointments, prioritizing URGENT ones
         const apptsQuery = await client.query(
             `SELECT a.*, u.email as user_email, u.name as user_name,
                     s.name as service_name, o.name as org_name
@@ -28,7 +28,8 @@ const reassignAppointments = async (slotId) => {
              JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
-             WHERE a.slot_id = $1 AND a.status IN ('pending', 'confirmed')`,
+             WHERE a.slot_id = $1 AND a.status IN ('pending', 'confirmed')
+             ORDER BY (a.pref_time = 'URGENT') DESC, a.created_at ASC`,
             [slotId]
         );
         const appointments = apptsQuery.rows;
@@ -56,13 +57,21 @@ const reassignAppointments = async (slotId) => {
                 params.push(origSlot.resource_id);
             }
 
+            // Consistent timezone-safe date string (YYYY-MM-DD in India time)
+            const localDateStr = getLocalDateString(origSlot.start_time);
+
             if (isUrgent) {
-                searchFilter += ` AND DATE(s.start_time) = DATE($${params.length + 1})`;
-                params.push(origSlot.start_time);
+                // Must be the same local date
+                searchFilter += ` AND (
+                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${params.length + 1}
+                )`; 
+                params.push(localDateStr);
             } else {
                 // For flexible, we prefer same day but allow FUTURE days
-                searchFilter += ` AND DATE(s.start_time) >= DATE($${params.length + 1})`;
-                params.push(origSlot.start_time);
+                searchFilter += ` AND (
+                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') >= $${params.length + 1}
+                )`;
+                params.push(localDateStr);
             }
 
             const altSlotQuery = await client.query(
@@ -70,9 +79,9 @@ const reassignAppointments = async (slotId) => {
                  FROM slots s
                  JOIN resources r ON s.resource_id = r.id
                  WHERE ${searchFilter}
-                 ORDER BY (DATE(s.start_time) = DATE($${params.length})) DESC, 
-                          (s.booked_count::float / s.max_capacity::float) ASC, 
-                          ABS(EXTRACT(EPOCH FROM (s.start_time - $${params.length}))) ASC
+                 ORDER BY (TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${params.length}) DESC, 
+                          (s.booked_count::float / NULLIF(s.max_capacity, 0)::float) ASC, 
+                          ABS(EXTRACT(EPOCH FROM (s.start_time - $${params.length - 1}))) ASC
                  LIMIT 1 FOR UPDATE`,
                 params
             );
@@ -163,6 +172,19 @@ const reassignAppointments = async (slotId) => {
 };
 
 /**
+ * Helper to get YYYY-MM-DD in Asia/Kolkata timezone from a Date or timestamp
+ */
+const getLocalDateString = (date) => {
+    if (!date) return null;
+    return new Intl.DateTimeFormat('en-CA', { 
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date(date));
+};
+
+/**
  * Triggered when a slot becomes available (cancellation, reassignment)
  * Pulls someone from the waitlist into this slot if they match preferences.
  * @param {string} slotId 
@@ -195,7 +217,9 @@ const fillSlotFromWaitlist = async (slotId) => {
         // 2. Loop until slot is full or no more eligible appointments
         let filledCount = 0;
         const remainingCapacity = slot.max_capacity - slot.booked_count;
-        console.log(`[Waitlist-Fill] Slot ${slotId} has ${remainingCapacity} spots left. Checking waitlist...`);
+        const localDate = getLocalDateString(slot.start_time);
+        
+        console.log(`[Waitlist-Fill] Slot ${slotId} (${slot.resource_name}) at ${slot.start_time} (Local Date: ${localDate}) has ${remainingCapacity} spots left.`);
 
         while (filledCount < remainingCapacity) {
             const eligibleQuery = await client.query(
@@ -221,7 +245,7 @@ const fillSlotFromWaitlist = async (slotId) => {
                    )
                  ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.status = 'waitlisted') DESC, a.created_at ASC
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,
-                [slot.org_id, slot.resource_id, new Date(slot.start_time).toISOString().split('T')[0]]
+                [slot.org_id, slot.resource_id, localDate]
             );
 
             if (eligibleQuery.rows.length === 0) {
@@ -243,8 +267,9 @@ const fillSlotFromWaitlist = async (slotId) => {
                 [slot.id]
             );
 
+            filledCount++;
             console.log(`[Waitlist-Fill] Appt ${appt.id} promoted from ${appt.status} to confirmed for slot ${slotId}`);
-
+            
             // 4. Notify
             try {
                 await emailService.sendReassignmentEmail(appt.user_email, appt, slot);
@@ -285,12 +310,12 @@ const rebalanceResourceSlots = async (resourceId, date) => {
 
         console.log(`[Rebalance] Starting for Resource: ${resourceId}, Date: ${date}`);
 
-        // 1. Get all active slots for this resource on this date
+        // 1. Get all active slots for this resource on this date (Local Time)
         const slotsRes = await client.query(
             `SELECT id, start_time, max_capacity, booked_count 
              FROM slots 
              WHERE resource_id = $1 
-               AND DATE(start_time) = $2
+               AND TO_CHAR(start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2
                AND is_active = TRUE
              ORDER BY start_time ASC FOR UPDATE`,
             [resourceId, date]
@@ -326,9 +351,8 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         console.log(`[Rebalance] Found ${appointments.length} eligible appointments for date ${date}`);
         
         if (appointments.length > 0) {
-            console.log(`[Rebalance] Appt IDs: ${appointments.map(a => a.id).join(', ')}`);
+            console.log(`[Rebalance] Sample Appointment: ID=${appointments[0].id}, PreferredDate=${appointments[0].preferred_date}, SlotID=${appointments[0].slot_id}`);
         }
-
         if (appointments.length === 0) {
             console.log('[Rebalance] Early exit: No appointments found for this resource/date.');
             await client.query('COMMIT');
