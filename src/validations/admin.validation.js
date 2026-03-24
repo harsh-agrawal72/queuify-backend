@@ -63,6 +63,7 @@ const createManualAppointment = {
         serviceId: Joi.string().uuid().required(),
         resourceId: Joi.string().uuid().optional(),
         slotId: Joi.string().uuid().optional(),
+        status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').optional(),
     }),
 };
 

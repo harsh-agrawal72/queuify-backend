@@ -584,7 +584,7 @@ const getAppointments = async (orgId, queryParams) => {
 
     let queryText = `
         SELECT 
-            a.id, 
+            a.id, a.org_id, a.service_id, a.resource_id, a.slot_id,
             a.status, 
             ${hasCancelledBy ? 'a.cancelled_by,' : "NULL as cancelled_by,"}
             a.created_at, 
@@ -980,7 +980,7 @@ const getLiveQueue = async (orgId, date) => {
 
     const appointmentsRes = await pool.query(
         `SELECT
-            a.id,
+            a.id, a.org_id,
             a.user_id,
             a.status,
             a.created_at,
@@ -1125,7 +1125,7 @@ const globalSearch = async (orgId, searchQuery) => {
         }
 
         const appointmentsPromise = client.query(
-            `SELECT a.id, ${hasTokenNumber ? 'a.token_number,' : 'NULL as token_number,'} a.status, a.created_at, 
+            `SELECT a.id, a.org_id, a.service_id, a.resource_id, a.slot_id, ${hasTokenNumber ? 'a.token_number,' : 'NULL as token_number,'} a.status, a.created_at, 
                     u.name as patient_name, u.email as patient_email
              FROM appointments a
             LEFT JOIN users u ON a.user_id = u.id
