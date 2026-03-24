@@ -1,4 +1,6 @@
 const { pool } = require('../config/db');
+const httpStatus = require('../utils/httpStatus');
+const ApiError = require('../utils/ApiError');
 
 const createAppointment = async (appointmentBody) => {
     const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false, customer_name, customer_phone } = appointmentBody;
@@ -30,14 +32,14 @@ const createAppointment = async (appointmentBody) => {
 
         // 2. Concurrency: Respect concurrent_capacity for PER_RESOURCE
         if (service.queue_scope === 'PER_RESOURCE') {
-            if (!resourceId) throw new Error('Resource ID is required for resource-scoped queues');
+            if (!resourceId) throw new ApiError(httpStatus.BAD_REQUEST, 'Resource ID is required for resource-scoped queues');
 
             // LOCK the resource row
             const resLock = await client.query(
                 'SELECT id, concurrent_capacity FROM resources WHERE id = $1 FOR UPDATE',
                 [resourceId]
             );
-            if (resLock.rows.length === 0) throw new Error('Resource not found');
+            if (resLock.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Resource not found');
             const resource = resLock.rows[0];
 
             // If STATIC, we must ensure we don't exceed capacity for the given slot
@@ -47,12 +49,12 @@ const createAppointment = async (appointmentBody) => {
                     [slotId]
                 );
                 const slot = slotRes.rows[0];
-                if (!slot) throw new Error('Slot not found or is inactive');
+                if (!slot) throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found or is inactive');
 
                 // Overbooking prevention: Use concurrent_capacity if slot capacity is generic
                 const maxCap = slot.max_capacity || resource.concurrent_capacity || 1;
                 if (slot.booked_count >= maxCap) {
-                    throw new Error('This session is fully booked (Capacity reached)');
+                    throw new ApiError(httpStatus.BAD_REQUEST, 'This session is fully booked (Capacity reached)');
                 }
             }
         } else if (service.queue_type === 'STATIC' && slotId) {
@@ -62,9 +64,9 @@ const createAppointment = async (appointmentBody) => {
                 [slotId]
             );
             const slot = slotRes.rows[0];
-            if (!slot) throw new Error('Slot not found or is inactive');
+            if (!slot) throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found or is inactive');
             if (slot.booked_count >= slot.max_capacity) {
-                throw new Error('This session is fully booked');
+                throw new ApiError(httpStatus.BAD_REQUEST, 'This session is fully booked');
             }
         }
 
@@ -75,12 +77,28 @@ const createAppointment = async (appointmentBody) => {
             if (slotInfo.rows.length > 0) {
                 preferredDate = new Date(slotInfo.rows[0].start_time).toISOString().split('T')[0];
             }
+        } else {
+            // Default to today for manual walk-ins / unassigned entries
+            preferredDate = new Date().toISOString().split('T')[0];
         }
 
         const appointmentRes = await client.query(
-            `INSERT INTO appointments (org_id, slot_id, user_id, service_id, resource_id, status, pref_resource, pref_time, preferred_date, customer_name, customer_phone) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-            [orgId, slotId || null, userId || null, serviceId, resourceId || null, 'confirmed', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate, customer_name || null, customer_phone || null]
+            `INSERT INTO appointments (org_id, slot_id, user_id, service_id, resource_id, status, pref_resource, pref_time, preferred_date, customer_name, customer_phone, token_number) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+            [
+                orgId, 
+                slotId || null, 
+                userId || null, 
+                serviceId, 
+                resourceId || null, 
+                'confirmed', 
+                pref_resource || 'ANY', 
+                pref_time || 'FLEXIBLE', 
+                preferredDate, 
+                customer_name || null, 
+                customer_phone || null,
+                appointmentBody.token_number || null
+            ]
         );
 
         const appointmentId = appointmentRes.rows[0].id;
@@ -99,13 +117,13 @@ const createAppointment = async (appointmentBody) => {
 
         if (service.queue_scope === 'PER_RESOURCE') {
             partitionBy = 'service_id, resource_id, preferred_date, slot_id';
-            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND slot_id = $4';
-            filterParams = [serviceId, resourceId, preferredDate, slotId];
+            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND (slot_id = $4 OR ($4::uuid IS NULL AND slot_id IS NULL))';
+            filterParams = [serviceId, resourceId, preferredDate, slotId || null];
         } else {
             // CENTRAL Queue: Shared across resources for the same intended date, but still partitioned by slot
             partitionBy = 'service_id, preferred_date, slot_id';
-            filterClause = 'service_id = $1 AND preferred_date = $2 AND slot_id = $3';
-            filterParams = [serviceId, preferredDate, slotId];
+            filterClause = 'service_id = $1 AND preferred_date = $2 AND (slot_id = $3 OR ($3::uuid IS NULL AND slot_id IS NULL))';
+            filterParams = [serviceId, preferredDate, slotId || null];
         }
 
         const queueRes = await client.query(

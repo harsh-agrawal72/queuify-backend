@@ -283,9 +283,12 @@ const rebalanceResourceSlots = async (resourceId, date) => {
     try {
         await client.query('BEGIN');
 
+        console.log(`[Rebalance] Starting for Resource: ${resourceId}, Date: ${date}`);
+
         // 1. Get all active slots for this resource on this date
         const slotsRes = await client.query(
-            `SELECT * FROM slots 
+            `SELECT id, start_time, max_capacity, booked_count 
+             FROM slots 
              WHERE resource_id = $1 
                AND DATE(start_time) = $2
                AND is_active = TRUE
@@ -294,72 +297,70 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         );
         const slots = slotsRes.rows;
 
+        console.log(`[Rebalance] Found ${slots.length} active slots`);
+
         if (slots.length < 2) {
-            console.log('[Rebalance] Not enough slots to rebalance.');
+            console.log('[Rebalance] Early exit: Not enough slots to rebalance (< 2).');
             await client.query('ROLLBACK');
-            return { message: 'Not enough slots to rebalance' };
+            return { message: 'Not enough slots to rebalance', movedCount: 0 };
         }
 
-        // 2. Get all confirmed appointments for these slots
+        // 2. Get all eligible appointments
+        // We include those already in these slots AND those for this resource on this date with NO slot
         const slotIds = slots.map(s => s.id);
         const apptsRes = await client.query(
-            `SELECT a.*, u.email as user_email, u.name as user_name,
+            `SELECT a.id, a.slot_id, a.user_id, u.email as user_email, u.name as user_name,
                     o.name as org_name, s.name as service_name
              FROM appointments a
              JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
-             WHERE a.slot_id = ANY($1) 
+             WHERE a.resource_id = $1
                AND a.status IN ('confirmed', 'pending')
+               AND (
+                   a.slot_id = ANY($2)
+                   OR (a.slot_id IS NULL AND a.preferred_date = $3)
+               )
              ORDER BY a.created_at ASC`,
-            [slotIds]
+            [resourceId, slotIds, date]
         );
         const appointments = apptsRes.rows;
 
-        if (appointments.length === 0) {
-            await client.query('COMMIT');
-            return { message: 'No appointments to rebalance' };
-        }
+        console.log(`[Rebalance] Found ${appointments.length} eligible appointments`);
 
-        console.log(`[Rebalance] Redistributing ${appointments.length} appointments across ${slots.length} slots`);
+        if (appointments.length === 0) {
+            console.log('[Rebalance] Early exit: No appointments to rebalance.');
+            await client.query('COMMIT');
+            return { message: 'No appointments to rebalance', movedCount: 0 };
+        }
 
         // 3. Fair Redistribution Logic
-        // Calculate target appointments per slot
-        const totalAppts = appointments.length;
-        const totalCapacity = slots.reduce((acc, s) => acc + s.max_capacity, 0);
-        
-        if (totalAppts > totalCapacity) {
-            console.log('[Rebalance] Warning: Total appointments exceed total capacity. Some will remain overloaded.');
-        }
-
         // Reset all slots booked_count temporarily in memory for distribution
-        const slotDistribution = slots.map(s => ({ ...s, currentBooked: 0 }));
+        const slotDistribution = slots.map(s => ({ 
+            id: s.id, 
+            max_capacity: parseInt(s.max_capacity) || 1, 
+            currentBooked: 0,
+            originalSlot: s
+        }));
         
-        // Distribute appointments one by one to the least filled slot (preserving capacity constraints)
         const updates = [];
-        let appointmentIdx = 0;
 
         for (const appt of appointments) {
-            // Find slot with lowest occupancy percentage that still has capacity
-            // Prefer slots that are earlier if occupancy is tied
+            // Find slot with lowest occupancy percentage
+            // Prefer slots that are earlier if occupancy is tied (already sorted by start_time)
             let bestSlot = null;
             let minOccupancy = Infinity;
 
             for (const s of slotDistribution) {
-                const capacity = parseInt(s.max_capacity) || 1; 
-                if (capacity > 0) {
-                    const occupancy = s.currentBooked / capacity;
-                    if (occupancy < minOccupancy) {
-                        minOccupancy = occupancy;
-                        bestSlot = s;
-                    }
+                const occupancy = s.currentBooked / s.max_capacity;
+                if (occupancy < minOccupancy) {
+                    minOccupancy = occupancy;
+                    bestSlot = s;
                 }
             }
 
-            // Fallback: if all are over capacity, pick the one with lowest count
-            if (!bestSlot) {
-                bestSlot = slotDistribution.reduce((prev, curr) => (prev.currentBooked < curr.currentBooked ? prev : curr));
-            }
+            // Fallback (redundant with current loop but safe)
+            if (!bestSlot) bestSlot = slotDistribution[0];
 
             if (appt.slot_id !== bestSlot.id) {
                 updates.push({
@@ -373,6 +374,8 @@ const rebalanceResourceSlots = async (resourceId, date) => {
 
             bestSlot.currentBooked++;
         }
+
+        console.log(`[Rebalance] Identified ${updates.length} necessary moves out of ${appointments.length} appointments`);
 
         // 4. Apply updates and Notify
         for (const update of updates) {
@@ -408,6 +411,8 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         }
 
         await client.query('COMMIT');
+        console.log(`[Rebalance] Successfully completed. Moved: ${updates.length}`);
+
         return { 
             message: 'Load balancing completed successfully',
             totalProcessed: appointments.length,
