@@ -59,6 +59,7 @@ const getUserStats = async (userId) => {
             nextAppointment.people_ahead = status.people_ahead || 0;
             nextAppointment.estimated_wait_time = status.estimated_wait_time || 0;
             nextAppointment.current_serving_number = status.current_serving_number || 0;
+            nextAppointment.queue_number = status.queue_number || 0;
         } catch (e) {
             console.error('Failed to attach queue status to next appointment:', e);
         }
@@ -141,7 +142,37 @@ const updateProfile = async (userId, updateBody) => {
         idx++;
     }
 
-    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, email_notification_enabled, notification_enabled, created_at';
+    if (updateBody.profile_picture_url !== undefined) {
+        query += `, profile_picture_url = $${idx}`;
+        params.push(updateBody.profile_picture_url);
+        idx++;
+    }
+
+    if (updateBody.address !== undefined) {
+        query += `, address = $${idx}`;
+        params.push(updateBody.address);
+        idx++;
+    }
+
+    if (updateBody.city !== undefined) {
+        query += `, city = $${idx}`;
+        params.push(updateBody.city);
+        idx++;
+    }
+
+    if (updateBody.state !== undefined) {
+        query += `, state = $${idx}`;
+        params.push(updateBody.state);
+        idx++;
+    }
+
+    if (updateBody.pincode !== undefined) {
+        query += `, pincode = $${idx}`;
+        params.push(updateBody.pincode);
+        idx++;
+    }
+
+    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, profile_picture_url, address, city, state, pincode, email_notification_enabled, notification_enabled, created_at';
 
     try {
         const result = await pool.query(query, params);

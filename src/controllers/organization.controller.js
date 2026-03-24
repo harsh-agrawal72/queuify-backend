@@ -12,7 +12,10 @@ const getOrganizations = catchAsync(async (req, res) => {
     const filter = {
         search: req.query.search,
         type: req.query.type,
-        status: req.user.role === 'user' ? 'active' : req.query.status
+        status: req.user.role === 'user' ? 'active' : req.query.status,
+        userCity: req.query.city,
+        userState: req.query.state,
+        userPincode: req.query.pincode
     };
     const config = require('../config/config');
     const result = await organizationService.queryOrganizations(filter);
@@ -46,7 +49,10 @@ const getPublicOrganizations = catchAsync(async (req, res) => {
     const filter = {
         search: req.query.search,
         type: req.query.type,
-        status: 'active'
+        status: 'active',
+        userCity: req.query.city,
+        userState: req.query.state,
+        userPincode: req.query.pincode
     };
     const orgs = await organizationService.queryOrganizations(filter);
     // Return safe data for public

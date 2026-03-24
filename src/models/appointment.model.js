@@ -315,8 +315,20 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
         if (!newSlot) throw new Error('New slot not found or inactive');
 
         // 3. Service Verification
-        if (newSlot.service_id !== appt.service_id) {
+        // If the slot has a specific service_id, it MUST match.
+        // If not, we must verify the resource provides this service.
+        if (newSlot.service_id && newSlot.service_id !== appt.service_id) {
             throw new Error('Cannot reschedule to a different service');
+        }
+
+        const compatibilityCheck = await client.query(
+            `SELECT 1 FROM resource_services 
+             WHERE resource_id = $1 AND service_id = $2`,
+            [newSlot.resource_id, appt.service_id]
+        );
+
+        if (compatibilityCheck.rows.length === 0 && newSlot.service_id !== appt.service_id) {
+            throw new Error('This professional does not provide the required service for this appointment');
         }
 
         // 4. Capacity Check

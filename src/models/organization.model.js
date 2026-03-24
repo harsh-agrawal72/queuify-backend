@@ -83,7 +83,28 @@ const queryOrganizations = async (filter = {}) => {
         )`;
     }
 
-    query += ' GROUP BY o.id, p.verified, logo.image_url, logo.id ORDER BY o.created_at DESC';
+    let orderBy = 'o.created_at DESC';
+    if (filter.userCity || filter.userPincode || filter.userState) {
+        const cityParam = filter.userCity || '';
+        const stateParam = filter.userState || '';
+        const pincodeParam = filter.userPincode || '';
+        
+        params.push(pincodeParam, cityParam, stateParam);
+        const pIdx = params.length - 2;
+        const cIdx = params.length - 1;
+        const sIdx = params.length;
+
+        query += `
+            , (
+                CASE WHEN p.pincode = $${pIdx} THEN 10 ELSE 0 END +
+                CASE WHEN p.city ILIKE $${cIdx} THEN 5 ELSE 0 END +
+                CASE WHEN p.state ILIKE $${sIdx} THEN 2 ELSE 0 END
+            ) as proximity_score
+        `;
+        orderBy = `proximity_score DESC, o.created_at DESC`;
+    }
+
+    query += ` GROUP BY o.id, p.verified, logo.image_url, logo.id, p.pincode, p.city, p.state ORDER BY ${orderBy}`;
     const result = await pool.query(query, params);
     return result.rows;
 };
