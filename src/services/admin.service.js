@@ -396,7 +396,7 @@ const getAnalytics = async (orgId, filters = {}) => {
     };
 };
 
-const getSlots = async (orgId, resourceId = null) => {
+const getSlots = async (orgId, resourceId = null, date = null) => {
     let queryText = `
         SELECT s.*, r.name as resource_name 
         FROM slots s 
@@ -406,8 +406,13 @@ const getSlots = async (orgId, resourceId = null) => {
     const params = [orgId];
 
     if (resourceId) {
-        queryText += ` AND s.resource_id = $2`;
         params.push(resourceId);
+        queryText += ` AND s.resource_id = $${params.length}`;
+    }
+
+    if (date) {
+        params.push(date);
+        queryText += ` AND s.start_time >= $${params.length}::date AND s.start_time < $${params.length}::date + interval '1 day'`;
     }
 
     queryText += ` ORDER BY s.start_time ASC`;

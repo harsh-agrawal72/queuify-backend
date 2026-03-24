@@ -34,8 +34,7 @@ const getAnalytics = catchAsync(async (req, res) => {
 });
 
 const getSlots = catchAsync(async (req, res) => {
-
-    const slots = await adminService.getSlots(req.user.org_id, req.query.resourceId);
+    const slots = await adminService.getSlots(req.user.org_id, req.query.resourceId, req.query.date);
     res.send(slots);
 });
 

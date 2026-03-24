@@ -39,6 +39,9 @@ const auth = (...requiredRoles) => async (req, res, next) => {
         });
         next();
     } catch (err) {
+        if (err instanceof ApiError) {
+            return next(err);
+        }
         next(new ApiError(httpStatus.UNAUTHORIZED, 'Please authenticate'));
     }
 };
