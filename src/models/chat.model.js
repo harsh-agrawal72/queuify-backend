@@ -30,11 +30,12 @@ const Chat = {
             SELECT 
                 c.*, 
                 o.name as org_name, 
-                o.avatar_url as org_avatar,
+                oi.image_url as org_avatar,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_type = 'admin' AND m.is_read = FALSE) as unread_count,
                 (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message
             FROM conversations c
             JOIN organizations o ON c.org_id = o.id
+            LEFT JOIN organization_images oi ON o.id = oi.org_id AND oi.image_type = 'logo'
             WHERE c.user_id = $1
             ORDER BY c.last_message_at DESC;
         `;

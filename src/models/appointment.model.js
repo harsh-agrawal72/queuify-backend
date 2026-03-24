@@ -399,5 +399,6 @@ module.exports = {
     getAppointmentsByOrgId,
     updateAppointmentStatus,
     cancelAppointment,
+    rescheduleAppointment,
     pool
 };

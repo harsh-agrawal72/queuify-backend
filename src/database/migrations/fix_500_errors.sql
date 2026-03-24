@@ -23,7 +23,13 @@ ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(50),
 ADD COLUMN IF NOT EXISTS queue_number INTEGER,
 ADD COLUMN IF NOT EXISTS token_number VARCHAR(100),
 ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE,
-ADD COLUMN IF NOT EXISTS is_deleted_permanent BOOLEAN DEFAULT FALSE;
+ADD COLUMN IF NOT EXISTS is_deleted_permanent BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255),
+ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(50);
+
+-- Make user_id and slot_id nullable for manual entries
+ALTER TABLE appointments ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE appointments ALTER COLUMN slot_id DROP NOT NULL;
 
 -- 3. Users missing columns
 ALTER TABLE users

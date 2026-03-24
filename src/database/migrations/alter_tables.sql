@@ -148,3 +148,14 @@ CREATE TABLE IF NOT EXISTS error_logs (
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ═══════════════════════════════════════
+-- 7. Appointments
+-- ═══════════════════════════════════════
+ALTER TABLE appointments 
+ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255),
+ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(50),
+ADD COLUMN IF NOT EXISTS preferred_date DATE;
+
+ALTER TABLE appointments ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE appointments ALTER COLUMN slot_id DROP NOT NULL;
