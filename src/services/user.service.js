@@ -223,9 +223,48 @@ const deleteAccount = async (userId) => {
     }
 };
 
+/**
+ * Save user profile image
+ * @param {string} userId
+ * @param {Object} file - Express file object (Multer)
+ * @returns {Promise<Object>}
+ */
+const saveProfileImage = async (userId, file) => {
+    const { buffer, mimetype } = file;
+    
+    // Optional: Delete previous image(s) to save space
+    await pool.query('DELETE FROM user_images WHERE user_id = $1', [userId]);
+
+    const query = 'INSERT INTO user_images (user_id, image_data, mime_type) VALUES ($1, $2, $3) RETURNING id';
+    const result = await pool.query(query, [userId, buffer, mimetype]);
+    
+    // Update users.profile_picture_url with a public-facing URL
+    // We use a relative URL that the frontend can append to its base URL
+    const imageUrl = `/v1/users/profile/image/${result.rows[0].id}`;
+    await pool.query('UPDATE users SET profile_picture_url = $1 WHERE id = $2', [imageUrl, userId]);
+    
+    return { id: result.rows[0].id, url: imageUrl };
+};
+
+/**
+ * Get user profile image
+ * @param {string} imageId
+ * @returns {Promise<Object>}
+ */
+const getProfileImage = async (imageId) => {
+    const query = 'SELECT image_data, mime_type FROM user_images WHERE id = $1';
+    const result = await pool.query(query, [imageId]);
+    if (result.rows.length === 0) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Image not found');
+    }
+    return result.rows[0];
+};
+
 module.exports = {
     getUserStats,
     updateProfile,
-    deleteAccount
+    deleteAccount,
+    saveProfileImage,
+    getProfileImage
 };
 

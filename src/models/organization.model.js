@@ -104,7 +104,12 @@ const queryOrganizations = async (filter = {}) => {
         orderBy = `proximity_score DESC, o.created_at DESC`;
     }
 
-    query += ` GROUP BY o.id, p.verified, logo.image_url, logo.id, p.pincode, p.city, p.state ORDER BY ${orderBy}`;
+    query += ` 
+        GROUP BY 
+            o.id, p.id, p.description, p.verified, p.address, p.images, p.city, p.state, p.pincode,
+            logo.image_url, logo.id
+        ORDER BY ${orderBy}
+    `;
     const result = await pool.query(query, params);
     return result.rows;
 };

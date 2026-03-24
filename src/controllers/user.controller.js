@@ -34,9 +34,26 @@ const deleteAccount = catchAsync(async (req, res) => {
     res.status(200).json({ success: true, message: 'Account deleted successfully' });
 });
 
+const uploadProfilePicture = catchAsync(async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded' });
+    }
+    const result = await userService.saveProfileImage(req.user.id, req.file);
+    res.status(200).send(result);
+});
+
+const getUserImage = catchAsync(async (req, res) => {
+    const { imageId } = req.params;
+    const image = await userService.getProfileImage(imageId);
+    res.set('Content-Type', image.mime_type);
+    res.send(image.image_data);
+});
+
 module.exports = {
     getUserStats,
     updateProfile,
-    deleteAccount
+    deleteAccount,
+    uploadProfilePicture,
+    getUserImage
 };
 
