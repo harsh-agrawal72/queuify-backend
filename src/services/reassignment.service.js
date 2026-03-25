@@ -173,6 +173,7 @@ const reassignAppointments = async (slotId) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('[Reassignment] Error:', error.message);
+        console.dir(error, { depth: null });
         throw error;
     } finally {
         client.release();
@@ -239,14 +240,16 @@ const fillSlotFromWaitlist = async (slotId) => {
                  JOIN organizations o ON a.org_id = o.id
                  WHERE a.status IN ('waitlisted_urgent', 'waitlisted_regular', 'pending')
                    AND a.org_id = $1
-                   AND a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
+                   AND (
+                        a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
+                        OR a.service_id = (SELECT service_id FROM resources WHERE id = $2)
+                   )
                    AND (
                         a.pref_resource = 'ANY' 
                         OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
                    )
                    AND (
                        -- For urgent, we must match the date exactly.
-                       -- Using string comparison is more robust against timezone shifts than DATE(timestamp)
                        (a.status = 'waitlisted_urgent' AND a.preferred_date = $3) 
                        -- For pending/waitlisted, we pick them up for any future or same-day slot
                        OR (a.status IN ('waitlisted_regular', 'pending') AND a.preferred_date <= $3)
@@ -264,10 +267,11 @@ const fillSlotFromWaitlist = async (slotId) => {
             const appt = eligibleQuery.rows[0];
             
             // 3. Promote!
+            // Sync date to the new slot's date
             await client.query(
-                `UPDATE appointments SET status = 'confirmed', slot_id = $1, resource_id = $2 
-                 WHERE id = $3`,
-                [slot.id, slot.resource_id, appt.id]
+                `UPDATE appointments SET status = 'confirmed', slot_id = $1, resource_id = $2, preferred_date = $3, created_at = NOW()
+                 WHERE id = $4`,
+                [slot.id, slot.resource_id, localDate, appt.id]
             );
 
             await client.query(
@@ -299,6 +303,7 @@ const fillSlotFromWaitlist = async (slotId) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('[Waitlist-Fill] Error:', error.message);
+        console.dir(error, { depth: null });
     } finally {
         client.release();
     }

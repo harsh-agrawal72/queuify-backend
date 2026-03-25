@@ -1021,9 +1021,10 @@ const getLiveQueue = async (orgId, date) => {
          WHERE a.org_id = $1::uuid
          AND (
              (a.slot_id IS NOT NULL AND sl.start_time >= $2::date AND sl.start_time < $2::date + interval '1 day')
-             OR (a.slot_id IS NULL AND a.created_at >= $2::date AND a.created_at < $2::date + interval '1 day')
+             -- Use preferred_date for pending/waitlisted, or fallback to created_at if preferred_date is null
+             OR (a.slot_id IS NULL AND COALESCE(a.preferred_date, a.created_at::date) = $2::date)
          )
-         AND a.status IN ('pending', 'confirmed', 'serving', 'completed', 'no_show')
+         AND a.status IN ('pending', 'confirmed', 'serving', 'completed', 'no_show', 'waitlisted_urgent')
          ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC`,
         [orgId, queryDate]
     );

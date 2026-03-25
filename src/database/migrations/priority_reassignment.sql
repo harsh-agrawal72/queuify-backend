@@ -3,7 +3,8 @@
 -- 1. Add priority and preference columns to appointments
 ALTER TABLE appointments
 ADD COLUMN IF NOT EXISTS pref_resource VARCHAR(20) DEFAULT 'ANY',
-ADD COLUMN IF NOT EXISTS pref_time VARCHAR(20) DEFAULT 'FLEXIBLE';
+ADD COLUMN IF NOT EXISTS pref_time VARCHAR(20) DEFAULT 'FLEXIBLE',
+ADD COLUMN IF NOT EXISTS preferred_date DATE;
 
 -- 2. Add waitlisted_urgent status to appointment_status enum
 DO $$
