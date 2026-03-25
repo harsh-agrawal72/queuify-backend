@@ -34,12 +34,16 @@ const updateAppointmentStatus = {
     }),
     body: Joi.object().keys({
         status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').required(),
+        reason: Joi.string().optional().allow('', null),
     }),
 };
 
 const deleteAppointment = {
     params: Joi.object().keys({
         appointmentId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+    }),
+    body: Joi.object().keys({
+        reason: Joi.string().optional().allow('', null),
     }),
 };
 

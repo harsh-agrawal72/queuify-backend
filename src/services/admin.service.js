@@ -190,14 +190,14 @@ const getAnalytics = async (orgId, filters = {}) => {
     const kpiQuery = `
         SELECT
             COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE a.status = 'confirmed') AS confirmed,
-            COUNT(*) FILTER (WHERE a.status = 'cancelled') AS cancelled,
-            COUNT(*) FILTER (WHERE a.status = 'completed') AS completed,
-            COUNT(*) FILTER (WHERE a.status = 'pending')   AS pending
+            COUNT(*) FILTER (WHERE a.status::text IN ('confirmed', 'booked', 'serving')) AS confirmed,
+            COUNT(*) FILTER (WHERE a.status::text = 'cancelled') AS cancelled,
+            COUNT(*) FILTER (WHERE a.status::text = 'completed') AS completed,
+            COUNT(*) FILTER (WHERE a.status::text = 'pending')   AS pending
         FROM appointments a
         WHERE a.org_id = $1 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= $2::timestamptz 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' <= $3::timestamptz${extraWhere}
+        AND a.created_at >= $2::timestamptz 
+        AND a.created_at <= $3::timestamptz${extraWhere}
     `;
     const kpiRes = await query(kpiQuery, baseParams);
     const kpi = kpiRes.rows[0];
@@ -222,8 +222,8 @@ const getAnalytics = async (orgId, filters = {}) => {
             COALESCE(SUM(s.max_capacity), 0) AS capacity
         FROM slots s
         WHERE s.org_id = $1 
-        AND s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= $2::timestamptz 
-        AND s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' <= $3::timestamptz${slotExtraWhere}
+        AND s.start_time >= $2::timestamptz 
+        AND s.start_time <= $3::timestamptz${slotExtraWhere}
     `;
     const utilRes = await query(utilQuery, baseParams);
     const bookedTotal = parseInt(utilRes.rows[0].booked) || 0;
@@ -240,12 +240,12 @@ const getAnalytics = async (orgId, filters = {}) => {
     // ═══════════════════════════════════════
     const trendRes = await query(`
         SELECT 
-            TO_CHAR(a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS date, 
+            TO_CHAR(a.created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS date, 
             COUNT(*) AS count
         FROM appointments a
         WHERE a.org_id = $1 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= $2::timestamptz 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' <= $3::timestamptz${extraWhere}
+        AND a.created_at >= $2::timestamptz 
+        AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY date
         ORDER BY date ASC
     `, baseParams);
@@ -273,8 +273,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         FROM appointments a
         JOIN services svc ON a.service_id = svc.id
         WHERE a.org_id = $1 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= $2::timestamptz 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' <= $3::timestamptz${extraWhere}
+        AND a.created_at >= $2::timestamptz 
+        AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY svc.name
         ORDER BY count DESC
     `, baseParams);
@@ -287,8 +287,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         FROM appointments a
         LEFT JOIN resources r ON a.resource_id = r.id
         WHERE a.org_id = $1 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= $2::timestamptz 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' <= $3::timestamptz${extraWhere}
+        AND a.created_at >= $2::timestamptz 
+        AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY r.name
         ORDER BY count DESC
     `, baseParams);
@@ -304,14 +304,14 @@ const getAnalytics = async (orgId, filters = {}) => {
     // ═══════════════════════════════════════
     const heatmapRes = await query(`
         SELECT
-            EXTRACT(DOW FROM sl.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::int AS day,
-            EXTRACT(HOUR FROM sl.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::int AS hour,
+            EXTRACT(DOW FROM sl.start_time AT TIME ZONE 'Asia/Kolkata')::int AS day,
+            EXTRACT(HOUR FROM sl.start_time AT TIME ZONE 'Asia/Kolkata')::int AS hour,
             COUNT(a.id) AS count
         FROM appointments a
         JOIN slots sl ON a.slot_id = sl.id
         WHERE a.org_id = $1 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= $2::timestamptz 
-        AND a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' <= $3::timestamptz${extraWhere}
+        AND a.created_at >= $2::timestamptz 
+        AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY day, hour
         ORDER BY count DESC
     `, baseParams);
