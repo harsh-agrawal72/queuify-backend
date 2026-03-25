@@ -94,11 +94,14 @@ const reassignAppointments = async (slotId) => {
             if (altSlotQuery.rows.length > 0) {
                 const altSlot = altSlotQuery.rows[0];
                 
-                // Update appointment
+                // Update appointment with new slot and sync date
+                const newDate = getLocalDateString(altSlot.start_time);
                 await client.query(
-                    `UPDATE appointments SET slot_id = $1, resource_id = $2, status = 'confirmed' 
-                     WHERE id = $3`,
-                    [altSlot.id, altSlot.resource_id, appt.id]
+                    `UPDATE appointments 
+                     SET slot_id = $1, resource_id = $2, preferred_date = $3, 
+                         created_at = NOW(), status = 'confirmed' 
+                     WHERE id = $4`,
+                    [altSlot.id, altSlot.resource_id, newDate, appt.id]
                 );
 
                 // Update slot booked count
@@ -407,10 +410,11 @@ const rebalanceResourceSlots = async (resourceId, date) => {
 
         // 4. Apply updates and Notify
         for (const update of updates) {
-            // Update appointment
+            // Update appointment and sync date
+            const newDate = getLocalDateString(update.newSlot.originalSlot.start_time);
             await client.query(
-                `UPDATE appointments SET slot_id = $1 WHERE id = $2`,
-                [update.newSlotId, update.apptId]
+                `UPDATE appointments SET slot_id = $1, preferred_date = $2, created_at = NOW() WHERE id = $3`,
+                [update.newSlotId, newDate, update.apptId]
             );
             
             // Notify user
