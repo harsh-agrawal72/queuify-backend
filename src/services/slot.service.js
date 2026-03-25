@@ -201,8 +201,18 @@ const updateSlot = async (slotId, orgId, updateBody) => {
         values.push(slotId);
         const updateQuery = `UPDATE slots SET ${updateFields.join(', ')} WHERE id = $${idx} RETURNING *`;
         const result = await client.query(updateQuery, values);
+        const updatedSlot = result.rows[0];
 
-        return result.rows[0];
+        // If capacity increased, try to fill from waitlist
+        if (max_capacity && max_capacity > slot.max_capacity) {
+            try {
+                await reassignmentService.fillSlotFromWaitlist(slotId);
+            } catch (waitErr) {
+                console.error('[SlotUpdate] Waitlist fill failed:', waitErr.message);
+            }
+        }
+
+        return updatedSlot;
 
     } catch (pkg_err) {
         throw pkg_err;

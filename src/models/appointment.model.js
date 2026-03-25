@@ -316,7 +316,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
         if (apptRes.rows.length === 0) throw new Error('Appointment not found');
         const appt = apptRes.rows[0];
 
-        if (!['pending', 'confirmed', 'waitlisted_urgent', 'waitlisted_regular'].includes(appt.status)) {
+        if (!['pending', 'confirmed', 'waitlisted_urgent'].includes(appt.status)) {
             throw new Error(`Cannot reschedule appointment in ${appt.status} status`);
         }
 

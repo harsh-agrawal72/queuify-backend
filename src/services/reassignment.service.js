@@ -228,8 +228,6 @@ const fillSlotFromWaitlist = async (slotId) => {
         const remainingCapacity = slot.max_capacity - slot.booked_count;
         const localDate = getLocalDateString(slot.start_time);
         
-        console.log(`[Waitlist-Fill] Slot ${slotId} (${slot.resource_name}) at ${slot.start_time} (Local Date: ${localDate}) has ${remainingCapacity} spots left.`);
-
         while (filledCount < remainingCapacity) {
             const eligibleQuery = await client.query(
                 `SELECT a.*, u.email as user_email, u.name as user_name,
@@ -238,29 +236,26 @@ const fillSlotFromWaitlist = async (slotId) => {
                  JOIN users u ON a.user_id = u.id
                  JOIN services s ON a.service_id = s.id
                  JOIN organizations o ON a.org_id = o.id
-                 WHERE a.status IN ('waitlisted_urgent', 'waitlisted_regular', 'pending')
+                 WHERE a.status IN ('waitlisted_urgent', 'pending')
                    AND a.org_id = $1
                    AND (
-                        a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
-                        OR a.service_id = (SELECT service_id FROM resources WHERE id = $2)
+                        -- Use resource_services join which is the primary link
+                        a.service_id IN (SELECT rs.service_id FROM resource_services rs WHERE rs.resource_id = $2)
                    )
                    AND (
                         a.pref_resource = 'ANY' 
                         OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
                    )
                    AND (
-                       -- For urgent, we must match the date exactly.
-                       (a.status = 'waitlisted_urgent' AND a.preferred_date = $3) 
-                       -- For pending/waitlisted, we pick them up for any future or same-day slot
-                       OR (a.status IN ('waitlisted_regular', 'pending') AND a.preferred_date <= $3)
+                        -- For both urgent and pending, we pick them up if their preferred date has come or past
+                        a.preferred_date <= $3::date
                    )
-                 ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.status = 'waitlisted_regular') DESC, a.created_at ASC
+                 ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,
                 [slot.org_id, slot.resource_id, localDate]
             );
 
             if (eligibleQuery.rows.length === 0) {
-                console.log(`[Waitlist-Fill] No more eligible appointments found for slot ${slotId} (Date: ${localDate})`);
                 break;
             }
 
@@ -269,7 +264,7 @@ const fillSlotFromWaitlist = async (slotId) => {
             // 3. Promote!
             // Sync date to the new slot's date
             await client.query(
-                `UPDATE appointments SET status = 'confirmed', slot_id = $1, resource_id = $2, preferred_date = $3, created_at = NOW()
+                `UPDATE appointments SET status = 'confirmed', slot_id = $1, resource_id = $2, preferred_date = $3, updated_at = NOW()
                  WHERE id = $4`,
                 [slot.id, slot.resource_id, localDate, appt.id]
             );
@@ -280,7 +275,6 @@ const fillSlotFromWaitlist = async (slotId) => {
             );
 
             filledCount++;
-            console.log(`[Waitlist-Fill] Appt ${appt.id} promoted from ${appt.status} to confirmed for slot ${slotId}`);
             
             // 4. Notify
             try {
@@ -301,9 +295,8 @@ const fillSlotFromWaitlist = async (slotId) => {
 
         await client.query('COMMIT');
     } catch (error) {
-        await client.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK');
         console.error('[Waitlist-Fill] Error:', error.message);
-        console.dir(error, { depth: null });
     } finally {
         client.release();
     }
