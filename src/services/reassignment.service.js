@@ -234,7 +234,7 @@ const fillSlotFromWaitlist = async (slotId) => {
                  JOIN users u ON a.user_id = u.id
                  JOIN services s ON a.service_id = s.id
                  JOIN organizations o ON a.org_id = o.id
-                 WHERE a.status IN ('waitlisted_urgent', 'waitlisted', 'pending')
+                 WHERE a.status IN ('waitlisted_urgent', 'waitlisted_regular', 'pending')
                    AND a.org_id = $1
                    AND a.service_id IN (SELECT service_id FROM resource_services WHERE resource_id = $2)
                    AND (
@@ -246,15 +246,15 @@ const fillSlotFromWaitlist = async (slotId) => {
                        -- Using string comparison is more robust against timezone shifts than DATE(timestamp)
                        (a.status = 'waitlisted_urgent' AND a.preferred_date = $3) 
                        -- For pending/waitlisted, we pick them up for any future or same-day slot
-                       OR (a.status IN ('waitlisted', 'pending') AND a.preferred_date <= $3)
+                       OR (a.status IN ('waitlisted_regular', 'pending') AND a.preferred_date <= $3)
                    )
-                 ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.status = 'waitlisted') DESC, a.created_at ASC
+                 ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.status = 'waitlisted_regular') DESC, a.created_at ASC
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,
                 [slot.org_id, slot.resource_id, localDate]
             );
 
             if (eligibleQuery.rows.length === 0) {
-                console.log(`[Waitlist-Fill] No more eligible appointments found for slot ${slotId}`);
+                console.log(`[Waitlist-Fill] No more eligible appointments found for slot ${slotId} (Date: ${localDate})`);
                 break;
             }
 
@@ -290,8 +290,6 @@ const fillSlotFromWaitlist = async (slotId) => {
                     status: 'confirmed'
                 });
             } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
-
-            filledCount++;
         }
 
         await client.query('COMMIT');
@@ -336,28 +334,29 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         }
 
         // 2. Get all eligible appointments for this resource on this date
-        // We broadly include all confirmed/pending appointments for this resource on this date
-        // to ensure orphans from deleted/inactive slots are also picked up.
+        // We include confirmed and pending appointments that are currently assigned to ANY slot on this date
+        // for this resource. We join with slots to be robust about the date.
         const apptsRes = await client.query(
             `SELECT a.id, a.slot_id, a.user_id, u.email as user_email, u.name as user_name,
-                    o.name as org_name, s.name as service_name
+                    o.name as org_name, s.name as service_name, a.preferred_date
              FROM appointments a
              JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
+             LEFT JOIN slots sl ON a.slot_id = sl.id
              WHERE a.resource_id = $1
                AND a.status IN ('confirmed', 'pending')
-               AND a.preferred_date = $2
+               AND (
+                   (a.slot_id IS NOT NULL AND TO_CHAR(sl.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2)
+                   OR (a.slot_id IS NULL AND a.preferred_date = $2::date)
+               )
              ORDER BY a.created_at ASC`,
             [resourceId, date]
         );
         const appointments = apptsRes.rows;
 
-        console.log(`[Rebalance] Found ${appointments.length} eligible appointments for date ${date}`);
+        console.log(`[Rebalance] Found ${appointments.length} eligible appointments for resource ${resourceId} on date ${date}`);
         
-        if (appointments.length > 0) {
-            console.log(`[Rebalance] Sample Appointment: ID=${appointments[0].id}, PreferredDate=${appointments[0].preferred_date}, SlotID=${appointments[0].slot_id}`);
-        }
         if (appointments.length === 0) {
             console.log('[Rebalance] Early exit: No appointments found for this resource/date.');
             await client.query('COMMIT');
@@ -391,10 +390,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             // Fallback (redundant with current loop but safe)
             if (!bestSlot) bestSlot = slotDistribution[0];
 
-            console.log(`[Rebalance] Appt ${appt.id}: Old Slot ${appt.slot_id} -> Best Slot ${bestSlot.id}`);
-
-            if (appt.slot_id !== bestSlot.id) {
-                console.log(`[Rebalance] !! MOVE DETECTED !! Appt ${appt.id} moving to ${bestSlot.id}`);
+            if (String(appt.slot_id) !== String(bestSlot.id)) {
                 updates.push({
                     apptId: appt.id,
                     oldSlotId: appt.slot_id,

@@ -27,6 +27,9 @@ ADD COLUMN IF NOT EXISTS is_deleted_permanent BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255),
 ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(50);
 
+-- Ensure token_number is string (handles cases where it might be integer)
+ALTER TABLE appointments ALTER COLUMN token_number TYPE VARCHAR(100);
+
 -- Make user_id and slot_id nullable for manual entries
 ALTER TABLE appointments ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE appointments ALTER COLUMN slot_id DROP NOT NULL;
