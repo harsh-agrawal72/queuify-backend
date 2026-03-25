@@ -46,32 +46,35 @@ const reassignAppointments = async (slotId) => {
             const isUrgent = appt.pref_time === 'URGENT';
             const isSpecific = appt.pref_resource === 'SPECIFIC';
 
-            // 3. Construct the alternative slot query based on preferences
-            // Join with resource_services because slots table doesn't have service_id
-            let searchFilter = `EXISTS (SELECT 1 FROM resource_services rs WHERE rs.resource_id = s.resource_id AND rs.service_id = $1) 
-                                AND s.org_id = $2 AND s.is_active = TRUE AND s.id != $3 AND s.booked_count < s.max_capacity`;
-            const params = [appt.service_id, appt.org_id, slotId];
-
-            if (isSpecific) {
-                searchFilter += ` AND s.resource_id = $${params.length + 1}`;
-                params.push(origSlot.resource_id);
-            }
-
             // Consistent timezone-safe date string (YYYY-MM-DD in India time)
             const localDateStr = getLocalDateString(origSlot.start_time);
+            const origStartTime = new Date(origSlot.start_time).toISOString();
+
+            const params = [appt.service_id, appt.org_id, slotId];
+            let searchFilter = `EXISTS (SELECT 1 FROM resource_services rs WHERE rs.resource_id = s.resource_id AND rs.service_id = $1) 
+                                AND s.org_id = $2 AND s.is_active = TRUE AND s.id != $3 AND s.booked_count < s.max_capacity`;
+
+            if (isSpecific) {
+                params.push(origSlot.resource_id);
+                searchFilter += ` AND s.resource_id = $${params.length}`;
+            }
+
+            params.push(localDateStr);
+            const dateParamIdx = params.length;
+
+            params.push(origStartTime);
+            const startTimeParamIdx = params.length;
 
             if (isUrgent) {
                 // Must be the same local date
                 searchFilter += ` AND (
-                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${params.length + 1}
+                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${dateParamIdx}
                 )`; 
-                params.push(localDateStr);
             } else {
                 // For flexible, we prefer same day but allow FUTURE days
                 searchFilter += ` AND (
-                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') >= $${params.length + 1}
+                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') >= $${dateParamIdx}
                 )`;
-                params.push(localDateStr);
             }
 
             const altSlotQuery = await client.query(
@@ -79,9 +82,11 @@ const reassignAppointments = async (slotId) => {
                  FROM slots s
                  JOIN resources r ON s.resource_id = r.id
                  WHERE ${searchFilter}
-                 ORDER BY (TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${params.length}) DESC, 
-                          (s.booked_count::float / NULLIF(s.max_capacity, 0)::float) ASC, 
-                          ABS(EXTRACT(EPOCH FROM (s.start_time - $${params.length - 1}))) ASC
+                 ORDER BY 
+                    (TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${dateParamIdx}) DESC, 
+                    (s.start_time > $${startTimeParamIdx}::timestamp) DESC, -- Prefer "next" slots
+                    (s.booked_count::float / NULLIF(s.max_capacity, 0)::float) ASC, 
+                    ABS(EXTRACT(EPOCH FROM (s.start_time - $${startTimeParamIdx}::timestamp))) ASC
                  LIMIT 1 FOR UPDATE`,
                 params
             );
