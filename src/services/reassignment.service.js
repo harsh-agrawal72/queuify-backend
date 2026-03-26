@@ -68,12 +68,12 @@ const reassignAppointments = async (slotId) => {
             if (isUrgent) {
                 // Must be the same local date
                 searchFilter += ` AND (
-                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${dateParamIdx}
+                    TO_CHAR(s.start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${dateParamIdx}
                 )`; 
             } else {
                 // For flexible, we prefer same day but allow FUTURE days
                 searchFilter += ` AND (
-                    TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') >= $${dateParamIdx}
+                    TO_CHAR(s.start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') >= $${dateParamIdx}
                 )`;
             }
 
@@ -83,7 +83,7 @@ const reassignAppointments = async (slotId) => {
                  JOIN resources r ON s.resource_id = r.id
                  WHERE ${searchFilter}
                  ORDER BY 
-                    (TO_CHAR(s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${dateParamIdx}) DESC, 
+                    (TO_CHAR(s.start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $${dateParamIdx}) DESC, 
                     (s.start_time > $${startTimeParamIdx}::timestamp) DESC, -- Prefer "next" slots
                     (s.booked_count::float / NULLIF(s.max_capacity, 0)::float) ASC, 
                     ABS(EXTRACT(EPOCH FROM (s.start_time - $${startTimeParamIdx}::timestamp))) ASC
@@ -322,7 +322,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             `SELECT id, start_time, max_capacity, booked_count 
              FROM slots 
              WHERE resource_id = $1 
-               AND TO_CHAR(start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2
+               AND TO_CHAR(start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2
                AND is_active = TRUE
              ORDER BY start_time ASC FOR UPDATE`,
             [resourceId, date]
@@ -352,7 +352,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
              WHERE a.resource_id = $1
                AND a.status IN ('confirmed', 'pending', 'waitlisted_urgent')
                AND (
-                   (a.slot_id IS NOT NULL AND TO_CHAR(sl.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2)
+                   (a.slot_id IS NOT NULL AND TO_CHAR(sl.start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2)
                    OR (a.slot_id IS NULL AND a.preferred_date = $2::date)
                )
              ORDER BY a.created_at ASC`,
@@ -360,10 +360,6 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         );
         const appointments = apptsRes.rows;
 
-        console.log(`[Rebalance] Found ${appointments.length} eligible appointments:`, 
-            appointments.map(a => ({ id: a.id, slot: a.slot_id, status: a.status }))
-        );
-        
         if (appointments.length === 0) {
             console.log('[Rebalance] Early exit: No appointments found for this resource/date.');
             await client.query('COMMIT');
@@ -406,17 +402,13 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             bestSlot.currentBooked++;
         }
 
-        console.log(`[Rebalance] Move simulation complete. Updates needed: ${updates.length}`);
-        updates.forEach(u => console.log(`  -> Appt ${u.apptId}: ${u.oldSlotId} => ${u.newSlotId}`));
-
         // 4. Apply updates and Notify
         for (const update of updates) {
             const newDate = getLocalDateString(update.newSlot.originalSlot.start_time);
-            const res = await client.query(
+            await client.query(
                 `UPDATE appointments SET slot_id = $1, preferred_date = $2, status = 'confirmed', updated_at = NOW() WHERE id = $3`,
                 [update.newSlotId, newDate, update.apptId]
             );
-            console.log(`[Rebalance] DB Update Result for Appt ${update.apptId}:`, res.rowCount);
 
             if (update.appt.user_email) {
                 try {
