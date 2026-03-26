@@ -9,9 +9,8 @@ const poolConfig = {
     database: config.postgres.database,
 };
 
-if (config.env === 'production') {
-    poolConfig.ssl = { rejectUnauthorized: false };
-}
+// Enable SSL for Render database connections
+poolConfig.ssl = { rejectUnauthorized: false };
 
 const pool = new Pool(poolConfig);
 

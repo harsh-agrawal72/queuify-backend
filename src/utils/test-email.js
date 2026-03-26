@@ -1,62 +1,53 @@
 require('dotenv').config();
-const Mailjet = require('node-mailjet');
+const nodemailer = require('nodemailer');
 
-const testMailjet = async () => {
-    console.log('--- Mailjet API Test ---');
-    console.log('API Key:', process.env.MAILJET_API_KEY ? 'Set' : 'Missing');
-    console.log('Secret Key:', process.env.MAILJET_SECRET_KEY ? 'Set' : 'Missing');
+const testSMTP = async () => {
+    console.log('--- SMTP Connection Test ---');
+    console.log('Host:', process.env.SMTP_HOST || 'Missing');
+    console.log('Port:', process.env.SMTP_PORT || 'Missing');
+    console.log('User:', process.env.SMTP_USER || 'Missing');
     console.log('From Email:', process.env.EMAIL_FROM || 'Missing');
     
-    if (!process.env.MAILJET_API_KEY || !process.env.MAILJET_SECRET_KEY) {
-        console.error('FAILED: Mailjet API Keys are missing in .env');
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.error('FAILED: SMTP credentials are missing in .env');
         return;
     }
 
     try {
-        const mailjet = Mailjet.apiConnect(
-            process.env.MAILJET_API_KEY,
-            process.env.MAILJET_SECRET_KEY
-        );
+        const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: parseInt(process.env.SMTP_PORT),
+            secure: parseInt(process.env.SMTP_PORT) === 465, // true for 465
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
 
-        console.log('Sending test email to', process.env.EMAIL_FROM, '...');
+        console.log('Verifying SMTP connection...');
+        await transporter.verify();
+        console.log('SUCCESS: Connected to SMTP server!');
+
+        console.log(`Sending test email to ${process.env.EMAIL_FROM} ...`);
         
-        const result = await mailjet
-            .post("send", { version: 'v3.1' })
-            .request({
-                Messages: [
-                    {
-                        From: {
-                            Email: process.env.EMAIL_FROM,
-                            Name: "Queuify Test"
-                        },
-                        To: [
-                            {
-                                Email: process.env.EMAIL_FROM
-                            }
-                        ],
-                        Subject: 'Mailjet Success Test',
-                        TextPart: 'If you see this, your Mailjet configuration is working perfectly!',
-                    }
-                ]
-            });
+        const result = await transporter.sendMail({
+            from: process.env.EMAIL_FROM,
+            to: process.env.EMAIL_FROM,
+            subject: 'SMTP Success Test',
+            text: 'If you see this, your SMTP configuration is working perfectly!',
+        });
 
-        const status = result.body.Messages[0].Status;
-        if (status === 'success') {
-            console.log('SUCCESS: Test email sent via Mailjet!');
-        } else {
-            console.warn('Mailjet responded with status:', status);
-        }
+        console.log('SUCCESS: Test email sent via SMTP! MessageID:', result.messageId);
     } catch (error) {
-        console.error('FAILED: Mailjet test failed.');
-        console.error('Error Code/Status:', error.statusCode);
-        console.error('Response Message:', error.response ? error.response.statusText : error.message);
+        console.error('FAILED: SMTP test failed.');
+        console.error('Error:', error.message);
         
-        if (error.statusCode === 401) {
-            console.error('ADVICE: Unauthorized. Your Mailjet API Keys are incorrect.');
-        } else if (error.statusCode === 403) {
-            console.error('ADVICE: Forbidden. Your From Email is NOT verified in Mailjet, or your account is suspended.');
+        if (error.message.includes('getaddrinfo')) {
+            console.error('ADVICE: Could not find the host. Your SMTP_HOST is incorrect.');
+        } else if (error.message.includes('timeout') || error.message.includes('timeout')) {
+            console.error('ADVICE: Connection timed out. Ensure the SMTP_PORT is correct and not blocked.');
         }
     }
 };
 
-testMailjet();
+testSMTP();

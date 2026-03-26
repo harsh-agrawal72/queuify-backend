@@ -36,11 +36,13 @@ const bookAppointment = async (appointmentBody) => {
                 const userEmailEnabled = user && user.email_notification_enabled !== false;
                 const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
 
-                if (orgEmailEnabled && userEmailEnabled && user && user.email) {
-                    console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
-                    await emailService.sendBookingConfirmation(user.email, appointmentWithDetails);
-                } else {
-                    console.log(`[Booking-Async] Skipping user email. OrgEnabled: ${orgEmailEnabled}, UserEnabled: ${userEmailEnabled}`);
+                try {
+                    if (orgEmailEnabled && userEmailEnabled && user && user.email) {
+                        console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
+                        await emailService.sendBookingConfirmation(user.email, appointmentWithDetails);
+                    }
+                } catch (emailErr) {
+                    console.error(`[Booking-Async] User email failed:`, emailErr.message);
                 }
 
                 if (org && (org.new_booking_notification === true || org.new_booking_notification === null)) {
@@ -72,9 +74,13 @@ const bookAppointment = async (appointmentBody) => {
                     }
 
                     // Email Notification to Org Contact
-                    if (orgEmailEnabled && org.contact_email) {
-                        console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
-                        await emailService.sendAdminBookingNotification(org.contact_email, appointmentWithDetails);
+                    try {
+                        if (orgEmailEnabled && org.contact_email) {
+                            console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
+                            await emailService.sendAdminBookingNotification(org.contact_email, appointmentWithDetails);
+                        }
+                    } catch (emailErr) {
+                        console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
                     }
                 }
             } catch (e) {
@@ -135,9 +141,13 @@ const cancelAppointment = async (appointmentId, userId) => {
                 const appointmentWithDetails = await appointmentModel.getAppointmentById(appointment.id);
 
                 // 1. Notify User (respecting preference)
-                if (user && user.email && user.email_notification_enabled !== false) {
-                    console.log(`[Cancel-Async] Sending cancellation email to user: ${user.email}`);
-                    await emailService.sendCancellationEmail(user.email, appointmentWithDetails || appointment);
+                try {
+                    if (user && user.email && user.email_notification_enabled !== false) {
+                        console.log(`[Cancel-Async] Sending cancellation email to user: ${user.email}`);
+                        await emailService.sendCancellationEmail(user.email, appointmentWithDetails || appointment);
+                    }
+                } catch (emailErr) {
+                    console.error(`[Cancel-Async] User email failed:`, emailErr.message);
                 }
 
                 await notificationService.sendNotification(
@@ -166,20 +176,24 @@ const cancelAppointment = async (appointmentId, userId) => {
                     }
 
                     // Email Notifications
-                    if (org.email_notification) {
-                        if (org.contact_email) {
-                            console.log(`[Cancel-Async] Sending cancellation email to org contact: ${org.contact_email}`);
-                            await emailService.sendCancellationEmail(org.contact_email, appointmentWithDetails || appointment);
-                        }
+                    try {
+                        if (org.email_notification) {
+                            if (org.contact_email) {
+                                console.log(`[Cancel-Async] Sending cancellation email to org contact: ${org.contact_email}`);
+                                await emailService.sendCancellationEmail(org.contact_email, appointmentWithDetails || appointment);
+                            }
 
-                        if (admins.length > 0) {
-                            for (const admin of admins) {
-                                if (admin.email && admin.email !== org.contact_email) {
-                                    console.log(`[Cancel-Async] Sending cancellation email to secondary admin: ${admin.email}`);
-                                    await emailService.sendCancellationEmail(admin.email, appointmentWithDetails || appointment);
+                            if (admins.length > 0) {
+                                for (const admin of admins) {
+                                    if (admin.email && admin.email !== org.contact_email) {
+                                        console.log(`[Cancel-Async] Sending cancellation email to secondary admin: ${admin.email}`);
+                                        await emailService.sendCancellationEmail(admin.email, appointmentWithDetails || appointment);
+                                    }
                                 }
                             }
                         }
+                    } catch (emailErr) {
+                        console.error(`[Cancel-Async] Admin/Org email failed:`, emailErr.message);
                     }
                 }
             } catch (e) { console.error('[Cancel-Async] FAILURE:', e); }
@@ -370,9 +384,13 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
                     return;
                 }
 
-                if (user && user.email && user.email_notification_enabled !== false) {
-                    console.log(`[UserUpdate-Async] Sending email to user: ${user.email}`);
-                    await emailService.sendStatusUpdateEmail(user.email, appointmentWithDetails);
+                try {
+                    if (user && user.email && user.email_notification_enabled !== false) {
+                        console.log(`[UserUpdate-Async] Sending email to user: ${user.email}`);
+                        await emailService.sendStatusUpdateEmail(user.email, appointmentWithDetails);
+                    }
+                } catch (emailErr) {
+                    console.error(`[UserUpdate-Async] User email failed:`, emailErr.message);
                 }
 
                 await notificationService.sendNotification(
@@ -401,20 +419,24 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
                     }
 
                     // Email Notifications
-                    if (org.email_notification) {
-                        if (org.contact_email) {
-                            console.log(`[UserUpdate-Async] Sending email to org contact: ${org.contact_email}`);
-                            await emailService.sendStatusUpdateEmail(org.contact_email, appointmentWithDetails);
-                        }
+                    try {
+                        if (org.email_notification) {
+                            if (org.contact_email) {
+                                console.log(`[UserUpdate-Async] Sending email to org contact: ${org.contact_email}`);
+                                await emailService.sendStatusUpdateEmail(org.contact_email, appointmentWithDetails);
+                            }
 
-                        if (admins.length > 0) {
-                            for (const admin of admins) {
-                                if (admin.email && admin.email !== org.contact_email) {
-                                    console.log(`[UserUpdate-Async] Sending email to secondary admin: ${admin.email}`);
-                                    await emailService.sendStatusUpdateEmail(admin.email, appointmentWithDetails);
+                            if (admins.length > 0) {
+                                for (const admin of admins) {
+                                    if (admin.email && admin.email !== org.contact_email) {
+                                        console.log(`[UserUpdate-Async] Sending email to secondary admin: ${admin.email}`);
+                                        await emailService.sendStatusUpdateEmail(admin.email, appointmentWithDetails);
+                                    }
                                 }
                             }
                         }
+                    } catch (emailErr) {
+                        console.error(`[UserUpdate-Async] Admin/Org email failed:`, emailErr.message);
                     }
                 }
             } catch (e) {
@@ -625,8 +647,12 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
                 const orgRes = await pool.query('SELECT contact_email, email_notification FROM organizations WHERE id = $1', [appointment.org_id]);
                 const org = orgRes.rows[0];
 
-                if (user && user.email && user.email_notification_enabled !== false) {
-                    await emailService.sendBookingConfirmation(user.email, appointmentWithDetails); // Reuse booking confirmation for new time
+                try {
+                    if (user && user.email && user.email_notification_enabled !== false) {
+                        await emailService.sendBookingConfirmation(user.email, appointmentWithDetails); // Reuse booking confirmation for new time
+                    }
+                } catch (emailErr) {
+                    console.error(`[Reschedule-Async] Email failed:`, emailErr.message);
                 }
 
                 await notificationService.sendNotification(
