@@ -339,14 +339,14 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         // for this resource. We join with slots to be robust about the date.
         const apptsRes = await client.query(
             `SELECT a.id, a.slot_id, a.user_id, u.email as user_email, u.name as user_name,
-                    o.name as org_name, s.name as service_name, a.preferred_date
+                    o.name as org_name, s.name as service_name, a.preferred_date, a.status
              FROM appointments a
              JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
              LEFT JOIN slots sl ON a.slot_id = sl.id
              WHERE a.resource_id = $1
-               AND a.status IN ('confirmed', 'pending')
+               AND a.status IN ('confirmed', 'pending', 'waitlisted_urgent')
                AND (
                    (a.slot_id IS NOT NULL AND TO_CHAR(sl.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2)
                    OR (a.slot_id IS NULL AND a.preferred_date = $2::date)
@@ -391,7 +391,8 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             // Fallback (redundant with current loop but safe)
             if (!bestSlot) bestSlot = slotDistribution[0];
 
-            if (String(appt.slot_id) !== String(bestSlot.id)) {
+            // Only move if the slot actually changes OR if it's currently waitlisted (slot_id is NULL)
+            if (!appt.slot_id || String(appt.slot_id) !== String(bestSlot.id)) {
                 updates.push({
                     apptId: appt.id,
                     oldSlotId: appt.slot_id,
@@ -408,12 +409,13 @@ const rebalanceResourceSlots = async (resourceId, date) => {
 
         // 4. Apply updates and Notify
         for (const update of updates) {
-            // Update appointment and sync date
+            // Update appointment and sync date, PRESERVING created_at for fairness
             const newDate = getLocalDateString(update.newSlot.originalSlot.start_time);
             await client.query(
-                `UPDATE appointments SET slot_id = $1, preferred_date = $2, created_at = NOW() WHERE id = $3`,
+                `UPDATE appointments SET slot_id = $1, preferred_date = $2, status = 'confirmed', updated_at = NOW() WHERE id = $3`,
                 [update.newSlotId, newDate, update.apptId]
             );
+
             
             // Notify user
             try {
