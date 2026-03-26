@@ -602,7 +602,8 @@ const getAppointments = async (orgId, queryParams) => {
             s.start_time, 
             s.end_time,
             svc.name as service_name,
-            r.name as resource_name
+            r.name as resource_name,
+            a.preferred_date
         FROM appointments a
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN slots s ON a.slot_id = s.id
@@ -631,7 +632,7 @@ const getAppointments = async (orgId, queryParams) => {
         // Use DATE() to compare only the date part of start_time (if slot exists) or created_at (if waitlist)
         queryText += ` AND (
             (a.slot_id IS NOT NULL AND DATE(s.start_time) = $${paramCount}) OR
-            (a.slot_id IS NULL AND DATE(a.created_at) = $${paramCount})
+            (a.slot_id IS NULL AND (a.preferred_date = $${paramCount} OR (a.preferred_date IS NULL AND DATE(a.created_at) = $${paramCount})))
         )`;
         params.push(date);
     }
@@ -672,11 +673,11 @@ const getAppointments = async (orgId, queryParams) => {
 
         if (date) {
             countParamCount++;
-            countQuery += ` AND (
-                (a.slot_id IS NOT NULL AND DATE(s.start_time) = $${countParamCount}) OR
-                (a.slot_id IS NULL AND DATE(a.created_at) = $${countParamCount})
-            )`;
-            countParams.push(date);
+        countQuery += ` AND (
+            (a.slot_id IS NOT NULL AND DATE(s.start_time) = $${countParamCount}) OR
+            (a.slot_id IS NULL AND (a.preferred_date = $${countParamCount} OR (a.preferred_date IS NULL AND DATE(a.created_at) = $${countParamCount})))
+        )`;
+        countParams.push(date);
         }
 
         if (search) {
