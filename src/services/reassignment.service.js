@@ -329,7 +329,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         );
         const slots = slotsRes.rows;
 
-        console.log(`[Rebalance] Found ${slots.length} active slots`);
+        console.log(`[Rebalance] Found ${slots.length} active slots for resource ${resourceId} on ${date}:`, 
+            slots.map(s => ({ id: s.id, time: s.start_time, cap: s.max_capacity, booked: s.booked_count }))
+        );
 
         if (slots.length < 2) {
             console.log('[Rebalance] Early exit: Not enough slots to rebalance (< 2).');
@@ -338,8 +340,6 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         }
 
         // 2. Get all eligible appointments for this resource on this date
-        // We include confirmed and pending appointments that are currently assigned to ANY slot on this date
-        // for this resource. We join with slots to be robust about the date.
         const apptsRes = await client.query(
             `SELECT a.id, a.slot_id, a.user_id, a.status, a.created_at,
                     u.email as user_email, u.name as user_name,
@@ -360,7 +360,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         );
         const appointments = apptsRes.rows;
 
-        console.log(`[Rebalance] Found ${appointments.length} eligible appointments for resource ${resourceId} on date ${date}`);
+        console.log(`[Rebalance] Found ${appointments.length} eligible appointments:`, 
+            appointments.map(a => ({ id: a.id, slot: a.slot_id, status: a.status }))
+        );
         
         if (appointments.length === 0) {
             console.log('[Rebalance] Early exit: No appointments found for this resource/date.');
@@ -368,7 +370,6 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             return { message: 'No appointments to rebalance', movedCount: 0, totalProcessed: 0 };
         }
         // 3. Fair Redistribution Logic
-        // Reset all slots booked_count temporarily in memory for distribution
         const slotDistribution = slots.map(s => ({ 
             id: s.id, 
             max_capacity: parseInt(s.max_capacity) || 1, 
@@ -379,8 +380,6 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         const updates = [];
 
         for (const appt of appointments) {
-            // Find slot with lowest occupancy percentage
-            // Prefer slots that are earlier if occupancy is tied (already sorted by start_time)
             let bestSlot = null;
             let minOccupancy = Infinity;
 
@@ -392,10 +391,8 @@ const rebalanceResourceSlots = async (resourceId, date) => {
                 }
             }
 
-            // Fallback (redundant with current loop but safe)
             if (!bestSlot) bestSlot = slotDistribution[0];
 
-            // Only move if the slot actually changes OR if it's currently waitlisted (slot_id is NULL)
             if (!appt.slot_id || String(appt.slot_id) !== String(bestSlot.id)) {
                 updates.push({
                     apptId: appt.id,
@@ -409,18 +406,18 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             bestSlot.currentBooked++;
         }
 
-        console.log(`[Rebalance] Identified ${updates.length} necessary moves out of ${appointments.length} appointments`);
+        console.log(`[Rebalance] Move simulation complete. Updates needed: ${updates.length}`);
+        updates.forEach(u => console.log(`  -> Appt ${u.apptId}: ${u.oldSlotId} => ${u.newSlotId}`));
 
         // 4. Apply updates and Notify
         for (const update of updates) {
-            // Update appointment and sync date, PRESERVING created_at for fairness
             const newDate = getLocalDateString(update.newSlot.originalSlot.start_time);
-            await client.query(
+            const res = await client.query(
                 `UPDATE appointments SET slot_id = $1, preferred_date = $2, status = 'confirmed', updated_at = NOW() WHERE id = $3`,
                 [update.newSlotId, newDate, update.apptId]
             );
+            console.log(`[Rebalance] DB Update Result for Appt ${update.apptId}:`, res.rowCount);
 
-            // Notify user only if they have a linked account (email available)
             if (update.appt.user_email) {
                 try {
                     await emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot);
@@ -428,6 +425,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
                     console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
                 }
             }
+
 
             // Emit Socket Update if user is logged in
             if (update.appt.user_id) {
