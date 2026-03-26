@@ -338,10 +338,11 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         // We include confirmed and pending appointments that are currently assigned to ANY slot on this date
         // for this resource. We join with slots to be robust about the date.
         const apptsRes = await client.query(
-            `SELECT a.id, a.slot_id, a.user_id, u.email as user_email, u.name as user_name,
-                    o.name as org_name, s.name as service_name, a.preferred_date, a.status
+            `SELECT a.id, a.slot_id, a.user_id, a.status, a.created_at,
+                    u.email as user_email, u.name as user_name,
+                    o.name as org_name, s.name as service_name, a.preferred_date
              FROM appointments a
-             JOIN users u ON a.user_id = u.id
+             LEFT JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
              LEFT JOIN slots sl ON a.slot_id = sl.id
@@ -416,23 +417,27 @@ const rebalanceResourceSlots = async (resourceId, date) => {
                 [update.newSlotId, newDate, update.apptId]
             );
 
-            
-            // Notify user
-            try {
-                await emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot);
-            } catch (err) {
-                console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
+            // Notify user only if they have a linked account (email available)
+            if (update.appt.user_email) {
+                try {
+                    await emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot);
+                } catch (err) {
+                    console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
+                }
             }
 
-            // Emit Socket Update
-            try {
-                socket.getIO().to(`user_${update.appt.user_id}`).emit('appointment_updated', {
-                    appointmentId: update.apptId,
-                    type: 'rebalance',
-                    status: 'confirmed'
-                });
-            } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
+            // Emit Socket Update if user is logged in
+            if (update.appt.user_id) {
+                try {
+                    socket.getIO().to(`user_${update.appt.user_id}`).emit('appointment_updated', {
+                        appointmentId: update.apptId,
+                        type: 'rebalance',
+                        status: 'confirmed'
+                    });
+                } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
+            }
         }
+
 
         // 5. Update slot booked counts in DB
         for (const s of slotDistribution) {
