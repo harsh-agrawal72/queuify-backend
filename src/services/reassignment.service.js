@@ -25,7 +25,7 @@ const reassignAppointments = async (slotId) => {
             `SELECT a.*, u.email as user_email, u.name as user_name,
                     s.name as service_name, o.name as org_name
              FROM appointments a
-             JOIN users u ON a.user_id = u.id
+             LEFT JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
              WHERE a.slot_id = $1 AND a.status IN ('pending', 'confirmed')
@@ -99,7 +99,7 @@ const reassignAppointments = async (slotId) => {
                 await client.query(
                     `UPDATE appointments 
                      SET slot_id = $1, resource_id = $2, preferred_date = $3, 
-                         created_at = NOW(), status = 'confirmed' 
+                         status = 'confirmed' 
                      WHERE id = $4`,
                     [altSlot.id, altSlot.resource_id, newDate, appt.id]
                 );
@@ -233,7 +233,7 @@ const fillSlotFromWaitlist = async (slotId) => {
                 `SELECT a.*, u.email as user_email, u.name as user_name,
                         s.name as service_name, o.name as org_name
                  FROM appointments a
-                 JOIN users u ON a.user_id = u.id
+                 LEFT JOIN users u ON a.user_id = u.id
                  JOIN services s ON a.service_id = s.id
                  JOIN organizations o ON a.org_id = o.id
                  WHERE a.status IN ('waitlisted_urgent', 'pending')
@@ -277,10 +277,13 @@ const fillSlotFromWaitlist = async (slotId) => {
             filledCount++;
             
             // 4. Notify
-            try {
-                await emailService.sendReassignmentEmail(appt.user_email, appt, slot);
-            } catch (err) {
-                console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
+            // Notify user only if email is available
+            if (appt.user_email) {
+                try {
+                    await emailService.sendReassignmentEmail(appt.user_email, appt, slot);
+                } catch (err) {
+                    console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
+                }
             }
 
             // Emit Socket Update

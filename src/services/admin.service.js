@@ -127,10 +127,8 @@ const getTodayQueue = async (orgId) => {
             )
             ORDER BY a.created_at ASC
         ) as queue_number,
-        svc.name as service_name, r.name as resource_name
-        FROM appointments a
-        JOIN users u ON a.user_id = u.id
         JOIN services svc ON a.service_id = svc.id
+        LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN resources r ON a.resource_id = r.id
         LEFT JOIN slots sl ON a.slot_id = sl.id
         WHERE a.org_id = $1 
