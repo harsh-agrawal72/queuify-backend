@@ -204,7 +204,7 @@ module.exports = {
         `);
         await sendEmail(to, subject, html);
     },
-    
+
     sendWelcomeEmail: async (to, name) => {
         const subject = 'Welcome to Queuify!';
         const html = wrapInProfessionalLayout(`

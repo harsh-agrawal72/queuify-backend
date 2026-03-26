@@ -1,47 +1,62 @@
 require('dotenv').config();
-const nodemailer = require('nodemailer');
+const Mailjet = require('node-mailjet');
 
-const testEmail = async () => {
-    console.log('--- SMTP Connection Test ---');
-    console.log('Host:', process.env.SMTP_HOST);
-    console.log('Port:', process.env.SMTP_PORT);
-    console.log('User:', process.env.SMTP_USERNAME);
+const testMailjet = async () => {
+    console.log('--- Mailjet API Test ---');
+    console.log('API Key:', process.env.MAILJET_API_KEY ? 'Set' : 'Missing');
+    console.log('Secret Key:', process.env.MAILJET_SECRET_KEY ? 'Set' : 'Missing');
+    console.log('From Email:', process.env.EMAIL_FROM || 'Missing');
     
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT,
-        secure: Number(process.env.SMTP_PORT) === 465,
-        family: 4, // Force IPv4
-        auth: {
-            user: process.env.SMTP_USERNAME,
-            pass: process.env.SMTP_PASSWORD,
-        },
-        connectionTimeout: 10000,
-    });
+    if (!process.env.MAILJET_API_KEY || !process.env.MAILJET_SECRET_KEY) {
+        console.error('FAILED: Mailjet API Keys are missing in .env');
+        return;
+    }
 
     try {
-        console.log('Verifying connection...');
-        await transporter.verify();
-        console.log('SUCCESS: SMTP server is ready to take our messages!');
-        
+        const mailjet = Mailjet.apiConnect(
+            process.env.MAILJET_API_KEY,
+            process.env.MAILJET_SECRET_KEY
+        );
+
         console.log('Sending test email to', process.env.EMAIL_FROM, '...');
-        await transporter.sendMail({
-            from: process.env.EMAIL_FROM,
-            to: process.env.SMTP_USERNAME,
-            subject: 'SMTP Success Test',
-            text: 'If you see this, your SMTP configuration on Render is working perfectly!',
-        });
-        console.log('SUCCESS: Test email sent!');
+        
+        const result = await mailjet
+            .post("send", { version: 'v3.1' })
+            .request({
+                Messages: [
+                    {
+                        From: {
+                            Email: process.env.EMAIL_FROM,
+                            Name: "Queuify Test"
+                        },
+                        To: [
+                            {
+                                Email: process.env.EMAIL_FROM
+                            }
+                        ],
+                        Subject: 'Mailjet Success Test',
+                        TextPart: 'If you see this, your Mailjet configuration is working perfectly!',
+                    }
+                ]
+            });
+
+        const status = result.body.Messages[0].Status;
+        if (status === 'success') {
+            console.log('SUCCESS: Test email sent via Mailjet!');
+        } else {
+            console.warn('Mailjet responded with status:', status);
+        }
     } catch (error) {
-        console.error('FAILED: SMTP test failed.');
-        console.error('Error Message:', error.message);
-        console.error('Error Code:', error.code);
-        if (error.code === 'ETIMEDOUT') {
-            console.error('ADVICE: This is a timeout. Render is likely blocking outbound SMTP ports.');
-        } else if (error.code === 'ENETUNREACH') {
-            console.error('ADVICE: Network unreachable. This often happens with IPv6 issues.');
+        console.error('FAILED: Mailjet test failed.');
+        console.error('Error Code/Status:', error.statusCode);
+        console.error('Response Message:', error.response ? error.response.statusText : error.message);
+        
+        if (error.statusCode === 401) {
+            console.error('ADVICE: Unauthorized. Your Mailjet API Keys are incorrect.');
+        } else if (error.statusCode === 403) {
+            console.error('ADVICE: Forbidden. Your From Email is NOT verified in Mailjet, or your account is suspended.');
         }
     }
 };
 
-testEmail();
+testMailjet();
