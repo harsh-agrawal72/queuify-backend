@@ -349,7 +349,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
              JOIN services s ON a.service_id = s.id
              JOIN organizations o ON a.org_id = o.id
              LEFT JOIN slots sl ON a.slot_id = sl.id
-             WHERE a.resource_id = $1
+             WHERE (a.resource_id = $1 OR sl.resource_id = $1)
                AND a.status IN ('confirmed', 'pending', 'waitlisted_urgent')
                AND (
                    (a.slot_id IS NOT NULL AND TO_CHAR(sl.start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $2)
@@ -406,8 +406,8 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         for (const update of updates) {
             const newDate = getLocalDateString(update.newSlot.originalSlot.start_time);
             await client.query(
-                `UPDATE appointments SET slot_id = $1, preferred_date = $2, status = 'confirmed', updated_at = NOW() WHERE id = $3`,
-                [update.newSlotId, newDate, update.apptId]
+                `UPDATE appointments SET slot_id = $1, resource_id = $2, preferred_date = $3, status = 'confirmed', updated_at = NOW() WHERE id = $4`,
+                [update.newSlotId, resourceId, newDate, update.apptId]
             );
 
             if (update.appt.user_email) {
