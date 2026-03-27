@@ -1,13 +1,10 @@
-const Mailjet = require('node-mailjet');
+const { Resend } = require('resend');
 const config = require('../config/config');
 
 const VERSION_TAG = "[EMAIL-SERVICE]";
-console.log(`${VERSION_TAG} Initializing Mailjet API Client...`);
+console.log(`${VERSION_TAG} Initializing Resend API Client...`);
 
-const mailjet = Mailjet.apiConnect(
-    config.email.mailjet.apiKey || 'placeholder',
-    config.email.mailjet.apiSecret || 'placeholder'
-);
+const resend = new Resend(config.email.resend.apiKey || 're_placeholder');
 
 const wrapInProfessionalLayout = (content) => `
     <!DOCTYPE html>
@@ -46,38 +43,24 @@ const wrapInProfessionalLayout = (content) => `
 
 const sendEmail = async (to, subject, html) => {
     try {
-        console.log(`${VERSION_TAG} Sending email via Mailjet API to: ${to}`);
+        console.log(`${VERSION_TAG} Sending email via Resend API to: ${to}`);
 
-        const request = await mailjet
-            .post("send", { 'version': 'v3.1' })
-            .request({
-                "Messages": [
-                    {
-                        "From": {
-                            "Email": config.email.from,
-                            "Name": "Queuify Support"
-                        },
-                        "To": [
-                            {
-                                "Email": to,
-                                "Name": to.split('@')[0]
-                            }
-                        ],
-                        "Subject": subject,
-                        "HTMLPart": html
-                    }
-                ]
-            });
+        const { data, error } = await resend.emails.send({
+            from: `Queuify <support@queuify.in>`, // Verified domain queuify.in
+            to: [to],
+            subject: subject,
+            html: html,
+        });
 
-        console.log(`${VERSION_TAG} Email sent successfully via Mailjet API. Status: ${request.response.status}`);
-        return request.body;
-    } catch (error) {
-        console.error(`${VERSION_TAG} Mailjet API Error for ${to}:`, error.statusCode);
-        if (error.response && error.response.body) {
-            console.error(`${VERSION_TAG} Error details:`, JSON.stringify(error.response.body, null, 2));
-        } else {
-            console.error(`${VERSION_TAG} Error message:`, error.message);
+        if (error) {
+            console.error(`${VERSION_TAG} Resend API Error for ${to}:`, error.name, error.message);
+            throw error;
         }
+
+        console.log(`${VERSION_TAG} Email sent successfully via Resend API. ID: ${data.id}`);
+        return data;
+    } catch (error) {
+        console.error(`${VERSION_TAG} unexpected error for ${to}:`, error.message);
         throw error;
     }
 };

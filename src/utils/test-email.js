@@ -1,13 +1,13 @@
 const { sendEmail } = require('../services/email.service');
 
-async function testMailjet() {
-    console.log('--- Mailjet API Test ---');
+async function testResend() {
+    console.log('--- Resend API Test ---');
     try {
-        const to = 'harshagrawal7274@gmail.com';
-        const subject = 'Queuify Mailjet API Test';
+        const to = 'harshagrawal93557@gmail.com';
+        const subject = 'Queuify Resend API Test';
         const html = `
-            <h1>Mailjet API Test Successful</h1>
-            <p>This email was sent via the <strong>Mailjet REST API</strong> to bypass SMTP port restrictions on Render.</p>
+            <h1>Resend API Test Successful</h1>
+            <p>This email was sent via the <strong>Resend REST API</strong> to bypass SMTP port restrictions on Render.</p>
             <p>Time: ${new Date().toLocaleString()}</p>
         `;
 
@@ -16,9 +16,9 @@ async function testMailjet() {
         console.log('Success! Result:', JSON.stringify(result, null, 2));
     } catch (error) {
         console.error('Test Failed!');
-        console.error('Check your MAILJET_API_KEY and MAILJET_API_SECRET in .env');
+        console.error('Check your RESEND_API_KEY in .env');
         console.error('Error:', error.message);
     }
 }
 
-testMailjet();
+testResend();

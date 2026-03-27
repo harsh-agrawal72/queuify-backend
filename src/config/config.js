@@ -19,8 +19,7 @@ const envVarsSchema = Joi.object()
         SMTP_PORT: Joi.number().description('port to connect to the email server'),
         SMTP_USER: Joi.string().description('username for email server'),
         SMTP_PASS: Joi.string().description('password for email server'),
-        MAILJET_API_KEY: Joi.string().description('Mailjet API Key'),
-        MAILJET_API_SECRET: Joi.string().description('Mailjet API Secret'),
+        RESEND_API_KEY: Joi.string().description('Resend API Key'),
         EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
         CLIENT_URL: Joi.string().required().description('Client url'),
         GOOGLE_CLIENT_ID: Joi.string().required().description('Google Client ID'),
@@ -60,6 +59,9 @@ module.exports = {
         mailjet: {
             apiKey: envVars.MAILJET_API_KEY,
             apiSecret: envVars.MAILJET_API_SECRET,
+        },
+        resend: {
+            apiKey: envVars.RESEND_API_KEY,
         },
         from: envVars.EMAIL_FROM,
     },
