@@ -1082,10 +1082,11 @@ const createManualAppointment = async (orgId, appointmentData) => {
 
 const getNotifications = async (userId) => {
     // Fetch notifications from the actual notifications table for THIS user (the admin)
+    // Only fetch notifications intended for the admin dashboard (starting with /admin/)
     const res = await pool.query(
         `SELECT id, title, message, created_at as time, is_read, type, link
          FROM notifications 
-         WHERE user_id = $1 
+         WHERE user_id = $1 AND link LIKE '/admin/%'
          ORDER BY created_at DESC 
          LIMIT 20`,
         [userId]

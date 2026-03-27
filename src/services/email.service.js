@@ -12,6 +12,10 @@ const transporter = nodemailer.createTransport({
         user: config.email.smtp.user,
         pass: config.email.smtp.pass,
     },
+    // Force IPv4 to avoid ENETUNREACH issues with IPv6 on some networks
+    family: 4,
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000,
 });
 
 transporter.verify().then(() => {

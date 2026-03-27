@@ -34,20 +34,19 @@ const checkReminders = async () => {
         for (const appt of appointments) {
             console.log(`[Cron] Sending reminder for appt ${appt.id} to ${appt.email}`);
 
-            try {
-                await emailService.sendReminderEmail(appt.email, {
-                    id: appt.id,
-                    startTime: appt.start_time,
-                    userName: appt.user_name,
-                    orgName: appt.org_name,
-                    serviceName: appt.service_name
-                });
+            // Send reminder asynchronously
+            emailService.sendReminderEmail(appt.email, {
+                id: appt.id,
+                startTime: appt.start_time,
+                userName: appt.user_name,
+                orgName: appt.org_name,
+                serviceName: appt.service_name
+            }).catch(err => {
+                console.error(`[Cron] Failed to send reminder for appt ${appt.id}:`, err.message);
+            });
 
-                // Mark as sent
-                await pool.query('UPDATE appointments SET reminder_sent = TRUE WHERE id = $1', [appt.id]);
-            } catch (err) {
-                console.error(`[Cron] Failed to send reminder for appt ${appt.id}:`, err);
-            }
+            // Mark as sent immediately (best effort to avoid duplicates)
+            await pool.query('UPDATE appointments SET reminder_sent = TRUE WHERE id = $1', [appt.id]);
         }
     } catch (err) {
         console.error('Reminder cron failed:', err);

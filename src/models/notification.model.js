@@ -17,7 +17,10 @@ const createNotification = async (data) => {
  */
 const getUserNotifications = async (userId) => {
     const result = await pool.query(
-        'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
+        `SELECT * FROM notifications 
+         WHERE user_id = $1 AND (link NOT LIKE '/admin/%' OR link IS NULL)
+         ORDER BY created_at DESC 
+         LIMIT 50`,
         [userId]
     );
     return result.rows;

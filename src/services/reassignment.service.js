@@ -123,10 +123,10 @@ const reassignAppointments = async (slotId) => {
                 } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
                 
                 // Notify user
-                try {
-                    await emailService.sendReassignmentEmail(appt.user_email, appt, altSlot);
-                } catch (emailErr) {
-                    console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
+                if (appt.user_email) {
+                    emailService.sendReassignmentEmail(appt.user_email, appt, altSlot).catch(emailErr => {
+                        console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
+                    });
                 }
             }
 
@@ -138,11 +138,9 @@ const reassignAppointments = async (slotId) => {
                         [appt.id]
                     );
                     console.log(`[Reassignment] Appt ${appt.id} marked as WAITLISTED_URGENT (No slots today)`);
-                    try {
-                        await emailService.sendWaitlistEmail(appt.user_email, appt);
-                    } catch (emailErr) {
-                        console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
-                    }
+                    emailService.sendWaitlistEmail(appt.user_email, appt).catch(emailErr => {
+                        console.error(`[Reassignment-Waitlist] Email failed for ${appt.user_email}:`, emailErr.message);
+                    });
                 } else {
                     // Standard reschedule/pending
                     await client.query(
@@ -150,11 +148,9 @@ const reassignAppointments = async (slotId) => {
                         [appt.id]
                     );
                     console.log(`[Reassignment] Appt ${appt.id} marked as PENDING (Needs Rescheduling)`);
-                    try {
-                        await emailService.sendRescheduleEmail(appt.user_email, appt);
-                    } catch (emailErr) {
-                        console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
-                    }
+                    emailService.sendRescheduleEmail(appt.user_email, appt).catch(emailErr => {
+                        console.error(`[Reassignment-Reschedule] Email failed for ${appt.user_email}:`, emailErr.message);
+                    });
 
                     // Emit Socket Update
                     try {
@@ -279,11 +275,9 @@ const fillSlotFromWaitlist = async (slotId) => {
             // 4. Notify
             // Notify user only if email is available
             if (appt.user_email) {
-                try {
-                    await emailService.sendReassignmentEmail(appt.user_email, appt, slot);
-                } catch (err) {
+                emailService.sendReassignmentEmail(appt.user_email, appt, slot).catch(err => {
                     console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
-                }
+                });
             }
 
             // Emit Socket Update
@@ -411,11 +405,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             );
 
             if (update.appt.user_email) {
-                try {
-                    await emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot);
-                } catch (err) {
+                emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot).catch(err => {
                     console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
-                }
+                });
             }
 
 

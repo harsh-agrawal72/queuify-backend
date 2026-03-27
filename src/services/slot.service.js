@@ -137,16 +137,21 @@ const deleteSlot = async (slotId, orgId) => {
             [slotId, orgId]
         );
 
+        await client.query('COMMIT');
+
         // Run reassignment logic ONLY for future or today's slots
         // Past slots don't need reassignment as they already happened
         if (!isPast) {
-            console.log(`[deleteSlot] Triggering reassignment for future/current slot ${slotId}`);
-            await reassignmentService.reassignAppointments(slotId);
+            console.log(`[deleteSlot] Triggering background reassignment for future/current slot ${slotId}`);
+            setImmediate(() => {
+                reassignmentService.reassignAppointments(slotId).catch(err => {
+                    console.error(`[Reassignment-Background] Error for slot ${slotId}:`, err.message);
+                });
+            });
         } else {
             console.log(`[deleteSlot] Skipping reassignment for past slot ${slotId}`);
         }
 
-        await client.query('COMMIT');
         return slot;
 
     } catch (err) {

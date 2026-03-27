@@ -316,7 +316,10 @@ const forgotPassword = async (email) => {
     const resetPasswordToken = await tokenService.generateResetPasswordToken(email);
     const resetPasswordUrl = `${config.clientUrl}/reset-password?token=${resetPasswordToken}`;
 
-    await emailService.sendForgotPasswordEmail(email, resetPasswordUrl);
+    // Background the email delivery to prevent API timeouts if the SMTP server is slow
+    emailService.sendForgotPasswordEmail(email, resetPasswordUrl).catch(err => {
+        console.error(`[EMAIL-SERVICE] Background forgot-password email failed for ${email}:`, err.message);
+    });
 };
 
 const setPassword = async (token, newPassword) => {
