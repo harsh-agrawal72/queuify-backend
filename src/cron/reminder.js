@@ -5,58 +5,82 @@ const emailService = require('../services/email.service');
 const checkReminders = async () => {
     try {
         const now = new Date();
+        const appointmentService = require('../services/appointment.service');
+        const notificationService = require('../services/notification.service');
 
-        // Window for 15-minute reminder (between 10 and 25 minutes from now)
-        // This ensures that even if the cron runs every 5-10 mins, we catch the window.
-        const rangeStart = new Date(now.getTime() + 10 * 60 * 1000);
-        const rangeEnd = new Date(now.getTime() + 25 * 60 * 1000);
-
+        // 1. Fetch appointments that haven't received a reminder yet and are scheduled for today
         const query = `
-            SELECT a.id, a.user_id, s.start_time, u.email, u.name as user_name, o.name as org_name, svc.name as service_name
+            SELECT a.id, a.user_id, a.service_id, a.resource_id, a.org_id, a.slot_id, 
+                   u.email, u.name as user_name, u.email_notification_enabled,
+                   o.name as org_name, svc.name as service_name
             FROM appointments a
             JOIN slots s ON a.slot_id = s.id
             JOIN users u ON a.user_id = u.id
             JOIN organizations o ON a.org_id = o.id
             JOIN services svc ON a.service_id = svc.id
-            WHERE a.status = 'confirmed' 
+            WHERE a.status IN ('confirmed', 'pending')
             AND a.reminder_sent = FALSE
-            AND u.email_notification_enabled IS NOT FALSE
-            AND s.start_time BETWEEN $1 AND $2
+            AND s.start_time >= $1
+            AND s.start_time <= $2
         `;
 
-        const res = await pool.query(query, [rangeStart, rangeEnd]);
-        const appointments = res.rows;
+        // Look at candidates in a generous 4-hour window from now to account for delays/early progress
+        const lookAheadStart = new Date(now.getTime() - 30 * 60000); // 30 mins ago
+        const lookAheadEnd = new Date(now.getTime() + 4 * 60 * 60000); // 4 hours ahead
+        
+        const res = await pool.query(query, [lookAheadStart, lookAheadEnd]);
+        const candidates = res.rows;
 
-        if (appointments.length > 0) {
-            console.log(`[Cron] Found ${appointments.length} appointments for 15-min reminder.`);
-        }
+        for (const appt of candidates) {
+            try {
+                // 2. Get AI-powered status
+                const status = await appointmentService.getQueueStatus(appt.id);
+                if (!status.expected_start_time) continue;
 
-        for (const appt of appointments) {
-            console.log(`[Cron] Sending reminder for appt ${appt.id} to ${appt.email}`);
+                const expectedTime = new Date(status.expected_start_time);
+                const diffMinutes = (expectedTime.getTime() - now.getTime()) / 60000;
 
-            // Send reminder asynchronously
-            emailService.sendReminderEmail(appt.email, {
-                id: appt.id,
-                startTime: appt.start_time,
-                userName: appt.user_name,
-                orgName: appt.org_name,
-                serviceName: appt.service_name
-            }).catch(err => {
-                console.error(`[Cron] Failed to send reminder for appt ${appt.id}:`, err.message);
-            });
+                // 3. TARGET: 30-Minute Reminder (Window: 25 to 35 mins)
+                if (diffMinutes >= 25 && diffMinutes <= 35) {
+                    console.log(`[Cron-AI] Sending 30-min arrival reminder for appt ${appt.id}`);
 
-            // Mark as sent immediately (best effort to avoid duplicates)
-            await pool.query('UPDATE appointments SET reminder_sent = TRUE WHERE id = $1', [appt.id]);
+                    // A. In-App Notification
+                    await notificationService.sendNotification(
+                        appt.user_id,
+                        '⏰ Arrival Reminder',
+                        `Your appointment for ${appt.service_name} at ${appt.org_name} is in approx. 30 mins. Please arrive on time.`,
+                        'appointment',
+                        `/appointments/${appt.id}/queue`
+                    );
+
+                    // B. Email Notification
+                    if (appt.email && appt.email_notification_enabled !== false) {
+                        await emailService.sendReminderEmail(appt.email, {
+                            id: appt.id,
+                            startTime: expectedTime,
+                            userName: appt.user_name,
+                            orgName: appt.org_name,
+                            serviceName: appt.service_name,
+                            isAI: true
+                        }).catch(e => console.error(`[Cron-Email] Failed:`, e.message));
+                    }
+
+                    // C. Mark as sent
+                    await pool.query('UPDATE appointments SET reminder_sent = TRUE WHERE id = $1', [appt.id]);
+                }
+            } catch (innerErr) {
+                console.error(`[Cron-AI] Error processing appt ${appt.id}:`, innerErr.message);
+            }
         }
     } catch (err) {
-        console.error('Reminder cron failed:', err);
+        console.error('AI Reminder cron failed:', err);
     }
 };
 
-// Run every 5 minutes
+// Run every 2 minutes
 const init = () => {
-    cron.schedule('*/5 * * * *', checkReminders);
-    console.log('Reminder cron job initialized (Target: 15-min window)');
+    cron.schedule('*/2 * * * *', checkReminders);
+    console.log('AI-Powered Arrival Reminder cron initialized (Target: 30-min window)');
 };
 
 module.exports = {

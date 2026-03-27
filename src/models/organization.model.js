@@ -74,6 +74,7 @@ const queryOrganizations = async (filter = {}) => {
             OR o.type ILIKE $${searchIdx}
             OR o.address ILIKE $${searchIdx}
             OR p.description ILIKE $${searchIdx}
+            OR p.keywords ILIKE $${searchIdx}
             OR p.city ILIKE $${searchIdx}
             OR EXISTS (
                 SELECT 1 FROM services s 

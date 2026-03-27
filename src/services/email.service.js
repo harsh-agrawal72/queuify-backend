@@ -218,29 +218,32 @@ module.exports = {
     },
 
     sendReminderEmail: async (to, appointment) => {
-        const subject = 'Reminder: Your Appointment is Starting Soon';
-        const userName = appointment.user_name || 'there';
-        const orgName = appointment.org_name || 'Organization';
-        const serviceName = appointment.service_name || 'Service';
-        const replyTo = appointment.org_contact_email || 'support@queuify.in';
+        const subject = '⏰ Arrival Reminder: Your Appointment is in 30 Mins';
+        const userName = appointment.userName || appointment.user_name || 'there';
+        const orgName = appointment.orgName || appointment.org_name || 'Organization';
+        const serviceName = appointment.serviceName || appointment.service_name || 'Service';
+        const predictedTime = appointment.startTime;
+        const isAI = appointment.isAI || false;
 
         const html = wrapInProfessionalLayout(`
             <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Arrival Reminder</h2>
-            <p style="color: #64748b; font-size: 16px;">Hello ${userName}, this is a friendly reminder for your upcoming appointment.</p>
+            <p style="color: #64748b; font-size: 16px;">Hello ${userName}, this is a smart reminder for your upcoming appointment.</p>
             
-            <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 20px; padding: 32px; margin: 24px 0;">
-                <p style="margin: 0; font-size: 13px; font-weight: 700; color: #92400e; text-transform: uppercase;">Starting In 15 Minutes</p>
+            <div style="background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 20px; padding: 32px; margin: 24px 0;">
+                <p style="margin: 0; font-size: 13px; font-weight: 700; color: #9d174d; text-transform: uppercase;">Predicted Arrival: In 30 Minutes</p>
                 <div style="margin-top: 16px;">
-                    <p style="margin: 0; color: #451a03; font-weight: 600; font-size: 18px;">${serviceName}</p>
-                    <p style="margin: 4px 0 0 0; color: #92400e;">Location: <strong>${orgName}</strong></p>
+                    <p style="margin: 0; color: #831843; font-weight: 600; font-size: 18px;">${serviceName}</p>
+                    <p style="margin: 4px 0 0 0; color: #9d174d;">Location: <strong>${orgName}</strong></p>
+                    ${predictedTime ? `<p style="margin: 8px 0 0 0; color: #db2777; font-size: 14px;"><strong>Expected Turn:</strong> ${formatTime(predictedTime)}</p>` : ''}
                 </div>
             </div>
             
             <div style="text-align: center;">
-                <a href="${config.clientUrl}/dashboard" class="button" style="background: #d97706; box-shadow: 0 10px 15px -3px rgba(217, 119, 6, 0.3);">I'm On My Way</a>
+                <a href="${config.clientUrl}/dashboard" class="button" style="background: #db2777; box-shadow: 0 10px 15px -3px rgba(219, 39, 119, 0.3);">Track Live Status</a>
             </div>
-        `, `Reminder: ${serviceName} starts in 15 mins.`);
-        await sendEmail(to, subject, html, replyTo);
+            <p style="text-align: center; font-size: 12px; color: #94a3b8; margin-top: 12px;">${isAI ? 'Note: This time is real-time calculated based on current queue speed.' : ''}</p>
+        `, `Reminder: ${serviceName} expected in approx. 30 mins.`);
+        await sendEmail(to, subject, html);
     },
 
     sendAdminBookingNotification: async (to, appointment) => {

@@ -381,6 +381,11 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
             queue_number: appointment.queue_number
         });
 
+        // Smart Queue Alerts
+        if (status === 'serving') {
+            checkAndNotifyDrift(appointmentId);
+        }
+
         // Notifications logic (Fire and Forget)...
         (async () => {
             try {
@@ -463,9 +468,87 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
     return updatedAppointment;
 };
 
+/**
+ * Check if a slot is facing delays or moving faster, and notify users proactively
+ */
+const checkAndNotifyDrift = async (appointmentId) => {
+    try {
+        const status = await getQueueStatus(appointmentId);
+        const drift = status.time_drift_minutes;
+        
+        // CASE 1: DELAY (Arrive Later)
+        if (drift >= 15) {
+            const { rows: waiters } = await pool.query(
+                "SELECT user_id, id FROM appointments WHERE slot_id = $1 AND status IN ('pending', 'confirmed') AND id != $2",
+                [status.slot_id || (await appointmentModel.getAppointmentById(appointmentId)).slot_id, appointmentId]
+            );
+
+            for (const waiter of waiters) {
+                await notificationService.sendNotification(
+                    waiter.user_id,
+                    '🤖 Smart Queue Alert',
+                    `Queue is moving slightly slower. You can arrive approx. ${drift} mins later than planned.`,
+                    'appointment',
+                    `/appointments/${waiter.id}/queue`
+                );
+            }
+        } 
+        // CASE 2: FAST (Arrive Earlier)
+        else if (drift <= -7) {
+            const { rows: waiters } = await pool.query(
+                "SELECT user_id, id FROM appointments WHERE slot_id = $1 AND status IN ('pending', 'confirmed') AND id != $2",
+                [status.slot_id || (await appointmentModel.getAppointmentById(appointmentId)).slot_id, appointmentId]
+            );
+
+            for (const waiter of waiters) {
+                await notificationService.sendNotification(
+                    waiter.user_id,
+                    '🚀 Smart Queue Alert',
+                    `Queue is moving faster today! Please arrive approx. ${Math.abs(drift)} mins earlier than planned.`,
+                    'appointment',
+                    `/appointments/${waiter.id}/queue`
+                );
+            }
+        }
+    } catch (e) {
+        console.error('[DriftAlert] Failed:', e.message);
+    }
+};
+
 
 const getUserAppointments = async (userId) => {
-    return appointmentModel.getAppointmentsByUserId(userId);
+    const appointments = await appointmentModel.getAppointmentsByUserId(userId);
+    
+    // Enrich active appointments with real-time AI metrics
+    return Promise.all(appointments.map(async (appt) => {
+        if (['pending', 'confirmed', 'serving'].includes(appt.status)) {
+            try {
+                // Get real-time average speed
+                const avgTime = (await getSystemAverageSpeed(appt.service_id, appt.resource_id)) || appt.estimated_service_time || 15;
+                const nominalAvg = appt.estimated_service_time || 15;
+                
+                // Simplified wait time for dashboard (can be further refined if start_time is far in future)
+                // For now, let's use the logic: Wait = (People Ahead) * avgTime
+                // If it's serving, it's roughly avgTime / 2 (on average)
+                const peopleAhead = parseInt(appt.people_ahead) || 0;
+                let estWait = peopleAhead * avgTime;
+                
+                // If there's a drift (AI vs Nominal), calculate it
+                const nominalWait = peopleAhead * nominalAvg;
+                const driftMins = Math.round(estWait - nominalWait);
+
+                return {
+                    ...appt,
+                    estimated_service_time: avgTime,
+                    estimated_wait_time: estWait,
+                    time_drift_minutes: driftMins
+                };
+            } catch (e) {
+                return appt;
+            }
+        }
+        return appt;
+    }));
 };
 
 /**
@@ -541,20 +624,17 @@ const getQueueStatus = async (appointmentId) => {
             `WITH RankedQueue AS (
                 SELECT 
                     a.id, a.status, a.slot_id, sl.start_time as slot_start, a.serving_started_at,
-                    ROW_NUMBER() OVER (ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC) as q_rank
+                    ROW_NUMBER() OVER (PARTITION BY a.slot_id ORDER BY a.created_at ASC) as q_rank
                 FROM appointments a
                 LEFT JOIN slots sl ON a.slot_id = sl.id
                 WHERE a.status IN ('serving', 'pending', 'confirmed', 'completed', 'no_show')
-                AND (
-                    ${isPerResource ? 'a.resource_id' : 'a.service_id'} = $1::uuid
-                )
-                AND DATE(COALESCE(sl.start_time, a.created_at)) = DATE($2)
+                AND a.slot_id = $1::uuid
              )
              SELECT * FROM RankedQueue`,
-            [scopeId, queryDate]
+            [appointment.slot_id]
         );
 
-        console.log(`[Diagnostic-v2.2] Ranked rows found: ${rankedRows.length}`);
+        console.log(`[Diagnostic-v2.3] Ranked rows in slot: ${rankedRows.length}`);
 
         const myEntry = rankedRows.find(r => r.id === appointmentId);
         const myRank = myEntry ? parseInt(myEntry.q_rank) : 0;
@@ -565,7 +645,7 @@ const getQueueStatus = async (appointmentId) => {
             currentServingNumber = parseInt(servingEntry.q_rank);
         } else {
             const firstWaiting = rankedRows.find(r => ['pending', 'confirmed'].includes(r.status));
-            currentServingNumber = firstWaiting ? Math.max(0, parseInt(firstWaiting.q_rank) - 1) : myRank;
+            currentServingNumber = firstWaiting ? Math.max(0, parseInt(firstWaiting.q_rank) - 1) : 0;
         }
 
         const peopleAhead = Math.max(0, myRank - (servingEntry ? currentServingNumber : currentServingNumber + 1));
@@ -608,6 +688,11 @@ const getQueueStatus = async (appointmentId) => {
             } catch (e) { return null; }
         };
 
+        // 6. Drift Detection (AI Difference)
+        const nominalAvg = service.estimated_service_time || 15;
+        const nominalWait = peopleAhead * nominalAvg;
+        const timeDriftMinutes = Math.round(estimatedWaitMinutes - nominalWait);
+
         return {
             queue_number: myRank,
             myRank: myRank,
@@ -617,6 +702,7 @@ const getQueueStatus = async (appointmentId) => {
             people_ahead: peopleAhead,
             estimated_wait_time: Math.round(estimatedWaitMinutes),
             estimated_service_time: avgTime,
+            time_drift_minutes: timeDriftMinutes,
             total_in_slot: rankedRows.length,
             expected_start_time: safeISO(expectedStartTime),
             slot_start_time: safeISO(referenceDate),
