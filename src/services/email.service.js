@@ -6,47 +6,80 @@ console.log(`${VERSION_TAG} Initializing Resend API Client...`);
 
 const resend = new Resend(config.email.resend.apiKey || 're_placeholder');
 
-const wrapInProfessionalLayout = (content) => `
+/**
+ * Premium Email Layout Wrapper
+ */
+const wrapInProfessionalLayout = (content, previewText = 'Your Queuify Appointment Update') => `
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Queuify Notification</title>
         <style>
-            body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 0; background-color: #f8fafc; }
-            .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); border: 1px solid #e2e8f0; }
-            .header { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 40px 20px; text-align: center; color: white; }
-            .header h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.025em; }
-            .content { padding: 40px; }
-            .footer { padding: 20px; text-align: center; background: #f1f5f9; color: #64748b; font-size: 13px; }
-            .button { display: inline-block; background-color: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 16px; margin: 20px 0; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2); }
-            .info-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0; }
-            .token { font-size: 32px; font-weight: 800; color: #4f46e5; margin: 10px 0; letter-spacing: 2px; }
-            .label { color: #64748b; font-size: 12px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; }
+            body { font-family: 'Inter', system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 0; background-color: #f1f5f9; }
+            .preview-text { display: none; max-height: 0px; overflow: hidden; }
+            .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); border: 1px solid #e2e8f0; }
+            .header { background: #4f46e5; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 48px 20px; text-align: center; color: white; }
+            .header h1 { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; text-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .content { padding: 48px; }
+            .footer { padding: 32px; text-align: center; background: #f8fafc; color: #94a3b8; font-size: 14px; border-top: 1px solid #e2e8f0; }
+            .button { display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 16px 32px; border-radius: 16px; text-decoration: none; font-weight: 700; font-size: 16px; margin: 24px 0; transition: all 0.2s; box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3); }
+            .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 20px; padding: 32px; margin: 24px 0; text-align: center; }
+            .token-display { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; margin: 16px auto; display: inline-block; min-width: 140px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+            .token-number { font-size: 44px; font-weight: 900; color: #4f46e5; margin: 0; line-height: 1; letter-spacing: -0.02em; }
+            .detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+            .detail-label { color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+            .detail-value { color: #1e293b; font-weight: 600; text-align: right; }
         </style>
     </head>
     <body>
+        <div class="preview-text">${previewText}</div>
         <div class="container">
             <div class="header">
-                <h1>Queuify Manager</h1>
+                <h1>Queuify</h1>
             </div>
             <div class="content">
                 ${content}
             </div>
             <div class="footer">
-                &copy; ${new Date().getFullYear()} Queuify Manager Team. All rights reserved.
+                <p>&copy; ${new Date().getFullYear()} Queuify Inc. Excellence in Attendance Management.</p>
+                <p style="font-size: 12px;">This is an automated notification. Please do not reply directly to this email.</p>
             </div>
         </div>
     </body>
     </html>
 `;
 
+/**
+ * Helper to format times consistently
+ */
+const formatTime = (time) => {
+    if (!time) return 'N/A';
+    try {
+        return new Date(time).toLocaleString('en-IN', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Asia/Kolkata'
+        });
+    } catch (e) {
+        return 'Invalid Date';
+    }
+};
+
+/**
+ * Core send mail function
+ */
 const sendEmail = async (to, subject, html) => {
     try {
         console.log(`${VERSION_TAG} Sending email via Resend API to: ${to}`);
 
         const { data, error } = await resend.emails.send({
-            from: `Queuify <support@queuify.in>`, // Verified domain queuify.in
+            from: `Queuify Notification <support@queuify.in>`,
             to: [to],
             subject: subject,
             html: html,
@@ -67,290 +100,327 @@ const sendEmail = async (to, subject, html) => {
 
 module.exports = {
     sendEmail,
+
+    /**
+     * Confirmation sent to the User
+     */
     sendBookingConfirmation: async (to, appointment) => {
-        const subject = 'Appointment Confirmation - Queuify';
-        const userName = appointment.user_name || appointment.userName || 'there';
-        const orgName = appointment.org_name || appointment.orgName || 'Organization';
-        const serviceName = appointment.service_name || appointment.serviceName || 'Service';
-        const tokenNumber = appointment.token_number || appointment.tokenNumber || 'N/A';
-        const startTime = appointment.start_time || appointment.startTime;
+        const subject = 'Appointment Confirmed! - Queuify';
+        const userName = appointment.user_name || appointment.customer_name || 'Customer';
+        const orgName = appointment.org_name || 'Organization';
+        const serviceName = appointment.service_name || 'Service';
+        const tokenNumber = appointment.token_number || appointment.tokenNumber || 'QUEUED';
+        const startTime = appointment.start_time || appointment.startTime || appointment.preferred_date;
 
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Appointment Confirmed!</h2>
-            <p>Hello <strong>${userName}</strong>, Your appointment has been booked successfully.</p>
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Appointment Confirmed!</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello <strong>${userName}</strong>, your reservation at <strong>${orgName}</strong> has been secured.</p>
             
-            <div class="info-box">
-                <div class="label">Token Number</div>
-                <div class="token">${tokenNumber}</div>
+            <div class="info-card">
+                <div class="detail-label" style="margin-bottom: 8px;">Your Queue Token</div>
+                <div class="token-display">
+                    <div class="token-number">#${tokenNumber}</div>
+                </div>
             </div>
 
-            <div style="margin: 20px 0;">
-                <p><strong>Organization:</strong> ${orgName}</p>
-                <p><strong>Service:</strong> ${serviceName}</p>
-                <p><strong>Time:</strong> ${startTime ? new Date(startTime).toLocaleString() : 'N/A'}</p>
+            <div style="background: white; border: 1px solid #f1f5f9; border-radius: 16px; padding: 8px 0;">
+                <div style="padding: 12px 24px; border-bottom: 1px solid #f1f5f9;">
+                    <span style="color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase;">Service</span>
+                    <div style="color: #1e293b; font-weight: 600; margin-top: 4px;">${serviceName}</div>
+                </div>
+                <div style="padding: 12px 24px; border-bottom: 1px solid #f1f5f9;">
+                    <span style="color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase;">Time & Date</span>
+                    <div style="color: #1e293b; font-weight: 600; margin-top: 4px;">${formatTime(startTime)}</div>
+                </div>
+                <div style="padding: 12px 24px;">
+                    <span style="color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase;">Location</span>
+                    <div style="color: #1e293b; font-weight: 600; margin-top: 4px;">${orgName} ${appointment.org_address ? `<br><small style="font-weight: normal; color: #64748b;">${appointment.org_address}</small>` : ''}</div>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 32px;">
+                <a href="${config.clientUrl}/dashboard" class="button">View My Appointment</a>
             </div>
             
-            <p>Please arrive at least 5 minutes before your scheduled time.</p>
-        `);
+            <p style="text-align: center; font-size: 14px; color: #94a3b8; margin-top: 24px;">Please arrive 10 minutes prior to your scheduled time. Show this email at the reception if requested.</p>
+        `, `Confirmed: #${tokenNumber} for ${serviceName} at ${orgName}`);
         await sendEmail(to, subject, html);
     },
 
+    /**
+     * Cancellation Notice
+     */
     sendCancellationEmail: async (to, appointment) => {
-        const subject = 'Appointment Cancelled - Queuify';
-        const serviceName = appointment.service_name || appointment.serviceName || 'Service';
-        const orgName = appointment.org_name || appointment.orgName || 'Organization';
-        const reason = appointment.cancellation_reason || 'No specific reason provided.';
+        const subject = 'Cancellation Notice - Queuify';
+        const serviceName = appointment.service_name || 'Service';
+        const orgName = appointment.org_name || 'Organization';
+        const reason = appointment.cancellation_reason || 'Schedule adjustment or administrative request.';
+        
         const html = wrapInProfessionalLayout(`
-            <h2 style="color:#ef4444; margin-top: 0;">Appointment Cancelled</h2>
-            <p>Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been cancelled.</p>
+            <h2 style="color:#ef4444; margin: 0; font-size: 24px;">Appointment Cancelled</h2>
+            <p style="color: #64748b; font-size: 16px;">We regret to inform you that your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been cancelled.</p>
             
-            <div class="info-box" style="border-left: 4px solid #ef4444;">
-                <p style="margin: 0; font-weight: 700; color: #991b1b;">Reason for Cancellation:</p>
-                <p style="margin: 5px 0 0 0; color: #7f1d1d; font-style: italic;">"${reason}"</p>
+            <div style="background: #fef2f2; border: 1px solid #fee2e2; border-radius: 16px; padding: 24px; margin: 24px 0;">
+                <p style="margin: 0; font-size: 12px; font-weight: 700; color: #991b1b; text-transform: uppercase; letter-spacing: 0.05em;">Reason for Cancellation</p>
+                <p style="margin: 12px 0 0 0; color: #7f1d1d; font-size: 15px; line-height: 1.5;">"${reason}"</p>
             </div>
 
-            <div style="margin-top: 20px;">
-                <p>If you have any questions or would like to reschedule, please contact the organization directly or visit the dashboard.</p>
+            <div style="text-align: center; margin-top: 32px;">
+                <a href="${config.clientUrl}/dashboard" class="button" style="background: #ef4444; box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);">Book New Appointment</a>
             </div>
-            <p>Thank you for your understanding.</p>
-        `);
+        `, `Update: Appointment for ${serviceName} has been cancelled.`);
         await sendEmail(to, subject, html);
     },
 
+    /**
+     * Status Update (confirmed, pending, serving, completed)
+     */
     sendStatusUpdateEmail: async (to, appointment) => {
-        const status = (appointment.status || '').toUpperCase();
-        const orgName = appointment.org_name || appointment.orgName || 'Organization';
-        const subject = `Update: ${status} - Appointment Status`;
+        const status = (appointment.status || 'Updated').toUpperCase();
+        const orgName = appointment.org_name || 'Organization';
+        const serviceName = appointment.service_name || 'Service';
+        const subject = `Update: ${status} - ${serviceName}`;
+        
+        const statusColors = {
+            'SERVING': { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' },
+            'COMPLETED': { bg: '#f0f9ff', text: '#075985', border: '#bae6fd' },
+            'CONFIRMED': { bg: '#f5f3ff', text: '#5b21b6', border: '#ddd6fe' },
+            'WAITLISTED': { bg: '#fffbeb', text: '#92400e', border: '#fef3c7' }
+        };
+        const color = statusColors[status] || { bg: '#f8fafc', text: '#475569', border: '#e2e8f0' };
+
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Status Update</h2>
-            <p>Your appointment status at <strong>${orgName}</strong> has been updated to:</p>
-            <div class="info-box" style="text-align: center;">
-                <span style="background-color: #4f46e5; color: white; padding: 8px 16px; border-radius: 20px; font-weight: 700; text-transform: uppercase; font-size: 14px;">${status}</span>
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Status Update</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello, your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been updated.</p>
+            
+            <div style="text-align: center; margin: 32px 0;">
+                <div style="background: ${color.bg}; color: ${color.text}; border: 1px solid ${color.border}; padding: 12px 24px; border-radius: 99px; display: inline-block; font-weight: 800; font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase;">
+                    ${status}
+                </div>
             </div>
-            <p>You can track your live position and status in the Queuify dashboard.</p>
-        `);
+
+            ${status === 'SERVING' ? `
+                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 16px; padding: 24px; text-align: center;">
+                    <p style="margin: 0; color: #166534; font-weight: 700;">It's your turn!</p>
+                    <p style="margin: 8px 0 0 0; color: #166534; font-size: 14px;">Please proceed to the designated counter immediately.</p>
+                </div>
+            ` : ''}
+
+            <div style="text-align: center; margin-top: 32px;">
+                <a href="${config.clientUrl}/dashboard" class="button">Track Real-time Status</a>
+            </div>
+        `, `Your appointment for ${serviceName} is now ${status}.`);
         await sendEmail(to, subject, html);
     },
 
+    /**
+     * Arrival Reminder (sent by cron/workers)
+     */
     sendReminderEmail: async (to, appointment) => {
         const subject = 'Reminder: Your Appointment is Starting Soon';
-        const userName = appointment.userName || appointment.user_name || 'there';
-        const orgName = appointment.orgName || appointment.org_name || 'Organization';
-        const serviceName = appointment.serviceName || appointment.service_name || 'Service';
+        const userName = appointment.user_name || 'there';
+        const orgName = appointment.org_name || 'Organization';
+        const serviceName = appointment.service_name || 'Service';
 
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Arrival Reminder</h2>
-            <p>Hello ${userName}, this is a friendly reminder that your appointment for <strong>${serviceName}</strong> is scheduled to start in approximately 15 minutes.</p>
-            <div class="info-box" style="background-color: #fffbeb; border: 1px solid #fef3c7;">
-                <p style="margin: 0; color: #92400e; font-weight: 600;">Location: ${orgName}</p>
-                <p style="margin: 5px 0 0 0; color: #b45309;">Please ensure you are at the location on time to maintain your position in the queue.</p>
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Arrival Reminder</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello ${userName}, this is a friendly reminder for your upcoming appointment.</p>
+            
+            <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 20px; padding: 32px; margin: 24px 0;">
+                <p style="margin: 0; font-size: 13px; font-weight: 700; color: #92400e; text-transform: uppercase;">Starting In 15 Minutes</p>
+                <div style="margin-top: 16px;">
+                    <p style="margin: 0; color: #451a03; font-weight: 600; font-size: 18px;">${serviceName}</p>
+                    <p style="margin: 4px 0 0 0; color: #92400e;">Location: <strong>${orgName}</strong></p>
+                </div>
             </div>
-            <p>We look forward to serving you!</p>
-        `);
+            
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/dashboard" class="button" style="background: #d97706; box-shadow: 0 10px 15px -3px rgba(217, 119, 6, 0.3);">I'm On My Way</a>
+            </div>
+        `, `Reminder: ${serviceName} starts in 15 mins.`);
         await sendEmail(to, subject, html);
     },
 
+    /**
+     * Admin Notification of new booking
+     */
     sendAdminBookingNotification: async (to, appointment) => {
-        const subject = `New Booking Alert - ${appointment.token_number || 'N/A'}`;
-        const userName = appointment.user_name || appointment.userName || 'N/A';
-        const serviceName = appointment.service_name || appointment.serviceName || 'N/A';
         const tokenNumber = appointment.token_number || appointment.tokenNumber || 'N/A';
+        const subject = `New Booking: #${tokenNumber} - ${appointment.service_name || 'Service'}`;
+        const userName = appointment.user_name || appointment.customer_name || 'Wait-in Customer';
+        const serviceName = appointment.service_name || 'Service';
 
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">New Appointment Booked</h2>
-            <p>A new appointment has been scheduled at your organization.</p>
-            <div class="info-box">
-                <p><strong>Customer:</strong> ${userName}</p>
-                <p><strong>Service:</strong> ${serviceName}</p>
-                <div class="label">Token Number</div>
-                <div class="token" style="font-size: 24px;">${tokenNumber}</div>
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">New Appointment Alert</h2>
+            <p style="color: #64748b; font-size: 16px;">A new appointment has been scheduled at your organization.</p>
+            
+            <div class="info-card">
+                <div class="detail-label">Assigned Token</div>
+                <div class="token-display">
+                    <div class="token-number">#${tokenNumber}</div>
+                </div>
+                <div style="margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: left;">
+                    <div class="detail-row">
+                        <span class="detail-label">Customer</span>
+                        <span class="detail-value">${userName}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Service</span>
+                        <span class="detail-value">${serviceName}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Scheduled Time</span>
+                        <span class="detail-value">${formatTime(appointment.start_time || appointment.startTime || appointment.preferred_date)}</span>
+                    </div>
+                </div>
             </div>
-            <p>You can manage this booking in your admin dashboard.</p>
-        `);
+
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/admin/appointments?search=${appointment.id}" class="button">Manage Booking</a>
+            </div>
+        `, `New Booking: #${tokenNumber} from ${userName}`);
         await sendEmail(to, subject, html);
     },
 
+    /**
+     * Verification emails
+     */
     sendOrgVerificationEmail: async (to, token) => {
         const subject = 'Verify Your Organization Email';
         const verificationUrl = `${config.clientUrl}/verify-org-email?token=${token}`;
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Verify Your Email</h2>
-            <p>Please click the button below to verify your organization's contact email address. This step is necessary to secure your account.</p>
-            <div style="text-align: center; margin: 35px 0;">
-                <a href="${verificationUrl}" class="button">Verify Email Address</a>
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Verify Your Email</h2>
+            <p style="color: #64748b; font-size: 16px;">Welcome to Queuify! Please verify your email to unlock all features for your organization.</p>
+            
+            <div style="text-align: center; margin: 40px 0;">
+                <a href="${verificationUrl}" class="button">Confirm Email Address</a>
             </div>
-            <p style="font-size: 14px; color: #64748b;">If the button doesn't work, copy and paste this link into your browser:</p>
-            <p style="font-size: 12px; color: #94a3b8; word-break: break-all;">${verificationUrl}</p>
-            <p style="font-size: 14px; color: #64748b; margin-top: 25px;">This link will expire in 24 hours.</p>
-        `);
+            
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; font-size: 13px; color: #64748b; word-break: break-all;">
+                <strong>Trouble clicking?</strong> Copy this link: ${verificationUrl}
+            </div>
+        `, 'Action Required: Please verify your Queuify account.');
         await sendEmail(to, subject, html);
     },
 
     sendWelcomeEmail: async (to, name) => {
         const subject = 'Welcome to Queuify!';
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Welcome, ${name}!</h2>
-            <p>We're thrilled to have you with us. Queuify helps you manage appointments and queues with ease.</p>
-            <div class="info-box">
-                <p style="margin: 0; font-weight: 700; color: #1e293b;">Quick Start Guide:</p>
-                <ul style="margin: 15px 0 0 0; padding-left: 20px; color: #475569;">
-                    <li>Set up your organization profile</li>
-                    <li>Add your services and staff</li>
-                    <li>Configure your available slots</li>
-                    <li>Start accepting bookings!</li>
-                </ul>
+            <h2 style="margin: 0; font-size: 28px; color: #0f172a;">Welcome aboard, ${name}!</h2>
+            <p style="color: #64748b; font-size: 18px;">We're excited to help you transform your waiting experience.</p>
+            
+            <div style="text-align: center; margin-top: 40px;">
+                <a href="${config.clientUrl}/admin" class="button">Go to Admin Dashboard</a>
             </div>
-            <p>If you have any questions, just reply to this email. We're here to help!</p>
-        `);
+        `, 'Welcome to the future of queue management.');
         await sendEmail(to, subject, html);
     },
 
     sendAdminInvitationEmail: async (to, name, inviteLink) => {
-        const subject = 'Admin Invitation - Set Your Password';
+        const subject = 'Invite: Join your team on Queuify';
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">You're Invited!</h2>
-            <p>Hello ${name || 'Admin'},</p>
-            <p>You have been invited to join an organization as an <strong>Administrator</strong>.</p>
-            <p>Please click the button below to set up your password and activate your account:</p>
-            <div style="text-align: center; margin: 35px 0;">
-                <a href="${inviteLink}" class="button">Set Password & Join</a>
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">You've been invited!</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello ${name || 'Admin'}, you have been added as an <strong>Administrator</strong> for your organization on Queuify.</p>
+            
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 20px; padding: 32px; margin: 32px 0; text-align: center;">
+                <p style="margin: 0 0 24px 0; color: #1e293b;">Click below to set your password and access your dashboard:</p>
+                <a href="${inviteLink}" class="button" style="margin: 0;">Accept Invitation</a>
             </div>
-            <p style="font-size: 14px; color: #64748b;">Or copy this link: ${inviteLink}</p>
-            <p style="margin-top: 25px;">Welcome to the team!</p>
-        `);
+        `, `You're invited to manage your organization on Queuify.`);
         await sendEmail(to, subject, html);
     },
 
     sendOrgCreationEmail: async (to, adminName, orgName, inviteLink) => {
-        const subject = 'Welcome! Your Organization is Ready';
+        const subject = 'Welcome! Your organization is live';
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Welcome to Queuify!</h2>
-            <p>Hello ${adminName},</p>
-            <p>Your organization <strong>${orgName}</strong> has been successfully created. You can now manage your services, staff, and appointments.</p>
-            <p>To get started, please set up your admin password using the button below:</p>
-            <div style="text-align: center; margin: 35px 0;">
-                <a href="${inviteLink}" class="button">Setup Admin Account</a>
+            <h2 style="margin: 0; font-size: 28px; color: #0f172a;">Congratulations!</h2>
+            <p style="color: #64748b; font-size: 18px;">Your organization <strong>${orgName}</strong> is now live on Queuify.</p>
+            
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 24px; padding: 40px; margin: 32px 0; text-align: center;">
+                <p style="margin: 0 0 24px 0; color: #166534; font-weight: 600;">You're ready to start managing appointments.</p>
+                <a href="${inviteLink}" class="button" style="background: #16a34a; box-shadow: 0 10px 15px -3px rgba(22, 163, 74, 0.3); margin: 0;">Complete Admin Setup</a>
             </div>
-            <p style="font-size: 14px; color: #64748b;">This link will expire in 7 days.</p>
-            <p style="margin-top: 25px;">We look forward to helping you grow!</p>
-        `);
+        `, `Welcome to Queuify! ${orgName} is now active.`);
         await sendEmail(to, subject, html);
     },
 
     sendForgotPasswordEmail: async (to, resetPasswordUrl) => {
         const subject = 'Reset Your Password - Queuify';
         const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">Reset Password</h2>
-            <p>We received a request to reset your password. If you didn't make this request, you can safely ignore this email.</p>
-            <p>To reset your password, please click the button below:</p>
-            <div style="text-align: center; margin: 35px 0;">
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Reset Your Password</h2>
+            <p style="color: #64748b; font-size: 16px;">We received a request to reset your password. If you didn't request this, you can safely ignore this email.</p>
+            
+            <div style="text-align: center; margin: 40px 0;">
                 <a href="${resetPasswordUrl}" class="button">Reset Password</a>
             </div>
-            <p style="font-size: 14px; color: #64748b;">This link will expire in 1 hour.</p>
-            <p style="margin-top: 25px;">Stay secure!</p>
-        `);
+        `, 'Security Update: Password reset request.');
         await sendEmail(to, subject, html);
     },
 
-    sendContactFormEmail: async (adminEmail, contactData) => {
-        const { name, email, subject, message } = contactData;
-        const emailSubject = `Contact Form: ${subject}`;
-        const html = wrapInProfessionalLayout(`
-            <h2 style="margin-top: 0;">New Contact Message</h2>
-            <p>You have a new submission from your website's contact form.</p>
-            <div class="info-box">
-                <p><strong>From:</strong> ${name} (<a href="mailto:${email}">${email}</a>)</p>
-                <p><strong>Subject:</strong> ${subject}</p>
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
-                    <p style="margin:0; font-weight: 700;">Message:</p>
-                    <p style="white-space: pre-wrap; margin-top: 5px;">${message}</p>
-                </div>
-            </div>
-            <p style="font-size: 12px; color: #64748b;">This message was generated from the Queuify contact form.</p>
-        `);
-        await sendEmail(adminEmail, emailSubject, html);
-    },
-
     sendReassignmentEmail: async (to, appointment, newSlot) => {
-        const subject = 'Appointment Reassigned - Queuify';
+        const subject = 'Schedule Update: Appointment Reassigned';
         const serviceName = appointment.service_name || 'Service';
         const orgName = appointment.org_name || 'Organization';
-        const newTime = newSlot.start_time;
-
+        
         const html = wrapInProfessionalLayout(`
-            <h2 style="color:#4f46e5; margin-top: 0;">Appointment Reassigned</h2>
-            <p>Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been reassigned due to a schedule change.</p>
+            <h2 style="color:#4f46e5; margin: 0; font-size: 24px;">Schedule Updated</h2>
+            <p style="color: #64748b; font-size: 16px;">Due to a schedule adjustment at <strong>${orgName}</strong>, your appointment for <strong>${serviceName}</strong> has been reassigned.</p>
             
-            <div class="info-box" style="border-left: 4px solid #4f46e5;">
-                <p style="margin: 0; font-weight: 600;">New Appointment Details:</p>
-                <p style="margin: 10px 0 0 0;"><strong>New Time:</strong> ${new Date(newTime).toLocaleString()}</p>
-                <p style="margin: 5px 0 0 0;"><strong>Doctor/Resource:</strong> ${newSlot.resource_name || 'Available Staff'}</p>
+            <div class="info-card" style="border-left: 4px solid #4f46e5; text-align: left;">
+                <div class="detail-label">New Time</div>
+                <div style="font-size: 20px; font-weight: 700; color: #1e293b; margin: 8px 0;">${formatTime(newSlot.start_time)}</div>
+                <div class="detail-label" style="margin-top: 16px;">Professional</div>
+                <div style="font-size: 16px; font-weight: 600; color: #475569;">${newSlot.resource_name || 'Staff'}</div>
             </div>
             
-            <p>Your token number and other details remain active. If this time doesn't work for you, please visit your dashboard to reschedule.</p>
-        `);
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/dashboard" class="button">Confirm New Time</a>
+            </div>
+        `, 'Update: Your appointment has been rescheduled.');
         await sendEmail(to, subject, html);
     },
 
     sendWaitlistEmail: async (to, appointment) => {
-        const subject = 'Urgent Status: Waitlisted - Queuify';
+        const subject = 'Urgent Status: Waitlisted';
         const serviceName = appointment.service_name || 'Service';
         const orgName = appointment.org_name || 'Organization';
 
         const html = wrapInProfessionalLayout(`
-            <h2 style="color:#f59e0b; margin-top: 0;">Urgent: Waitlisted</h2>
-            <p>We're sorry, but your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been affected by a schedule change and we couldn't automatically reassign it for today.</p>
+            <h2 style="color:#f59e0b; margin: 0; font-size: 24px;">Queue Update: Waitlisted</h2>
+            <p style="color: #64748b; font-size: 16px;">Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been moved to the waitlist.</p>
             
-            <div class="info-box" style="background-color: #fffbeb; border-left: 4px solid #f59e0b;">
-                <p style="margin: 0; font-weight: 600;">Status: High Priority Waitlist</p>
-                <p style="margin: 10px 0 0 0;">Since you marked this as **Urgent Today**, our staff will try their best to accommodate you. Please wait for a manual update or contact the organization.</p>
+            <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 20px; padding: 32px; margin: 24px 0;">
+                <p style="margin: 0; font-size: 13px; font-weight: 800; color: #9a3412; text-transform: uppercase;">Status: Urgent Waitlist</p>
+                <p style="margin: 16px 0 0 0; color: #9a3412; line-height: 1.6;">Our team is working to fit you in as soon as possible. Since you marked this as <strong>Urgent</strong>, you are currently at the top of our priority list.</p>
             </div>
             
-            <p>We apologize for the inconvenience.</p>
-        `);
-        await sendEmail(to, subject, html);
-    },
-
-    sendRescheduleEmail: async (to, appointment) => {
-        const subject = 'Action Required: Reschedule Your Appointment - Queuify';
-        const serviceName = appointment.service_name || 'Service';
-        const orgName = appointment.org_name || 'Organization';
-
-        const html = wrapInProfessionalLayout(`
-            <h2 style="color:#6366f1; margin-top: 0;">Schedule Interrupted</h2>
-            <p>Your appointment for <strong>${serviceName}</strong> at <strong>${orgName}</strong> has been affected by a schedule change.</p>
-            
-            <div class="info-box">
-                <p style="margin: 0;">Please visit the Queuify dashboard to choose a new time slot that works for you.</p>
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/dashboard" class="button" style="background: #f59e0b; box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);">Track Live Position</a>
             </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="${config.clientUrl}/dashboard" class="button">Go to Dashboard</a>
-            </div>
-        `);
+        `, 'Priority Alert: You have been moved to the urgent waitlist.');
         await sendEmail(to, subject, html);
     },
 
     sendRebalanceNotificationEmail: async (to, appointment, newSlot) => {
-        const subject = 'Appointment Schedule Update - Queuify';
+        const subject = 'Optimized: Your Schedule Update';
         const serviceName = appointment.service_name || 'Service';
         const orgName = appointment.org_name || 'Organization';
-        const newTime = newSlot.start_time;
 
         const html = wrapInProfessionalLayout(`
-            <h2 style="color:#4f46e5; margin-top: 0;">Schedule Optimized</h2>
-            <p>Hello <strong>${appointment.user_name}</strong>,</p>
-            <p>To ensure a smoother experience and reduced wait times at <strong>${orgName}</strong>, we have optimized today's schedule.</p>
-            <p>Your appointment for <strong>${serviceName}</strong> has been moved to a new time slot:</p>
+            <h2 style="color:#4f46e5; margin: 0; font-size: 24px;">Schedule Optimization</h2>
+            <p style="color: #64748b; font-size: 16px;">To ensure a smoother experience at <strong>${orgName}</strong>, we have optimized the schedule.</p>
             
-            <div class="info-box" style="border-left: 4px solid #4f46e5;">
-                <p style="margin: 0; font-weight: 600;">Updated Appointment Details:</p>
-                <p style="margin: 10px 0 0 0;"><strong>New Time:</strong> ${new Date(newTime).toLocaleString([], { hour: '2-digit', minute: '2-digit', weekday: 'short', month: 'short', day: 'numeric' })}</p>
-                <p style="margin: 5px 0 0 0;"><strong>Token:</strong> ${appointment.token_number}</p>
+            <div class="info-card" style="border-left: 4px solid #4f46e5; text-align: left;">
+                <div class="detail-label">New Optimized Time</div>
+                <div style="font-size: 20px; font-weight: 700; color: #1e293b; margin: 8px 0;">${formatTime(newSlot.start_time)}</div>
+                <div class="detail-label" style="margin-top: 16px;">Token ID</div>
+                <div style="font-size: 16px; font-weight: 600; color: #475569;">#${appointment.token_number}</div>
             </div>
             
-            <p>Everything else remains the same. We apologize for any inconvenience caused by this adjustment.</p>
-        `);
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/dashboard" class="button">View Details</a>
+            </div>
+        `, 'Great news: We\'ve optimized your appointment time.');
         await sendEmail(to, subject, html);
     }
 };

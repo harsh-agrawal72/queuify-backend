@@ -812,7 +812,8 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                 if (org && org.new_booking_notification) {
                     console.log(`[Email-Async] Organization found: ${org.name}. Notifications enabled.`);
                     const admins = await userModel.getAdminsByOrg(orgId);
-                    const adminMessage = `Status of ${data?.user_name || 'User'}'s appointment for ${data?.service_name || 'Service'} updated to ${status}.`;
+                    const tokenStr = data.token_number ? ` (Token #${data.token_number})` : '';
+                    const adminMessage = `Appointment for ${data?.user_name || 'Customer'}${tokenStr} [${data?.service_name || 'Service'}] updated to ${status.toUpperCase()}.`;
 
                     // In-App Notifications to ALL admins
                     for (const admin of admins) {
@@ -847,7 +848,7 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                      await notificationService.sendNotification(
                         appointment.user_id || updatedAppointment.user_id,
                         'Appointment Status Updated',
-                        `Your appointment status is now ${status}.`,
+                        `Your appointment status for ${data?.service_name || 'Service'} is now ${status.toUpperCase()}. Token: #${data.token_number || 'N/A'}`,
                         'appointment',
                         `/appointments`
                     );
@@ -943,7 +944,7 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
                     await notificationService.sendNotification(
                         appointment.user_id,
                         'Appointment Cancelled',
-                        `Your appointment has been cancelled by the administrator.`,
+                        `Your appointment${appointment.token_number ? ` (#${appointment.token_number})` : ''} has been cancelled by the administrator.`,
                         'appointment',
                         `/appointments`
                     );

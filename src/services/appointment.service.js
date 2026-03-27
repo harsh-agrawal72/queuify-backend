@@ -39,7 +39,10 @@ const bookAppointment = async (appointmentBody) => {
                 try {
                     if (orgEmailEnabled && userEmailEnabled && user && user.email) {
                         console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
-                        await emailService.sendBookingConfirmation(user.email, appointmentWithDetails);
+                        await emailService.sendBookingConfirmation(user.email, {
+                            ...appointmentWithDetails,
+                            token_number: queue_number
+                        });
                     }
                 } catch (emailErr) {
                     console.error(`[Booking-Async] User email failed:`, emailErr.message);
@@ -49,7 +52,7 @@ const bookAppointment = async (appointmentBody) => {
                     await notificationService.sendNotification(
                         appointment.user_id,
                         'Booking Confirmed',
-                        `Your appointment for ${appointmentWithDetails.service_name} at ${appointmentWithDetails.org_name} is confirmed. Token: ${appointmentWithDetails.token_number}`,
+                        `Your appointment for ${appointmentWithDetails.service_name} at ${appointmentWithDetails.org_name} is confirmed. Your Token is #${queue_number}.`,
                         'appointment',
                         `/appointments`
                     );
@@ -59,7 +62,7 @@ const bookAppointment = async (appointmentBody) => {
                 const orgBookingNotify = org && (org.new_booking_notification === true || org.new_booking_notification === null);
                 if (orgBookingNotify) {
                     const admins = await userModel.getAdminsByOrg(appointment.org_id);
-                    const adminMessage = `New booking received from ${user?.name || 'User'} for ${appointmentWithDetails.service_name}. Token: ${appointmentWithDetails.token_number}`;
+                    const adminMessage = `New booking from ${user?.name || 'Customer'} for ${appointmentWithDetails.service_name}. Token assigned: #${queue_number}`;
 
                     console.log(`[Booking-Async] Notifying ${admins.length} admins.`);
                     // In-App Notifications to all admins
@@ -75,10 +78,11 @@ const bookAppointment = async (appointmentBody) => {
 
                     // Email Notification to Org Contact
                     try {
-                        if (orgEmailEnabled && org.contact_email) {
                             console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
-                            await emailService.sendAdminBookingNotification(org.contact_email, appointmentWithDetails);
-                        }
+                            await emailService.sendAdminBookingNotification(org.contact_email, {
+                                ...appointmentWithDetails,
+                                token_number: queue_number
+                            });
                     } catch (emailErr) {
                         console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
                     }
@@ -658,7 +662,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
                 await notificationService.sendNotification(
                     appointment.user_id,
                     'Appointment Rescheduled',
-                    `Your appointment has been moved to ${new Date(appointmentWithDetails.slot_start).toLocaleString()}. Token: ${appointmentWithDetails.token_number}`,
+                    `Your appointment has been successfully moved to ${new Date(appointmentWithDetails.slot_start).toLocaleString()}. New Token: #${rank}`,
                     'appointment',
                     `/appointments`
                 );
