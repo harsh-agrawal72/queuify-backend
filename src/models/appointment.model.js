@@ -195,9 +195,27 @@ const getAppointmentsByUserId = async (userId) => {
             JOIN services s ON a.service_id = s.id
             WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
          )
+         QueueMetadata AS (
+            SELECT a.slot_id,
+                   MIN(q.calculated_queue) FILTER (WHERE a.status = 'serving') as serving_token,
+                   COUNT(*) FILTER (WHERE a.status IN ('confirmed', 'pending', 'serving')) as total_active
+            FROM appointments a
+            JOIN QueueRanks q ON a.id = q.id
+            GROUP BY a.slot_id
+         )
          SELECT a.*, 
                 COALESCE(q.calculated_queue, 0) as live_queue_number,
-                s.name as service_name, r.name as resource_name,
+                COALESCE((
+                    SELECT COUNT(*) 
+                    FROM appointments a2
+                    JOIN QueueRanks q2 ON a2.id = q2.id
+                    WHERE a2.slot_id = a.slot_id 
+                      AND a2.status IN ('confirmed', 'pending', 'serving')
+                      AND q2.calculated_queue < q.calculated_queue
+                ), 0) as people_ahead,
+                qm.serving_token,
+                qm.total_active as total_in_slot,
+                s.name as service_name, s.estimated_service_time, r.name as resource_name,
                 o.name as org_name, o.address as org_address,
                 sl.start_time, sl.end_time, a.reschedule_count,
                 a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
@@ -205,6 +223,7 @@ const getAppointmentsByUserId = async (userId) => {
                 rv.id as review_id, rv.rating as review_rating
          FROM appointments a
          LEFT JOIN QueueRanks q ON a.id = q.id
+         LEFT JOIN QueueMetadata qm ON a.slot_id = qm.slot_id
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN organizations o ON a.org_id = o.id
          LEFT JOIN resources r ON a.resource_id = r.id
