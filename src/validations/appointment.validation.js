@@ -27,6 +27,15 @@ const updateStatus = {
     })
 };
 
+const rescheduleAppointment = {
+    params: Joi.object().keys({
+        appointmentId: Joi.string().uuid().required()
+    }),
+    body: Joi.object().keys({
+        newSlotId: Joi.string().uuid().required()
+    })
+};
+
 const proposeReschedule = {
     params: Joi.object().keys({
         appointmentId: Joi.string().uuid().required()
