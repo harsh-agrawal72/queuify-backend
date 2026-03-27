@@ -611,9 +611,13 @@ const getQueueStatus = async (appointmentId) => {
         return {
             queue_number: myRank,
             myRank: myRank,
+            live_queue_number: myRank,
             current_serving_number: servingEntry ? currentServingNumber : 0,
+            serving_token: servingEntry ? currentServingNumber : 0,
             people_ahead: peopleAhead,
             estimated_wait_time: Math.round(estimatedWaitMinutes),
+            estimated_service_time: avgTime,
+            total_in_slot: rankedRows.length,
             expected_start_time: safeISO(expectedStartTime),
             slot_start_time: safeISO(referenceDate),
             status: appointment.status,
