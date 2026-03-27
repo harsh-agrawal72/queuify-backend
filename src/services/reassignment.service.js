@@ -23,7 +23,8 @@ const reassignAppointments = async (slotId) => {
         // 2. Get all affected appointments, prioritizing URGENT ones
         const apptsQuery = await client.query(
             `SELECT a.*, u.email as user_email, u.name as user_name,
-                    s.name as service_name, o.name as org_name
+                    u.email_notification_enabled, u.notification_enabled,
+                    s.name as service_name, o.name as org_name, o.email_notification as org_email_enabled
              FROM appointments a
              LEFT JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
@@ -123,7 +124,10 @@ const reassignAppointments = async (slotId) => {
                 } catch (sErr) { console.error('[Socket] failed:', sErr.message); }
                 
                 // Notify user
-                if (appt.user_email) {
+                const userEmailEnabled = appt.email_notification_enabled !== false;
+                const orgEmailEnabled = appt.org_email_enabled !== false;
+
+                if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
                     emailService.sendReassignmentEmail(appt.user_email, appt, altSlot).catch(emailErr => {
                         console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
                     });
@@ -138,9 +142,13 @@ const reassignAppointments = async (slotId) => {
                         [appt.id]
                     );
                     console.log(`[Reassignment] Appt ${appt.id} marked as WAITLISTED_URGENT (No slots today)`);
-                    emailService.sendWaitlistEmail(appt.user_email, appt).catch(emailErr => {
-                        console.error(`[Reassignment-Waitlist] Email failed for ${appt.user_email}:`, emailErr.message);
-                    });
+                    const userEmailEnabled = appt.email_notification_enabled !== false;
+                    const orgEmailEnabled = appt.org_email_enabled !== false;
+                    if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
+                        emailService.sendWaitlistEmail(appt.user_email, appt).catch(emailErr => {
+                            console.error(`[Reassignment-Waitlist] Email failed for ${appt.user_email}:`, emailErr.message);
+                        });
+                    }
                 } else {
                     // Standard reschedule/pending
                     await client.query(
@@ -148,9 +156,13 @@ const reassignAppointments = async (slotId) => {
                         [appt.id]
                     );
                     console.log(`[Reassignment] Appt ${appt.id} marked as PENDING (Needs Rescheduling)`);
-                    emailService.sendRescheduleEmail(appt.user_email, appt).catch(emailErr => {
-                        console.error(`[Reassignment-Reschedule] Email failed for ${appt.user_email}:`, emailErr.message);
-                    });
+                    const userEmailEnabled = appt.email_notification_enabled !== false;
+                    const orgEmailEnabled = appt.org_email_enabled !== false;
+                    if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
+                        emailService.sendRescheduleEmail(appt.user_email, appt).catch(emailErr => {
+                            console.error(`[Reassignment-Reschedule] Email failed for ${appt.user_email}:`, emailErr.message);
+                        });
+                    }
 
                     // Emit Socket Update
                     try {
@@ -227,7 +239,8 @@ const fillSlotFromWaitlist = async (slotId) => {
         while (filledCount < remainingCapacity) {
             const eligibleQuery = await client.query(
                 `SELECT a.*, u.email as user_email, u.name as user_name,
-                        s.name as service_name, o.name as org_name
+                        u.email_notification_enabled, u.notification_enabled,
+                        s.name as service_name, o.name as org_name, o.email_notification as org_email_enabled
                  FROM appointments a
                  LEFT JOIN users u ON a.user_id = u.id
                  JOIN services s ON a.service_id = s.id
@@ -273,9 +286,10 @@ const fillSlotFromWaitlist = async (slotId) => {
 
             filledCount++;
             
-            // 4. Notify
-            // Notify user only if email is available
-            if (appt.user_email) {
+            // Notify user only if enabled
+            const userEmailEnabled = appt.email_notification_enabled !== false;
+            const orgEmailEnabled = appt.org_email_enabled !== false;
+            if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
                 emailService.sendReassignmentEmail(appt.user_email, appt, slot).catch(err => {
                     console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
                 });
@@ -338,7 +352,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
         const apptsRes = await client.query(
             `SELECT a.id, a.slot_id, a.user_id, a.status, a.created_at,
                     u.email as user_email, u.name as user_name,
-                    o.name as org_name, s.name as service_name, a.preferred_date
+                    u.email_notification_enabled, u.notification_enabled,
+                    o.name as org_name, o.email_notification as org_email_enabled, 
+                    s.name as service_name, a.preferred_date
              FROM appointments a
              LEFT JOIN users u ON a.user_id = u.id
              JOIN services s ON a.service_id = s.id
@@ -405,7 +421,9 @@ const rebalanceResourceSlots = async (resourceId, date) => {
                 [update.newSlotId, resourceId, newDate, update.apptId]
             );
 
-            if (update.appt.user_email) {
+            const userEmailEnabled = update.appt.email_notification_enabled !== false;
+            const orgEmailEnabled = update.appt.org_email_enabled !== false;
+            if (update.appt.user_email && userEmailEnabled && orgEmailEnabled) {
                 emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot).catch(err => {
                     console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
                 });

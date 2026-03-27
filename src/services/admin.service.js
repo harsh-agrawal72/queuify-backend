@@ -793,7 +793,9 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                            COALESCE(u.email, 'Walk-in') as user_email, 
                            COALESCE(u.phone, ${hasCustomerPhone ? 'a.customer_phone' : 'NULL'}, 'Not Provided') as user_phone,
                            u.email_notification_enabled,
-                           o.name as org_name, s.name as service_name
+                           u.notification_enabled,
+                           o.name as org_name, s.name as service_name,
+                           o.email_notification as org_email_enabled, o.new_booking_notification as org_notify_enabled
                     FROM appointments a
                     LEFT JOIN users u ON a.user_id = u.id
                     LEFT JOIN organizations o ON a.org_id = o.id
@@ -809,11 +811,14 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
 
                 console.log(`[Email-Async] Data fetched. User: ${data.user_email}, Status: ${status}`);
 
-                if (data.user_email && data.email_notification_enabled !== false) {
+                const userEmailEnabled = data.email_notification_enabled !== false;
+                const orgEmailEnabled = data.org_email_enabled !== false;
+
+                if (data.user_email && userEmailEnabled && orgEmailEnabled) {
                     console.log(`[Email-Async] Sending user email to ${data.user_email}`);
                     await emailService.sendStatusUpdateEmail(data.user_email, data);
                 } else {
-                    console.log(`[Email-Async] User email skipped (No email or disabled). Enabled: ${data.email_notification_enabled}`);
+                    console.log(`[Email-Async] User email skipped (Settings: User=${userEmailEnabled}, Org=${orgEmailEnabled})`);
                 }
 
                 // Notify Admins of status change
@@ -855,14 +860,19 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                     }
                 }
 
-                if (appointment.user_id || updatedAppointment.user_id) {
-                     await notificationService.sendNotification(
-                        appointment.user_id || updatedAppointment.user_id,
-                        'Appointment Status Updated',
-                        `Your appointment status for ${data?.service_name || 'Service'} is now ${status.toUpperCase()}. Token: #${data.token_number || 'N/A'}`,
-                        'appointment',
-                        `/appointments`
-                    );
+                const userNotifyEnabled = data.notification_enabled !== false;
+                const orgNotifyEnabled = data.org_notify_enabled !== false;
+
+                if (userNotifyEnabled && orgNotifyEnabled) {
+                    if (appointment.user_id || updatedAppointment.user_id) {
+                         await notificationService.sendNotification(
+                            appointment.user_id || updatedAppointment.user_id,
+                            'Appointment Status Updated',
+                            `Your appointment status for ${data?.service_name || 'Service'} is now ${status.toUpperCase()}. Token: #${data.token_number || 'N/A'}`,
+                            'appointment',
+                            `/appointments`
+                        );
+                    }
                 }
             } catch (e) { console.error('[Email-Async] CRITICAL FAILURE:', e); }
         })();
@@ -920,12 +930,15 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
             (async () => {
                 try {
                     console.log(`[Email-Async] [Deletion] Starting for Appointment: ${appointmentId}`);
-                    const userRes = await pool.query('SELECT name, email, email_notification_enabled FROM users WHERE id = $1', [appointment.user_id]);
+                    const userRes = await pool.query('SELECT name, email, email_notification_enabled, notification_enabled FROM users WHERE id = $1', [appointment.user_id]);
                     const userData = userRes.rows[0];
-                    const orgRes = await pool.query('SELECT name, contact_email, email_notification FROM organizations WHERE id = $1', [orgId]);
+                    const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [orgId]);
                     const org = orgRes.rows[0];
 
-                    if (userData && userData.email && userData.email_notification_enabled !== false) {
+                    const userEmailEnabled = userData && userData.email_notification_enabled !== false;
+                    const orgEmailEnabled = org && (org.email_notification !== false);
+
+                    if (userData && userData.email && userEmailEnabled && orgEmailEnabled) {
                         await emailService.sendCancellationEmail(userData.email, {
                             ...cancelledAppt,
                             org_name: org.name,
@@ -951,14 +964,19 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
                         }
                     }
 
-                    const notificationService = require('./notification.service');
-                    await notificationService.sendNotification(
-                        appointment.user_id,
-                        'Appointment Cancelled',
-                        `Your appointment${appointment.token_number ? ` (#${appointment.token_number})` : ''} has been cancelled by the administrator.`,
-                        'appointment',
-                        `/appointments`
-                    );
+                    const userNotifyEnabled = userData && userData.notification_enabled !== false;
+                    const orgNotifyEnabled = org && org.new_booking_notification !== false;
+
+                    if (userNotifyEnabled && orgNotifyEnabled) {
+                        const notificationService = require('./notification.service');
+                        await notificationService.sendNotification(
+                            appointment.user_id,
+                            'Appointment Cancelled',
+                            `Your appointment${appointment.token_number ? ` (#${appointment.token_number})` : ''} has been cancelled by the administrator.`,
+                            'appointment',
+                            `/appointments`
+                        );
+                    }
                 } catch (e) {
                     console.error('Admin cancellation notification failed:', e);
                 }

@@ -668,21 +668,27 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
                 const orgRes = await pool.query('SELECT contact_email, email_notification FROM organizations WHERE id = $1', [appointment.org_id]);
                 const org = orgRes.rows[0];
 
+                const userEmailEnabled = user && user.email_notification_enabled !== false;
+                const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
+                const userNotifyEnabled = user && user.notification_enabled !== false;
+
                 try {
-                    if (user && user.email && user.email_notification_enabled !== false) {
-                        await emailService.sendBookingConfirmation(user.email, appointmentWithDetails); // Reuse booking confirmation for new time
+                    if (orgEmailEnabled && userEmailEnabled && user?.email) {
+                        await emailService.sendBookingConfirmation(user.email, appointmentWithDetails);
                     }
                 } catch (emailErr) {
                     console.error(`[Reschedule-Async] Email failed:`, emailErr.message);
                 }
 
-                await notificationService.sendNotification(
-                    appointment.user_id,
-                    'Appointment Rescheduled',
-                    `Your appointment has been successfully moved to ${new Date(appointmentWithDetails.slot_start).toLocaleString()}. New Token: #${rank}`,
-                    'appointment',
-                    `/appointments`
-                );
+                if (userNotifyEnabled) {
+                    await notificationService.sendNotification(
+                        appointment.user_id,
+                        'Appointment Rescheduled',
+                        `Your appointment has been successfully moved to ${new Date(appointmentWithDetails.slot_start).toLocaleString()}. New Token: #${appointment.token_number || 1}`,
+                        'appointment',
+                        `/appointments`
+                    );
+                }
 
                 // Notify Admins
                 const admins = await userModel.getAdminsByOrg(appointment.org_id);
@@ -778,25 +784,33 @@ const checkAndNotifySlotWaiters = async (slotId) => {
                     }
 
                     // B. Internal Notification
-                    const notifyTitle = autoBooked ? 'Appointment Auto-Booked!' : (autoBookError ? 'Auto-Booking Failed' : 'Slot Time Reached!');
-                    const notifyMessage = autoBooked 
-                        ? `Good news! Your appointment for ${serviceData?.service_name} was automatically booked for you as the time reached ${timeStr}.`
-                        : (autoBookError 
-                            ? `We tried to auto-book your appointment for ${serviceData?.service_name}, but it failed: ${autoBookError}. Please book manually now!`
-                            : `The estimated time for ${serviceData?.service_name || 'your slot'} has reached ${timeStr}. Book now!`);
+                    const userNotifyEnabled = req.notification_enabled !== false;
+                    const orgNotifyEnabled = req.org_notify_enabled !== false;
 
-                    await notificationService.sendNotification(
-                        req.user_id,
-                        notifyTitle,
-                        notifyMessage,
-                        'slot_update',
-                        autoBooked ? '/appointments' : '/dashboard'
-                    );
+                    if (userNotifyEnabled && orgNotifyEnabled) {
+                        const notifyTitle = autoBooked ? 'Appointment Auto-Booked!' : (autoBookError ? 'Auto-Booking Failed' : 'Slot Time Reached!');
+                        const notifyMessage = autoBooked 
+                            ? `Good news! Your appointment for ${serviceData?.service_name} was automatically booked for you as the time reached ${timeStr}.`
+                            : (autoBookError 
+                                ? `We tried to auto-book your appointment for ${serviceData?.service_name}, but it failed: ${autoBookError}. Please book manually now!`
+                                : `The estimated time for ${serviceData?.service_name || 'your slot'} has reached ${timeStr}. Book now!`);
+
+                        await notificationService.sendNotification(
+                            req.user_id,
+                            notifyTitle,
+                            notifyMessage,
+                            'slot_update',
+                            autoBooked ? '/appointments' : '/dashboard'
+                        );
+                    }
                     
                     notificationIds.push(req.id);
                     
                     // C. Email Notification
-                    if (req.user_email) {
+                    const userEmailEnabled = req.email_notification_enabled !== false;
+                    const orgEmailEnabled = req.org_email_enabled !== false;
+
+                    if (req.user_email && userEmailEnabled && orgEmailEnabled) {
                         try {
                             const emailSubject = autoBooked ? 'Appointment Auto-Booked Successfully' : 'Your Slot Time Reached';
                             const emailText = autoBooked
@@ -833,15 +847,24 @@ const proposeReschedule = async (appointmentId, orgId, proposedSlotId, reason) =
                 const slot = await slotModel.getSlotById(proposedSlotId);
                 const timeStr = new Date(slot.start_time).toLocaleString();
 
-                await notificationService.sendNotification(
-                    appointment.user_id,
-                    'Reschedule Proposed',
-                    `Business has proposed a new time: ${timeStr}. Reason: ${reason}. Accept for priority!`,
-                    'appointment',
-                    `/appointments`
-                );
+                const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [orgId]);
+                const org = orgRes.rows[0];
+                const userEmailEnabled = user && user.email_notification_enabled !== false;
+                const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
+                const userNotifyEnabled = user && user.notification_enabled !== false;
+                const orgNotifyEnabled = org && (org.new_booking_notification === true || org.new_booking_notification === null);
 
-                if (user && user.email) {
+                if (userNotifyEnabled && orgNotifyEnabled) {
+                    await notificationService.sendNotification(
+                        appointment.user_id,
+                        'Reschedule Proposed',
+                        `Business has proposed a new time: ${timeStr}. Reason: ${reason}. Accept for priority!`,
+                        'appointment',
+                        `/appointments`
+                    );
+                }
+
+                if (userEmailEnabled && orgEmailEnabled && user?.email) {
                     await emailService.sendGenericEmail(user.email, 'Reschedule Proposal', `The business has proposed a new time for your appointment: ${timeStr}. \n\nReason: ${reason}\n\nPlease visit your dashboard to accept or decline.`);
                 }
             } catch (e) { console.error('[Propose-Async] Error:', e); }

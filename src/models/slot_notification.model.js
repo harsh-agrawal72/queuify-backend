@@ -15,14 +15,16 @@ const createNotificationRequest = async (data) => {
     return result.rows[0];
 };
 
-/**
- * Get pending notifications for a slot that meet the time criteria
- */
 const getPendingNotificationsForSlot = async (slotId, currentEstimatedTime) => {
     const result = await pool.query(
-        `SELECT sn.*, u.name as user_name, u.email as user_email 
+        `SELECT sn.*, 
+                u.name as user_name, u.email as user_email, 
+                u.email_notification_enabled, u.notification_enabled,
+                o.email_notification as org_email_enabled, o.new_booking_notification as org_notify_enabled
          FROM slot_notifications sn
          JOIN users u ON sn.user_id = u.id
+         JOIN services s ON sn.service_id = s.id
+         JOIN organizations o ON s.org_id = o.id
          WHERE sn.slot_id = $1 AND sn.status = 'pending' AND sn.desired_time <= $2`,
         [slotId, currentEstimatedTime]
     );
