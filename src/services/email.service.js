@@ -1,32 +1,13 @@
-const nodemailer = require('nodemailer');
+const Mailjet = require('node-mailjet');
 const config = require('../config/config');
 
 const VERSION_TAG = "[EMAIL-SERVICE]";
-console.log(`${VERSION_TAG} Initializing Nodemailer SMTP...`);
+console.log(`${VERSION_TAG} Initializing Mailjet API Client...`);
 
-const transporter = nodemailer.createTransport({
-    // Direct IPv4 address for smtp.hostinger.com to bypass DNS-forced IPv6 routing issues
-    host: '172.65.255.143', 
-    port: config.email.smtp.port,
-    secure: config.email.smtp.port === 465, // true for 465, false for 587
-    auth: {
-        user: config.email.smtp.user,
-        pass: config.email.smtp.pass,
-    },
-    tls: {
-        // Ensure certificate validation still works against the original hostname
-        servername: config.email.smtp.host,
-        rejectUnauthorized: true
-    },
-    connectionTimeout: 15000, // 15 seconds
-    greetingTimeout: 15000,
-});
-
-transporter.verify().then(() => {
-    console.log(`${VERSION_TAG} Connected to SMTP server (${config.email.smtp.host}) successfully`);
-}).catch((err) => {
-    console.error(`${VERSION_TAG} Unable to connect to SMTP server. Ensure .env has correct keys. Error:`, err.message);
-});
+const mailjet = Mailjet.apiConnect(
+    config.email.mailjet.apiKey || 'placeholder',
+    config.email.mailjet.apiSecret || 'placeholder'
+);
 
 const wrapInProfessionalLayout = (content) => `
     <!DOCTYPE html>
@@ -65,19 +46,38 @@ const wrapInProfessionalLayout = (content) => `
 
 const sendEmail = async (to, subject, html) => {
     try {
-        console.log(`${VERSION_TAG} Sending email to: ${to}`);
+        console.log(`${VERSION_TAG} Sending email via Mailjet API to: ${to}`);
 
-        const result = await transporter.sendMail({
-            from: config.email.from, // e.g. "Queuify Support" <support@queuify.in>
-            to: to,
-            subject: subject,
-            html: html
-        });
+        const request = await mailjet
+            .post("send", { 'version': 'v3.1' })
+            .request({
+                "Messages": [
+                    {
+                        "From": {
+                            "Email": config.email.from,
+                            "Name": "Queuify Support"
+                        },
+                        "To": [
+                            {
+                                "Email": to,
+                                "Name": to.split('@')[0]
+                            }
+                        ],
+                        "Subject": subject,
+                        "HTMLPart": html
+                    }
+                ]
+            });
 
-        console.log(`${VERSION_TAG} Delivery MessageID: ${result.messageId}`);
-        return result;
+        console.log(`${VERSION_TAG} Email sent successfully via Mailjet API. Status: ${request.response.status}`);
+        return request.body;
     } catch (error) {
-        console.error(`${VERSION_TAG} Email Error for ${to}:`, error.message);
+        console.error(`${VERSION_TAG} Mailjet API Error for ${to}:`, error.statusCode);
+        if (error.response && error.response.body) {
+            console.error(`${VERSION_TAG} Error details:`, JSON.stringify(error.response.body, null, 2));
+        } else {
+            console.error(`${VERSION_TAG} Error message:`, error.message);
+        }
         throw error;
     }
 };
