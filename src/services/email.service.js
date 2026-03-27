@@ -81,6 +81,7 @@ const sendEmail = async (to, subject, html) => {
         const { data, error } = await resend.emails.send({
             from: `Queuify Notification <support@queuify.in>`,
             to: [to],
+            reply_to: 'support@queuify.in',
             subject: subject,
             html: html,
         });
@@ -101,9 +102,6 @@ const sendEmail = async (to, subject, html) => {
 module.exports = {
     sendEmail,
 
-    /**
-     * Confirmation sent to the User
-     */
     sendBookingConfirmation: async (to, appointment) => {
         const subject = 'Appointment Confirmed! - Queuify';
         const userName = appointment.user_name || appointment.customer_name || 'Customer';
@@ -147,9 +145,6 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
-    /**
-     * Cancellation Notice
-     */
     sendCancellationEmail: async (to, appointment) => {
         const subject = 'Cancellation Notice - Queuify';
         const serviceName = appointment.service_name || 'Service';
@@ -172,9 +167,6 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
-    /**
-     * Status Update (confirmed, pending, serving, completed)
-     */
     sendStatusUpdateEmail: async (to, appointment) => {
         const status = (appointment.status || 'Updated').toUpperCase();
         const orgName = appointment.org_name || 'Organization';
@@ -213,9 +205,6 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
-    /**
-     * Arrival Reminder (sent by cron/workers)
-     */
     sendReminderEmail: async (to, appointment) => {
         const subject = 'Reminder: Your Appointment is Starting Soon';
         const userName = appointment.user_name || 'there';
@@ -241,9 +230,6 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
-    /**
-     * Admin Notification of new booking
-     */
     sendAdminBookingNotification: async (to, appointment) => {
         const tokenNumber = appointment.token_number || appointment.tokenNumber || 'N/A';
         const subject = `New Booking: #${tokenNumber} - ${appointment.service_name || 'Service'}`;
@@ -282,9 +268,6 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
-    /**
-     * Verification emails
-     */
     sendOrgVerificationEmail: async (to, token) => {
         const subject = 'Verify Your Organization Email';
         const verificationUrl = `${config.clientUrl}/verify-org-email?token=${token}`;
@@ -422,5 +405,25 @@ module.exports = {
             </div>
         `, 'Great news: We\'ve optimized your appointment time.');
         await sendEmail(to, subject, html);
+    },
+
+    sendContactFormEmail: async (adminEmail, contactData) => {
+        const { name, email, subject, message } = contactData;
+        const emailSubject = `Contact Form: ${subject}`;
+        const html = wrapInProfessionalLayout(`
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">New Contact Message</h2>
+            <p style="color: #64748b; font-size: 16px;">You have a new submission from your website's contact form.</p>
+            
+            <div class="info-card" style="text-align: left;">
+                <p><strong>From:</strong> ${name} (<a href="mailto:${email}">${email}</a>)</p>
+                <p><strong>Subject:</strong> ${subject}</p>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <p style="margin:0; font-weight: 700;">Message:</p>
+                    <p style="white-space: pre-wrap; margin-top: 5px; color: #334155;">${message}</p>
+                </div>
+            </div>
+            <p style="font-size: 12px; color: #64748b; text-align: center;">This message was generated from the Queuify contact form.</p>
+        `, `New Message from ${name}: ${subject}`);
+        await sendEmail(adminEmail, emailSubject, html);
     }
 };
