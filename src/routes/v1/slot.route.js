@@ -23,7 +23,7 @@ router
 
 router
     .route('/:slotId/notify')
-    .post(auth('user'), slotController.requestSlotNotification);
+    .post(auth('user'), validate(slotValidation.requestSlotNotification), slotController.requestSlotNotification);
 
 module.exports = {
     router

@@ -473,9 +473,9 @@ const respondToReschedule = async (appointmentId, userId, action) => {
     try {
         await client.query('BEGIN');
         
-        // 1. Fetch appointment
+        // 1. Fetch appointment (With explicit uuid casts for reliability)
         const apptRes = await client.query(
-            'SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE',
+            'SELECT * FROM appointments WHERE id = $1::uuid AND user_id = $2::uuid FOR UPDATE',
             [appointmentId, userId]
         );
         if (apptRes.rows.length === 0) throw new Error('Appointment not found');
@@ -487,7 +487,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
             await client.query(
                 `UPDATE appointments 
                  SET proposed_slot_id = NULL, reschedule_status = 'declined' 
-                 WHERE id = $1`,
+                 WHERE id = $1::uuid`,
                 [appointmentId]
             );
             await client.query('COMMIT');
@@ -499,7 +499,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
         
         // 2. Fetch and Lock new slot
         const slotRes = await client.query(
-            'SELECT * FROM slots WHERE id = $1 AND is_active = TRUE FOR UPDATE',
+            'SELECT * FROM slots WHERE id = $1::uuid AND is_active = TRUE FOR UPDATE',
             [newSlotId]
         );
         const newSlot = slotRes.rows[0];
@@ -509,26 +509,27 @@ const respondToReschedule = async (appointmentId, userId, action) => {
         // 3. Update occupancy
         if (appt.slot_id) {
             await client.query(
-                'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1',
+                'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1::uuid',
                 [appt.slot_id]
             );
         }
         await client.query(
-            'UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1',
+            'UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1::uuid',
             [newSlotId]
         );
 
-        const newPreferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(newSlot.start_time));
+        // Safer date formatting (YYYY-MM-DD)
+        const newPreferredDate = new Date(newSlot.start_time).toISOString().split('T')[0];
 
         // 4. Update Appointment with PRIORITY (Token #1 logic)
         // To ensure Token #1, we set created_at to a very early timestamp for this partition
         const updatedApptRes = await client.query(
             `UPDATE appointments 
-             SET slot_id = $1, resource_id = $2, preferred_date = $3, 
-                 created_at = '1970-01-01 00:00:00', -- This ensures they are FIRST in Rank calculation
+             SET slot_id = $1::uuid, resource_id = $2::uuid, preferred_date = $3, 
+                 created_at = '1970-01-01 00:00:00', -- Token #1 Override
                  is_priority = TRUE, reschedule_status = 'accepted', reschedule_count = 0,
                  proposed_slot_id = NULL
-             WHERE id = $4 RETURNING *`,
+             WHERE id = $4::uuid RETURNING *`,
             [newSlotId, newSlot.resource_id, newPreferredDate, appointmentId]
         );
         

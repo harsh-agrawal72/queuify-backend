@@ -58,9 +58,17 @@ const deleteSlot = catchAsync(async (req, res) => {
 
 const requestSlotNotification = catchAsync(async (req, res) => {
     const { slotId } = req.params;
-    const { desiredTime } = req.body;
+    const { desiredTime, serviceId, resourceId, autoBook, customerPhone } = req.body;
     const userId = req.user.id;
-    const notification = await slotService.requestSlotNotification(userId, slotId, desiredTime);
+    const notification = await slotService.requestSlotNotification(
+        userId, 
+        slotId, 
+        desiredTime, 
+        serviceId, 
+        resourceId, 
+        autoBook, 
+        customerPhone
+    );
     res.status(httpStatus.CREATED).send(notification);
 });
 

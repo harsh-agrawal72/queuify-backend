@@ -26,7 +26,21 @@ const getSlots = {
     }),
 };
 
+const requestSlotNotification = {
+    params: Joi.object().keys({
+        slotId: Joi.string().uuid().required()
+    }),
+    body: Joi.object().keys({
+        desiredTime: Joi.date().iso().required(),
+        serviceId: Joi.string().uuid().required(),
+        resourceId: Joi.string().uuid().required(),
+        autoBook: Joi.boolean().default(false),
+        customerPhone: Joi.string().allow(null, '')
+    })
+};
+
 module.exports = {
     createSlot,
     getSlots,
+    requestSlotNotification
 };

@@ -261,9 +261,17 @@ const updateSlot = async (slotId, orgId, updateBody) => {
     }
 };
 
-const requestSlotNotification = async (userId, slotId, desiredTime) => {
+const requestSlotNotification = async (userId, slotId, desiredTime, serviceId, resourceId, autoBook, customerPhone) => {
     const slotNotificationModel = require('../models/slot_notification.model');
-    return slotNotificationModel.createNotificationRequest(userId, slotId, desiredTime);
+    return slotNotificationModel.createNotificationRequest({
+        userId,
+        slotId,
+        desiredTime,
+        serviceId,
+        resourceId,
+        autoBook,
+        customerPhone
+    });
 };
 
 module.exports = {
