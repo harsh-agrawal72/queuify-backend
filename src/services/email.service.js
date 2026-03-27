@@ -76,6 +76,11 @@ const formatTime = (time) => {
  */
 const sendEmail = async (to, subject, html, replyTo = 'support@queuify.in') => {
     try {
+        if (config.email.enabled === false) {
+            console.warn(`${VERSION_TAG} [PAUSED] Email sending is DISABLED via config. Skipping API call to: ${to}`);
+            return { id: 'skipped-due-to-config', status: 'skipped' };
+        }
+
         console.log(`${VERSION_TAG} Sending email via Resend API to: ${to} (Reply-To: ${replyTo})`);
 
         const { data, error } = await resend.emails.send({
