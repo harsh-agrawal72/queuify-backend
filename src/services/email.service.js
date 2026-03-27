@@ -74,14 +74,14 @@ const formatTime = (time) => {
 /**
  * Core send mail function
  */
-const sendEmail = async (to, subject, html) => {
+const sendEmail = async (to, subject, html, replyTo = 'support@queuify.in') => {
     try {
-        console.log(`${VERSION_TAG} Sending email via Resend API to: ${to}`);
+        console.log(`${VERSION_TAG} Sending email via Resend API to: ${to} (Reply-To: ${replyTo})`);
 
         const { data, error } = await resend.emails.send({
             from: `Queuify Notification <support@queuify.in>`,
             to: [to],
-            reply_to: 'support@queuify.in',
+            reply_to: replyTo,
             subject: subject,
             html: html,
         });
@@ -109,6 +109,7 @@ module.exports = {
         const serviceName = appointment.service_name || 'Service';
         const tokenNumber = appointment.token_number || appointment.tokenNumber || 'QUEUED';
         const startTime = appointment.start_time || appointment.startTime || appointment.preferred_date;
+        const replyTo = appointment.org_contact_email || 'support@queuify.in';
 
         const html = wrapInProfessionalLayout(`
             <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Appointment Confirmed!</h2>
@@ -136,13 +137,17 @@ module.exports = {
                 </div>
             </div>
 
-            <div style="text-align: center; margin-top: 32px;">
+            <p style="text-align: center; font-size: 14px; color: #4f46e5; margin-top: 20px;">
+                <strong>Got questions?</strong> Reply to this email to contact <strong>${orgName}</strong>.
+            </p>
+
+            <div style="text-align: center; margin-top: 12px;">
                 <a href="${config.clientUrl}/dashboard" class="button">View My Appointment</a>
             </div>
             
             <p style="text-align: center; font-size: 14px; color: #94a3b8; margin-top: 24px;">Please arrive 10 minutes prior to your scheduled time. Show this email at the reception if requested.</p>
         `, `Confirmed: #${tokenNumber} for ${serviceName} at ${orgName}`);
-        await sendEmail(to, subject, html);
+        await sendEmail(to, subject, html, replyTo);
     },
 
     sendCancellationEmail: async (to, appointment) => {
@@ -150,6 +155,7 @@ module.exports = {
         const serviceName = appointment.service_name || 'Service';
         const orgName = appointment.org_name || 'Organization';
         const reason = appointment.cancellation_reason || 'Schedule adjustment or administrative request.';
+        const replyTo = appointment.org_contact_email || 'support@queuify.in';
         
         const html = wrapInProfessionalLayout(`
             <h2 style="color:#ef4444; margin: 0; font-size: 24px;">Appointment Cancelled</h2>
@@ -164,7 +170,7 @@ module.exports = {
                 <a href="${config.clientUrl}/dashboard" class="button" style="background: #ef4444; box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);">Book New Appointment</a>
             </div>
         `, `Update: Appointment for ${serviceName} has been cancelled.`);
-        await sendEmail(to, subject, html);
+        await sendEmail(to, subject, html, replyTo);
     },
 
     sendStatusUpdateEmail: async (to, appointment) => {
@@ -172,6 +178,7 @@ module.exports = {
         const orgName = appointment.org_name || 'Organization';
         const serviceName = appointment.service_name || 'Service';
         const subject = `Update: ${status} - ${serviceName}`;
+        const replyTo = appointment.org_contact_email || 'support@queuify.in';
         
         const statusColors = {
             'SERVING': { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' },
@@ -202,7 +209,7 @@ module.exports = {
                 <a href="${config.clientUrl}/dashboard" class="button">Track Real-time Status</a>
             </div>
         `, `Your appointment for ${serviceName} is now ${status}.`);
-        await sendEmail(to, subject, html);
+        await sendEmail(to, subject, html, replyTo);
     },
 
     sendReminderEmail: async (to, appointment) => {
@@ -210,6 +217,7 @@ module.exports = {
         const userName = appointment.user_name || 'there';
         const orgName = appointment.org_name || 'Organization';
         const serviceName = appointment.service_name || 'Service';
+        const replyTo = appointment.org_contact_email || 'support@queuify.in';
 
         const html = wrapInProfessionalLayout(`
             <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Arrival Reminder</h2>
@@ -227,13 +235,14 @@ module.exports = {
                 <a href="${config.clientUrl}/dashboard" class="button" style="background: #d97706; box-shadow: 0 10px 15px -3px rgba(217, 119, 6, 0.3);">I'm On My Way</a>
             </div>
         `, `Reminder: ${serviceName} starts in 15 mins.`);
-        await sendEmail(to, subject, html);
+        await sendEmail(to, subject, html, replyTo);
     },
 
     sendAdminBookingNotification: async (to, appointment) => {
         const tokenNumber = appointment.token_number || appointment.tokenNumber || 'N/A';
         const subject = `New Booking: #${tokenNumber} - ${appointment.service_name || 'Service'}`;
         const userName = appointment.user_name || appointment.customer_name || 'Wait-in Customer';
+        const userEmail = appointment.user_email || appointment.userEmail || 'support@queuify.in';
         const serviceName = appointment.service_name || 'Service';
 
         const html = wrapInProfessionalLayout(`
@@ -261,11 +270,15 @@ module.exports = {
                 </div>
             </div>
 
-            <div style="text-align: center;">
+            <p style="text-align: center; font-size: 14px; color: #4f46e5; margin-top: 20px;">
+                <strong>Want to contact the customer?</strong> Just reply to this email to reach <strong>${userName}</strong>.
+            </p>
+
+            <div style="text-align: center; margin-top: 12px;">
                 <a href="${config.clientUrl}/admin/appointments?search=${appointment.id}" class="button">Manage Booking</a>
             </div>
         `, `New Booking: #${tokenNumber} from ${userName}`);
-        await sendEmail(to, subject, html);
+        await sendEmail(to, subject, html, userEmail);
     },
 
     sendOrgVerificationEmail: async (to, token) => {
