@@ -860,14 +860,17 @@ const respondToReschedule = async (appointmentId, userId, action) => {
     try {
         const result = await appointmentModel.respondToReschedule(appointmentId, userId, action);
         
-        // Notify Admins on response
+        // Notify Admins and User on response
         (async () => {
             try {
                 const appointment = action === 'accept' ? result.appointment : result;
-                const admins = await userModel.getAdminsByOrg(appointment.org_id);
+                const appointmentWithDetails = await appointmentModel.getAppointmentById(appointmentId);
                 const user = await userModel.getUserById(userId);
+                const orgRes = await pool.query('SELECT name, contact_email, email_notification FROM organizations WHERE id = $1', [appointment.org_id]);
+                const org = orgRes.rows[0];
                 
                 const message = `${user?.name || 'User'} has ${action}ed the reschedule proposal.`;
+                const admins = await userModel.getAdminsByOrg(appointment.org_id);
                 
                 for (const admin of admins) {
                     await notificationService.sendNotification(
@@ -879,10 +882,27 @@ const respondToReschedule = async (appointmentId, userId, action) => {
                     );
                 }
 
-                // If accepted, trigger slot notifications for both slots
+                // Email Notifications
+                const userEmailEnabled = user && user.email_notification_enabled !== false;
+                const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
+
                 if (action === 'accept') {
+                    // Send confirmation to User
+                    if (orgEmailEnabled && userEmailEnabled && user?.email) {
+                        await emailService.sendRescheduleAcceptanceEmail(user.email, {
+                            ...appointmentWithDetails,
+                            token_number: appointment.token_number || 1
+                        });
+                    }
+                    
+                    // Trigger slot notifications for both slots
                     if (result.oldSlotId) checkAndNotifySlotWaiters(result.oldSlotId);
                     if (appointment.slot_id) checkAndNotifySlotWaiters(appointment.slot_id);
+                } else if (action === 'decline') {
+                    // Send rejection notice to Admin (Org Contact Email)
+                    if (orgEmailEnabled && org?.contact_email) {
+                        await emailService.sendRescheduleRejectionEmail(org.contact_email, user?.name || 'User', appointmentWithDetails);
+                    }
                 }
             } catch (e) { console.error('[Respond-Async] Error:', e); }
         })();

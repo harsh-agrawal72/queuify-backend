@@ -469,5 +469,58 @@ module.exports = {
             </div>
         `, `Alert: Slot time reached ${estimatedTime} for ${serviceName}`);
         await sendEmail(to, subject, html);
+    },
+
+    sendRescheduleAcceptanceEmail: async (to, appointment) => {
+        const subject = 'Success: Your Appointment Reschedule is Confirmed';
+        const userName = appointment.user_name || 'Customer';
+        const orgName = appointment.org_name || 'Organization';
+        const serviceName = appointment.service_name || 'Service';
+        const startTime = appointment.start_time || appointment.slot_start;
+        const replyTo = appointment.org_contact_email || 'support@queuify.in';
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="color: #4f46e5; margin: 0; font-size: 24px;">Reschedule Confirmed!</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello <strong>${userName}</strong>, the reschedule proposal for <strong>${serviceName}</strong> has been accepted and confirmed.</p>
+            
+            <div class="info-card">
+                <div class="detail-label">New Time & Date</div>
+                <div style="font-size: 20px; font-weight: 700; color: #1e293b; margin: 12px 0;">${formatTime(startTime)}</div>
+                <div class="detail-label" style="margin-top: 16px;">Token ID</div>
+                <div style="font-size: 16px; font-weight: 600; color: #475569;">#${appointment.token_number || appointment.tokenNumber || '1'}</div>
+            </div>
+
+            <div style="text-align: center; margin-top: 32px;">
+                <a href="${config.clientUrl}/dashboard" class="button">View Appointment</a>
+            </div>
+            
+            <p style="text-align: center; font-size: 14px; color: #94a3b8; margin-top: 24px;">Please arrive 10 minutes prior to your new scheduled time.</p>
+        `, `Confirmed: New time for ${serviceName} at ${orgName}`);
+        await sendEmail(to, subject, html, replyTo);
+    },
+
+    sendRescheduleRejectionEmail: async (to, userName, appointment) => {
+        const subject = `Rejected: Reschedule Proposal for ${appointment.service_name || 'Appointment'}`;
+        const serviceName = appointment.service_name || 'Service';
+        const orgName = appointment.org_name || 'Organization';
+        
+        const html = wrapInProfessionalLayout(`
+            <h2 style="color: #ef4444; margin: 0; font-size: 24px;">Proposal Rejected</h2>
+            <p style="color: #64748b; font-size: 16px;">The user <strong>${userName}</strong> has chosen to keep their original slot and rejected the reschedule proposal for <strong>${serviceName}</strong>.</p>
+            
+            <div class="info-card">
+                <p style="margin: 0; color: #1e293b; font-weight: 600;">Original Appointment remains unchanged.</p>
+                <p style="margin: 8px 0 0 0; color: #64748b; font-size: 14px;">Appointment ID: ${appointment.id}</p>
+                <div class="detail-row" style="margin-top: 16px;">
+                    <span class="detail-label">Original Time</span>
+                    <span class="detail-value">${formatTime(appointment.start_time || appointment.slot_start)}</span>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 32px;">
+                <a href="${config.clientUrl}/admin/appointments?search=${appointment.id}" class="button">Manage Appointment</a>
+            </div>
+        `, `Notification: Reschedule rejected by ${userName}`);
+        await sendEmail(to, subject, html);
     }
 };
