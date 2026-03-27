@@ -43,7 +43,10 @@ router.route('/appointments/:id')
     .delete(superadminController.cancelAppointment);
 
 router.get('/analytics', superadminController.getAnalytics);
+router.get('/analytics/revenue', superadminController.getRevenueAnalytics);
+router.get('/analytics/health', superadminController.getOrgHealthScores);
 router.get('/system', superadminController.getSystemHealth);
 router.get('/activity', superadminController.getRecentActivity);
+router.get('/activity/audit-trail', superadminController.getPlatformAuditTrail);
 
 module.exports = router;

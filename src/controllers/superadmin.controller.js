@@ -81,8 +81,8 @@ const getGlobalAppointments = catchAsync(async (req, res) => {
         const result = await superadminService.getOrgBookings(orgId, filters, options);
         res.send(result);
     } else {
-        // Default: Aggregated View
-        const stats = await superadminService.getGlobalBookingStats();
+        // Default: Aggregated View (or search)
+        const stats = await superadminService.getGlobalBookingStats(req.query.search);
         res.send(stats);
     }
 });
@@ -141,6 +141,29 @@ const getGlobalMonitor = catchAsync(async (req, res) => {
     res.send(data);
 });
 
+const getRevenueAnalytics = catchAsync(async (req, res) => {
+    const data = await superadminService.getRevenueAnalytics();
+    res.send(data);
+});
+
+const getOrgHealthScores = catchAsync(async (req, res) => {
+    const data = await superadminService.getOrgHealthScores();
+    res.send(data);
+});
+
+const getPlatformAuditTrail = catchAsync(async (req, res) => {
+    const filters = {
+        action: req.query.action,
+        orgId: req.query.orgId
+    };
+    const options = {
+        page: parseInt(req.query.page, 10) || 1,
+        limit: parseInt(req.query.limit, 10) || 50
+    };
+    const data = await superadminService.getPlatformAuditTrail(filters, options);
+    res.send(data);
+});
+
 module.exports = {
     getOverview,
     getGlobalMonitor,
@@ -162,5 +185,8 @@ module.exports = {
     updateAdminStatus,
     deleteAdmin,
     verifyOrganization,
-    unverifyOrganization
+    unverifyOrganization,
+    getRevenueAnalytics,
+    getOrgHealthScores,
+    getPlatformAuditTrail
 };

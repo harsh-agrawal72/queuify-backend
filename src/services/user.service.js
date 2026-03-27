@@ -3,6 +3,7 @@ const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
 const bcrypt = require('bcryptjs');
 const appointmentService = require('./appointment.service');
+const cacheService = require('./cache.service');
 
 /**
  * Get user statistics
@@ -10,83 +11,85 @@ const appointmentService = require('./appointment.service');
  * @returns {Promise<Object>}
  */
 const getUserStats = async (userId) => {
-    // 1. Total Appointments
-    const totalRes = await pool.query(
-        'SELECT COUNT(*) FROM appointments WHERE user_id = $1',
-        [userId]
-    );
+    return cacheService.getOrSet(`user_stats_${userId}`, async () => {
+        // 1. Total Appointments
+        const totalRes = await pool.query(
+            'SELECT COUNT(*) FROM appointments WHERE user_id = $1',
+            [userId]
+        );
 
-    // 2. Upcoming (status in ['confirmed', 'pending', 'serving'] AND start_time > NOW())
-    const upcomingRes = await pool.query(`
-        SELECT COUNT(*) FROM appointments a
-        JOIN slots s ON a.slot_id = s.id
-        WHERE a.user_id = $1 
-        AND a.status IN ('confirmed', 'pending', 'serving')
-        AND s.start_time > NOW()
-    `, [userId]);
+        // 2. Upcoming
+        const upcomingRes = await pool.query(`
+            SELECT COUNT(*) FROM appointments a
+            JOIN slots s ON a.slot_id = s.id
+            WHERE a.user_id = $1 
+            AND a.status IN ('confirmed', 'pending', 'serving')
+            AND s.start_time > NOW()
+        `, [userId]);
 
-    // 3. Completed (status = 'completed' OR status = 'no_show')
-    const completedRes = await pool.query(
-        "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status IN ('completed', 'no_show')",
-        [userId]
-    );
+        // 3. Completed
+        const completedRes = await pool.query(
+            "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status IN ('completed', 'no_show')",
+            [userId]
+        );
 
-    // 4. Cancelled
-    const cancelledRes = await pool.query(
-        "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status = 'cancelled'",
-        [userId]
-    );
+        // 4. Cancelled
+        const cancelledRes = await pool.query(
+            "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status = 'cancelled'",
+            [userId]
+        );
 
-    // 5. Next Appointment
-    const nextApptRes = await pool.query(`
-        SELECT a.*, s.start_time, s.end_time, svc.name as service_name, org.name as org_name
-        FROM appointments a
-        JOIN slots s ON a.slot_id = s.id
-        LEFT JOIN services svc ON a.service_id = svc.id
-        LEFT JOIN organizations org ON a.org_id = org.id
-        WHERE a.user_id = $1 
-        AND a.status IN ('confirmed', 'pending', 'serving')
-        AND s.end_time > NOW()
-        ORDER BY s.start_time ASC
-        LIMIT 1
-    `, [userId]);
+        // 5. Next Appointment
+        const nextApptRes = await pool.query(`
+            SELECT a.*, s.start_time, s.end_time, svc.name as service_name, org.name as org_name
+            FROM appointments a
+            JOIN slots s ON a.slot_id = s.id
+            LEFT JOIN services svc ON a.service_id = svc.id
+            LEFT JOIN organizations org ON a.org_id = org.id
+            WHERE a.user_id = $1 
+            AND a.status IN ('confirmed', 'pending', 'serving')
+            AND s.end_time > NOW()
+            ORDER BY s.start_time ASC
+            LIMIT 1
+        `, [userId]);
 
-    let nextAppointment = nextApptRes.rows[0] || null;
+        let nextAppointment = nextApptRes.rows[0] || null;
 
-    if (nextAppointment) {
-        try {
-            const status = await appointmentService.getQueueStatus(nextAppointment.id);
-            nextAppointment.people_ahead = status.people_ahead || 0;
-            nextAppointment.estimated_wait_time = status.estimated_wait_time || 0;
-            nextAppointment.current_serving_number = status.current_serving_number || 0;
-            nextAppointment.queue_number = status.queue_number || 0;
-        } catch (e) {
-            console.error('Failed to attach queue status to next appointment:', e);
+        if (nextAppointment) {
+            try {
+                const status = await appointmentService.getQueueStatus(nextAppointment.id);
+                nextAppointment.people_ahead = status.people_ahead || 0;
+                nextAppointment.estimated_wait_time = status.estimated_wait_time || 0;
+                nextAppointment.current_serving_number = status.current_serving_number || 0;
+                nextAppointment.queue_number = status.queue_number || 0;
+            } catch (e) {
+                console.error('Failed to attach queue status to next appointment:', e);
+            }
         }
-    }
 
-    // 6. Recent unreviewed / completed appointments
-    const recentCompletedRes = await pool.query(`
-        SELECT a.id, a.status, s.start_time, svc.name as service_name, org.name as org_name, rv.id as review_id, rv.rating as review_rating
-        FROM appointments a
-        JOIN slots s ON a.slot_id = s.id
-        LEFT JOIN services svc ON a.service_id = svc.id
-        LEFT JOIN organizations org ON a.org_id = org.id
-        LEFT JOIN reviews rv ON a.id = rv.appointment_id
-        WHERE a.user_id = $1 
-        AND a.status = 'completed'
-        ORDER BY s.start_time DESC
-        LIMIT 3
-    `, [userId]);
+        // 6. Recent unreviewed / completed appointments
+        const recentCompletedRes = await pool.query(`
+            SELECT a.id, a.status, s.start_time, svc.name as service_name, org.name as org_name, rv.id as review_id, rv.rating as review_rating
+            FROM appointments a
+            JOIN slots s ON a.slot_id = s.id
+            LEFT JOIN services svc ON a.service_id = svc.id
+            LEFT JOIN organizations org ON a.org_id = org.id
+            LEFT JOIN reviews rv ON a.id = rv.appointment_id
+            WHERE a.user_id = $1 
+            AND a.status = 'completed'
+            ORDER BY s.start_time DESC
+            LIMIT 3
+        `, [userId]);
 
-    return {
-        total: parseInt(totalRes.rows[0].count),
-        upcoming: parseInt(upcomingRes.rows[0].count),
-        completed: parseInt(completedRes.rows[0].count),
-        cancelled: parseInt(cancelledRes.rows[0].count),
-        nextAppointment,
-        recentCompleted: recentCompletedRes.rows
-    };
+        return {
+            total: parseInt(totalRes.rows[0].count),
+            upcoming: parseInt(upcomingRes.rows[0].count),
+            completed: parseInt(completedRes.rows[0].count),
+            cancelled: parseInt(cancelledRes.rows[0].count),
+            nextAppointment,
+            recentCompleted: recentCompletedRes.rows
+        };
+    }, 30); // 30 second cache
 };
 
 /**

@@ -7,89 +7,96 @@ const activityService = require('./activity.service');
 const emailService = require('./email.service');
 const userModel = require('../models/user.model');
 const pkg = require('../../package.json');
+const cacheService = require('./cache.service');
 
 const getGlobalOverview = async () => {
-    // 1. Organization Stats
-    const orgsRes = await pool.query(`
-        SELECT 
-            COUNT(*) as total, 
-            SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN subscription_status='trial' THEN 1 ELSE 0 END) as trial,
-            SUM(CASE WHEN status='disabled' OR subscription_status='cancelled' THEN 1 ELSE 0 END) as suspended
-        FROM organizations
-    `);
-
-    // 2. User Stats (Split by Role)
-    const usersRes = await pool.query(`
-        SELECT 
-            SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) as users,
-            SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) as admins
-        FROM users
-    `);
-
-    // 3. Booking Stats (All time)
-    const bookingsRes = await pool.query(`
-        SELECT 
-            COUNT(*) as total, 
-            SUM(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 ELSE 0 END) as today 
-        FROM appointments
-    `);
-
-    // 4. Revenue Stats (All time)
-
-    // 5. MRR Calculation
-    const mrrRes = await pool.query(`
-        SELECT COALESCE(SUM(p.price_monthly), 0) as mrr
-        FROM organizations o
-        JOIN plans p ON o.plan_id = p.id
-        WHERE o.status = 'active' AND o.subscription_status IN ('active', 'trial')
-    `);
-
-    // 6. Platform Fill Rate
-    const fillRateRes = await pool.query(`
-        SELECT 
-            COALESCE(SUM(booked_count), 0) as booked,
-            COALESCE(SUM(max_capacity), 0) as capacity
-        FROM slots
-        WHERE start_time >= CURRENT_DATE - INTERVAL '30 days'
-    `);
-
-    const totalBookings = parseInt(bookingsRes.rows[0].total) || 0;
-    const totalCapacity = parseInt(fillRateRes.rows[0].capacity) || 1;
-    const totalBookedSlots = parseInt(fillRateRes.rows[0].booked) || 0;
-
-    // Cancellation Rate
-    const cancelledRes = await pool.query("SELECT COUNT(*) FROM appointments WHERE status = 'cancelled'");
-    const cancelledBookings = parseInt(cancelledRes.rows[0].count) || 0;
-
-    // Industry distribution
-    const industryRes = await pool.query(`
-            SELECT type, COUNT(*) as count 
-            FROM organizations 
-            GROUP BY type
+    return cacheService.getOrSet('global_overview', async () => {
+        // 1. Organization Stats
+        const orgsRes = await pool.query(`
+            SELECT 
+                COUNT(*) as total, 
+                SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active,
+                SUM(CASE WHEN subscription_status='trial' THEN 1 ELSE 0 END) as trial,
+                SUM(CASE WHEN status='disabled' OR subscription_status='cancelled' THEN 1 ELSE 0 END) as suspended
+            FROM organizations
         `);
 
-    return {
-        // KPI Cards
-        totalOrganizations: parseInt(orgsRes.rows[0].total),
-        activeOrganizations: parseInt(orgsRes.rows[0].active),
-        trialOrganizations: parseInt(orgsRes.rows[0].trial),
-        suspendedOrganizations: parseInt(orgsRes.rows[0].suspended),
-        industryDistribution: industryRes.rows,
+        // 2. User Stats (Split by Role)
+        const usersRes = await pool.query(`
+            SELECT 
+                SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) as users,
+                SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) as admins
+            FROM users
+        `);
 
-        totalUsers: parseInt(usersRes.rows[0].users) || 0,
-        totalAdmins: parseInt(usersRes.rows[0].admins) || 0,
+        // 3. Booking Stats (All time)
+        const bookingsRes = await pool.query(`
+            SELECT 
+                COUNT(*) as total, 
+                SUM(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 ELSE 0 END) as today,
+                SUM(CASE WHEN status = 'waitlisted_urgent' THEN 1 ELSE 0 END) as total_urgent,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as total_pending,
+                SUM(CASE WHEN DATE(created_at) = CURRENT_DATE AND status = 'waitlisted_urgent' THEN 1 ELSE 0 END) as today_urgent
+            FROM appointments
+        `);
 
-        totalBookings: totalBookings,
-        todayBookings: parseInt(bookingsRes.rows[0].today),
+        // 5. MRR Calculation
+        const mrrRes = await pool.query(`
+            SELECT COALESCE(SUM(p.price_monthly), 0) as mrr
+            FROM organizations o
+            JOIN plans p ON o.plan_id = p.id
+            WHERE o.status = 'active' AND o.subscription_status IN ('active', 'trial')
+        `);
 
-        mrr: parseFloat(mrrRes.rows[0].mrr),
+        // 6. Platform Fill Rate
+        const fillRateRes = await pool.query(`
+            SELECT 
+                COALESCE(SUM(booked_count), 0) as booked,
+                COALESCE(SUM(max_capacity), 0) as capacity
+            FROM slots
+            WHERE start_time >= CURRENT_DATE - INTERVAL '30 days'
+        `);
 
-        fillRate: ((totalBookedSlots / totalCapacity) * 100).toFixed(1),
-        cancellationRate: totalBookings > 0 ? ((cancelledBookings / totalBookings) * 100).toFixed(1) : 0,
+        const totalBookings = parseInt(bookingsRes.rows[0].total) || 0;
+        const totalCapacity = parseInt(fillRateRes.rows[0].capacity) || 1;
+        const totalBookedSlots = parseInt(fillRateRes.rows[0].booked) || 0;
 
-        growthRate: 5.4
-    };
+        // Cancellation Rate
+        const cancelledRes = await pool.query("SELECT COUNT(*) FROM appointments WHERE status = 'cancelled'");
+        const cancelledBookings = parseInt(cancelledRes.rows[0].count) || 0;
+
+        // Industry distribution
+        const industryRes = await pool.query(`
+                SELECT type, COUNT(*) as count 
+                FROM organizations 
+                GROUP BY type
+            `);
+
+        return {
+            // KPI Cards
+            totalOrganizations: parseInt(orgsRes.rows[0].total),
+            activeOrganizations: parseInt(orgsRes.rows[0].active),
+            trialOrganizations: parseInt(orgsRes.rows[0].trial),
+            suspendedOrganizations: parseInt(orgsRes.rows[0].suspended),
+            industryDistribution: industryRes.rows,
+
+            totalUsers: parseInt(usersRes.rows[0].users) || 0,
+            totalAdmins: parseInt(usersRes.rows[0].admins) || 0,
+
+            totalBookings: totalBookings,
+            todayBookings: parseInt(bookingsRes.rows[0].today),
+            totalUrgent: parseInt(bookingsRes.rows[0].total_urgent) || 0,
+            totalPending: parseInt(bookingsRes.rows[0].total_pending) || 0,
+            todayUrgent: parseInt(bookingsRes.rows[0].today_urgent) || 0,
+
+            mrr: parseFloat(mrrRes.rows[0].mrr),
+
+            fillRate: ((totalBookedSlots / totalCapacity) * 100).toFixed(1),
+            cancellationRate: totalBookings > 0 ? ((cancelledBookings / totalBookings) * 100).toFixed(1) : 0,
+
+            growthRate: 5.4
+        };
+    }, 60);
 };
 
 const getOrganizations = async () => {
@@ -498,22 +505,41 @@ const createAdmin = async (adminBody) => {
 };
 
 // Aggregated View for Global Bookings
-const getGlobalBookingStats = async () => {
-    const res = await pool.query(`
+const getGlobalBookingStats = async (search = null) => {
+    let query = `
         SELECT 
             o.id as org_id,
             o.name as org_name,
             COUNT(a.id) as total_bookings,
             SUM(CASE WHEN DATE(a.created_at) = CURRENT_DATE THEN 1 ELSE 0 END) as today_bookings,
             SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
-            SUM(CASE WHEN a.status = 'pending' THEN 1 ELSE 0 END) as pending
+            SUM(CASE WHEN a.status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN a.status = 'waitlisted_urgent' THEN 1 ELSE 0 END) as urgent
         FROM organizations o
         LEFT JOIN appointments a ON o.id = a.org_id
         WHERE o.status = 'active'
-        GROUP BY o.id, o.name
-        ORDER BY total_bookings DESC
-    `);
+    `;
+    const params = [];
 
+    if (search) {
+        // Global Appointment Search by Token, Phone, Name, or ID
+        const searchRes = await pool.query(`
+            SELECT a.*, o.name as org_name, u.name as user_name, r.name as resource_name
+            FROM appointments a
+            JOIN organizations o ON a.org_id = o.id
+            LEFT JOIN users u ON a.user_id = u.id
+            LEFT JOIN resources r ON a.resource_id = r.id
+            WHERE a.id::text ILIKE $1 
+               OR a.customer_name ILIKE $1 
+               OR a.customer_phone ILIKE $1 
+               OR a.token_number::text ILIKE $1
+            LIMIT 50
+        `, [`%${search}%`]);
+        return { isSearch: true, results: searchRes.rows };
+    }
+
+    query += ` GROUP BY o.id, o.name ORDER BY total_bookings DESC`;
+    const res = await pool.query(query, params);
     return res.rows;
 };
 
@@ -591,29 +617,31 @@ const getAdvancedAnalytics = async () => {
 };
 
 const getGlobalAnalytics = async () => {
-    // 1. Daily Bookings Global
-    const daily = await pool.query(`
-        SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count 
-        FROM appointments 
-        WHERE created_at >= NOW() - INTERVAL '7 days'
-        GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
-        ORDER BY date ASC
-    `);
+    return cacheService.getOrSet('global_analytics', async () => {
+        // 1. Daily Bookings Global
+        const daily = await pool.query(`
+            SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count 
+            FROM appointments 
+            WHERE created_at >= NOW() - INTERVAL '7 days'
+            GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
+            ORDER BY date ASC
+        `);
 
-    // 2. Top Orgs by Bookings
-    const topOrgs = await pool.query(`
-        SELECT o.name, COUNT(a.id) as bookings
-        FROM appointments a
-        JOIN organizations o ON a.org_id = o.id
-        GROUP BY o.name
-        ORDER BY bookings DESC
-        LIMIT 5
-    `);
+        // 2. Top Orgs by Bookings
+        const topOrgs = await pool.query(`
+            SELECT o.name, COUNT(a.id) as bookings
+            FROM appointments a
+            JOIN organizations o ON a.org_id = o.id
+            GROUP BY o.name
+            ORDER BY bookings DESC
+            LIMIT 5
+        `);
 
-    return {
-        dailyBookings: daily.rows,
-        topOrganizations: topOrgs.rows
-    };
+        return {
+            dailyBookings: daily.rows,
+            topOrganizations: topOrgs.rows
+        };
+    }, 300); // 5 min cache for historical
 };
 
 const getSystemHealth = async () => {
@@ -708,61 +736,184 @@ const getSystemHealth = async () => {
 };
 
 const getGlobalMonitorData = async () => {
-    // 1. Get Summary Stats
-    const statsRes = await pool.query(`
-        SELECT 
-            COUNT(DISTINCT a.org_id) as total_active_orgs,
-            COUNT(*) FILTER (WHERE a.status IN ('pending', 'confirmed')) as total_waiting,
-            COALESCE(AVG(s.estimated_service_time), 15) as avg_est_time
-        FROM appointments a
-        JOIN services s ON a.service_id = s.id
-        WHERE a.status IN ('pending', 'confirmed', 'serving')
-        AND DATE(a.created_at) = CURRENT_DATE
-    `);
+    return cacheService.getOrSet('global_monitor', async () => {
+        // 1. Get Summary Stats
+        const statsRes = await pool.query(`
+            SELECT 
+                COUNT(DISTINCT a.org_id) as total_active_orgs,
+                COUNT(*) FILTER (WHERE a.status IN ('pending', 'confirmed')) as total_waiting,
+                COALESCE(AVG(s.estimated_service_time), 15) as avg_est_time
+            FROM appointments a
+            JOIN services s ON a.service_id = s.id
+            WHERE a.status IN ('pending', 'confirmed', 'serving')
+            AND DATE(a.created_at) = CURRENT_DATE
+        `);
 
-    // 2. Get Per-Organization Metrics
-    const orgsRes = await pool.query(`
-        SELECT 
-            o.id,
-            o.name,
-            COUNT(a.id) FILTER (WHERE a.status IN ('pending', 'confirmed')) as waiting,
-            COUNT(a.id) FILTER (WHERE a.status = 'serving') as serving
-        FROM organizations o
-        LEFT JOIN appointments a ON o.id = a.org_id AND DATE(a.created_at) = CURRENT_DATE
-        WHERE o.status = 'active'
-        GROUP BY o.id, o.name
-        ORDER BY waiting DESC
-    `);
+        // 2. Get Per-Organization Metrics
+        const orgsRes = await pool.query(`
+            SELECT 
+                o.id,
+                o.name,
+                COUNT(a.id) FILTER (WHERE a.status = 'pending') as pending,
+                COUNT(a.id) FILTER (WHERE a.status = 'waitlisted_urgent') as urgent,
+                COUNT(a.id) FILTER (WHERE a.status = 'serving') as serving,
+                (SELECT COUNT(*) FROM slots s WHERE s.org_id = o.id AND DATE(s.start_time) = CURRENT_DATE AND s.is_active = TRUE) as active_slots,
+                (SELECT COUNT(DISTINCT s.resource_id) FROM slots s WHERE s.org_id = o.id AND DATE(s.start_time) = CURRENT_DATE AND s.is_active = TRUE) as active_professionals
+            FROM organizations o
+            LEFT JOIN appointments a ON o.id = a.org_id AND DATE(a.created_at) = CURRENT_DATE
+            WHERE o.status = 'active'
+            GROUP BY o.id, o.name
+            ORDER BY (COUNT(a.id) FILTER (WHERE a.status = 'waitlisted_urgent')) DESC, (COUNT(a.id) FILTER (WHERE a.status = 'pending')) DESC
+        `);
 
-    const organizations = orgsRes.rows.map(org => {
-        let status = 'idle';
-        const waiting = parseInt(org.waiting);
-        if (waiting > 20) status = 'critical';
-        else if (waiting > 10) status = 'busy';
-        else if (waiting > 0 || parseInt(org.serving) > 0) status = 'stable';
+        // 3. Global Professionals Summary
+        const profRes = await pool.query(`
+            SELECT COUNT(DISTINCT resource_id) as total_profs
+            FROM slots
+            WHERE DATE(start_time) = CURRENT_DATE AND is_active = TRUE
+        `);
+
+        const organizations = orgsRes.rows.map(org => {
+            let status = 'idle';
+            const pending = parseInt(org.pending);
+            const urgent = parseInt(org.urgent);
+            const waiting = pending + urgent;
+
+            if (urgent > 5 || waiting > 30) status = 'critical';
+            else if (urgent > 0 || waiting > 10) status = 'busy';
+            else if (waiting > 0 || parseInt(org.serving) > 0) status = 'stable';
+
+            return {
+                ...org,
+                waiting,
+                pending,
+                urgent,
+                active_slots: parseInt(org.active_slots),
+                active_professionals: parseInt(org.active_professionals),
+                serving: parseInt(org.serving),
+                status
+            };
+        });
+
+        const stats = statsRes.rows[0];
 
         return {
-            ...org,
-            waiting,
-            serving: parseInt(org.serving),
-            status
+            stats: {
+                totalActiveQueues: parseInt(stats.total_active_orgs) || 0,
+                totalWaiting: parseInt(stats.total_waiting) || 0,
+                totalProfessionals: parseInt(profRes.rows[0].total_profs) || 0,
+                avgWaitTime: Math.round(parseFloat(stats.avg_est_time) || 0),
+                systemLoad: parseInt(stats.total_waiting) > 50 ? 'Heavy' : 'Optimal'
+            },
+            organizations
         };
-    });
+    }, 30);
+};
 
-    const stats = statsRes.rows[0];
+const getRevenueAnalytics = async () => {
+    return cacheService.getOrSet('revenue_analytics', async () => {
+        // 1. MRR Trend (Last 6 Months)
+        const mrrTrend = await pool.query(`
+            SELECT 
+                TO_CHAR(d, 'Mon') as name,
+                COALESCE(SUM(p.price_monthly), 0) as mrr
+            FROM generate_series(
+                DATE_TRUNC('month', NOW()) - INTERVAL '5 months',
+                DATE_TRUNC('month', NOW()),
+                '1 month'::interval
+            ) d
+            LEFT JOIN organizations o ON o.created_at <= d + INTERVAL '1 month' - INTERVAL '1 day' AND o.status = 'active'
+            LEFT JOIN plans p ON o.plan_id = p.id
+            GROUP BY d
+            ORDER BY d ASC
+        `);
+
+        // 2. Revenue by Plan
+        const revenueByPlan = await pool.query(`
+            SELECT p.name, SUM(p.price_monthly) as value
+            FROM organizations o
+            JOIN plans p ON o.plan_id = p.id
+            WHERE o.status = 'active'
+            GROUP BY p.name
+        `);
+
+        return {
+            mrrTrend: mrrTrend.rows,
+            revenueByPlan: revenueByPlan.rows
+        };
+    }, 600);
+};
+
+const getOrgHealthScores = async () => {
+    return cacheService.getOrSet('org_health_scores', async () => {
+        const res = await pool.query(`
+            SELECT 
+                o.id,
+                o.name,
+                o.type,
+                COUNT(a.id) as total_appointments,
+                SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(a.id), 0) * 100 as completion_rate,
+                COALESCE(AVG(booked_count::float / NULLIF(max_capacity, 0)), 0) * 100 as utilization_rate
+            FROM organizations o
+            LEFT JOIN appointments a ON o.id = a.org_id
+            LEFT JOIN slots s ON o.id = s.org_id
+            GROUP BY o.id, o.name, o.type
+            ORDER BY completion_rate DESC NULLS LAST
+            LIMIT 10
+        `);
+
+        return res.rows.map(org => ({
+            ...org,
+            health_score: Math.round(((parseFloat(org.completion_rate) || 0) + (parseFloat(org.utilization_rate) || 0)) / 2)
+        }));
+    }, 300);
+};
+
+const getPlatformAuditTrail = async (filters, options) => {
+    const { action, orgId } = filters;
+    const page = options.page || 1;
+    const limit = options.limit || 50;
+    const offset = (page - 1) * limit;
+
+    let query = `
+        SELECT al.*, u.name as user_name, u.email as user_email
+        FROM activity_logs al
+        LEFT JOIN users u ON al.user_id = u.id
+        WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+
+    if (action) {
+        query += ` AND al.action = $${paramIndex}`;
+        params.push(action);
+        paramIndex++;
+    }
+
+    // Since details is JSONB, we can filter by orgId if stored there
+    if (orgId) {
+        query += ` AND al.details->>'orgId' = $${paramIndex}`;
+        params.push(orgId);
+        paramIndex++;
+    }
+
+    query += ` ORDER BY al.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex+1}`;
+    params.push(limit, offset);
+
+    const logs = await pool.query(query, params);
+    
+    const countRes = await pool.query('SELECT COUNT(*) FROM activity_logs');
 
     return {
-        stats: {
-            totalActiveQueues: parseInt(stats.total_active_orgs) || 0,
-            totalWaiting: parseInt(stats.total_waiting) || 0,
-            avgWaitTime: Math.round(parseFloat(stats.avg_est_time) || 0),
-            systemLoad: parseInt(stats.total_waiting) > 50 ? 'Heavy' : 'Optimal'
-        },
-        organizations
+        logs: logs.rows,
+        total: parseInt(countRes.rows[0].count)
     };
 };
 
 module.exports = {
+    getRevenueAnalytics,
+    getOrgHealthScores,
+    getPlatformAuditTrail,
     getGlobalBookingStats,
     getGlobalMonitorData,
     getOrgBookings,
