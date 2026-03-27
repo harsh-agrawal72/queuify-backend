@@ -603,7 +603,10 @@ const getAppointments = async (orgId, queryParams) => {
             s.end_time,
             svc.name as service_name,
             r.name as resource_name,
-            a.preferred_date
+            a.preferred_date,
+            a.reschedule_status,
+            a.reschedule_reason,
+            a.proposed_slot_id
         FROM appointments a
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN slots s ON a.slot_id = s.id
@@ -617,7 +620,11 @@ const getAppointments = async (orgId, queryParams) => {
 
     if (status) {
         paramCount++;
-        queryText += ` AND a.status = $${paramCount}`;
+        if (status === 'reschedule_proposed') {
+            queryText += ` AND a.reschedule_status = 'pending'`;
+        } else {
+            queryText += ` AND a.status = $${paramCount}`;
+        }
         params.push(status);
     }
 
@@ -661,7 +668,11 @@ const getAppointments = async (orgId, queryParams) => {
 
         if (status) {
             countParamCount++;
-            countQuery += ` AND a.status = $${countParamCount}`;
+            if (status === 'reschedule_proposed') {
+                countQuery += ` AND a.reschedule_status = 'pending'`;
+            } else {
+                countQuery += ` AND a.status = $${countParamCount}`;
+            }
             countParams.push(status);
         }
 
