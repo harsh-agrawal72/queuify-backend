@@ -194,7 +194,7 @@ const getAppointmentsByUserId = async (userId) => {
             FROM appointments a
             JOIN services s ON a.service_id = s.id
             WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
-         )
+         ),
          QueueMetadata AS (
             SELECT a.slot_id,
                    MIN(q.calculated_queue) FILTER (WHERE a.status = 'serving') as serving_token,
