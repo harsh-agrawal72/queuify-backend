@@ -125,9 +125,8 @@ const reassignAppointments = async (slotId) => {
                 
                 // Notify user
                 const userEmailEnabled = appt.email_notification_enabled !== false;
-                const orgEmailEnabled = appt.org_email_enabled !== false;
 
-                if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
+                if (appt.user_email && userEmailEnabled) {
                     emailService.sendReassignmentEmail(appt.user_email, appt, altSlot).catch(emailErr => {
                         console.error(`[Reassignment] Email failed for ${appt.user_email}:`, emailErr.message);
                     });
@@ -143,8 +142,7 @@ const reassignAppointments = async (slotId) => {
                     );
                     console.log(`[Reassignment] Appt ${appt.id} marked as WAITLISTED_URGENT (No slots today)`);
                     const userEmailEnabled = appt.email_notification_enabled !== false;
-                    const orgEmailEnabled = appt.org_email_enabled !== false;
-                    if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
+                    if (appt.user_email && userEmailEnabled) {
                         emailService.sendWaitlistEmail(appt.user_email, appt).catch(emailErr => {
                             console.error(`[Reassignment-Waitlist] Email failed for ${appt.user_email}:`, emailErr.message);
                         });
@@ -157,8 +155,7 @@ const reassignAppointments = async (slotId) => {
                     );
                     console.log(`[Reassignment] Appt ${appt.id} marked as PENDING (Needs Rescheduling)`);
                     const userEmailEnabled = appt.email_notification_enabled !== false;
-                    const orgEmailEnabled = appt.org_email_enabled !== false;
-                    if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
+                    if (appt.user_email && userEmailEnabled) {
                         emailService.sendRescheduleEmail(appt.user_email, appt).catch(emailErr => {
                             console.error(`[Reassignment-Reschedule] Email failed for ${appt.user_email}:`, emailErr.message);
                         });
@@ -288,8 +285,7 @@ const fillSlotFromWaitlist = async (slotId) => {
             
             // Notify user only if enabled
             const userEmailEnabled = appt.email_notification_enabled !== false;
-            const orgEmailEnabled = appt.org_email_enabled !== false;
-            if (appt.user_email && userEmailEnabled && orgEmailEnabled) {
+            if (appt.user_email && userEmailEnabled) {
                 emailService.sendReassignmentEmail(appt.user_email, appt, slot).catch(err => {
                     console.error(`[Waitlist-Fill] Email failed for ${appt.user_email}:`, err.message);
                 });
@@ -422,8 +418,7 @@ const rebalanceResourceSlots = async (resourceId, date) => {
             );
 
             const userEmailEnabled = update.appt.email_notification_enabled !== false;
-            const orgEmailEnabled = update.appt.org_email_enabled !== false;
-            if (update.appt.user_email && userEmailEnabled && orgEmailEnabled) {
+            if (update.appt.user_email && userEmailEnabled) {
                 emailService.sendRebalanceNotificationEmail(update.appt.user_email, update.appt, update.newSlot).catch(err => {
                     console.error(`[Rebalance] Email failed for ${update.appt.user_email}:`, err.message);
                 });

@@ -812,13 +812,12 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                 console.log(`[Email-Async] Data fetched. User: ${data.user_email}, Status: ${status}`);
 
                 const userEmailEnabled = data.email_notification_enabled !== false;
-                const orgEmailEnabled = data.org_email_enabled !== false;
 
-                if (data.user_email && userEmailEnabled && orgEmailEnabled) {
+                if (data.user_email && userEmailEnabled) {
                     console.log(`[Email-Async] Sending user email to ${data.user_email}`);
                     await emailService.sendStatusUpdateEmail(data.user_email, data);
                 } else {
-                    console.log(`[Email-Async] User email skipped (Settings: User=${userEmailEnabled}, Org=${orgEmailEnabled})`);
+                    console.log(`[Email-Async] User email skipped (User Preference: ${userEmailEnabled})`);
                 }
 
                 // Notify Admins of status change
@@ -861,9 +860,8 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                 }
 
                 const userNotifyEnabled = data.notification_enabled !== false;
-                const orgNotifyEnabled = data.org_notify_enabled !== false;
 
-                if (userNotifyEnabled && orgNotifyEnabled) {
+                if (userNotifyEnabled) {
                     if (appointment.user_id || updatedAppointment.user_id) {
                          await notificationService.sendNotification(
                             appointment.user_id || updatedAppointment.user_id,
@@ -936,9 +934,8 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
                     const org = orgRes.rows[0];
 
                     const userEmailEnabled = userData && userData.email_notification_enabled !== false;
-                    const orgEmailEnabled = org && (org.email_notification !== false);
 
-                    if (userData && userData.email && userEmailEnabled && orgEmailEnabled) {
+                    if (userData && userData.email && userEmailEnabled) {
                         await emailService.sendCancellationEmail(userData.email, {
                             ...cancelledAppt,
                             org_name: org.name,
@@ -965,9 +962,8 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
                     }
 
                     const userNotifyEnabled = userData && userData.notification_enabled !== false;
-                    const orgNotifyEnabled = org && org.new_booking_notification !== false;
 
-                    if (userNotifyEnabled && orgNotifyEnabled) {
+                    if (userNotifyEnabled) {
                         const notificationService = require('./notification.service');
                         await notificationService.sendNotification(
                             appointment.user_id,

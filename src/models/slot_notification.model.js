@@ -20,6 +20,7 @@ const getPendingNotificationsForSlot = async (slotId, currentEstimatedTime) => {
         `SELECT sn.*, 
                 u.name as user_name, u.email as user_email, 
                 u.email_notification_enabled, u.notification_enabled,
+                s.name as service_name, o.name as org_name, o.contact_email as org_contact_email,
                 o.email_notification as org_email_enabled, o.new_booking_notification as org_notify_enabled
          FROM slot_notifications sn
          JOIN users u ON sn.user_id = u.id
