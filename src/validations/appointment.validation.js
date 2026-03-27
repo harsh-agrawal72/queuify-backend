@@ -27,12 +27,22 @@ const updateStatus = {
     })
 };
 
-const rescheduleAppointment = {
+const proposeReschedule = {
     params: Joi.object().keys({
         appointmentId: Joi.string().uuid().required()
     }),
     body: Joi.object().keys({
-        newSlotId: Joi.string().uuid().required()
+        newSlotId: Joi.string().uuid().required(),
+        reason: Joi.string().required().min(5).max(500)
+    })
+};
+
+const respondToReschedule = {
+    params: Joi.object().keys({
+        appointmentId: Joi.string().uuid().required()
+    }),
+    body: Joi.object().keys({
+        action: Joi.string().valid('accept', 'decline').required()
     })
 };
 
@@ -40,6 +50,8 @@ module.exports = {
     bookAppointment,
     cancelAppointment,
     updateStatus,
-    rescheduleAppointment
+    rescheduleAppointment,
+    proposeReschedule,
+    respondToReschedule
 };
 

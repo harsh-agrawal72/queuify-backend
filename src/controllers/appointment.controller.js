@@ -78,6 +78,33 @@ module.exports = {
             appointment: result.appointment,
             queueNumber: result.queue_number
         });
+    }),
+    proposeReschedule: catchAsync(async (req, res) => {
+        const { newSlotId, reason } = req.body;
+        const appointment = await appointmentService.proposeReschedule(
+            req.params.appointmentId,
+            req.user.org_id,
+            newSlotId,
+            reason
+        );
+        res.send({
+            success: true,
+            message: 'Reschedule proposed successfully',
+            appointment
+        });
+    }),
+    respondToReschedule: catchAsync(async (req, res) => {
+        const { action } = req.body;
+        const result = await appointmentService.respondToReschedule(
+            req.params.appointmentId,
+            req.user.id,
+            action
+        );
+        res.send({
+            success: true,
+            message: `Proposal ${action}ed successfully`,
+            result
+        });
     })
 };
 

@@ -638,7 +638,15 @@ const getQueueStatus = async (appointmentId) => {
 const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin = false, orgId = null) => {
     try {
         const result = await appointmentModel.rescheduleAppointment(appointmentId, userId, newSlotId, isAdmin, orgId);
-        const { appointment, queue_number } = result;
+        const { appointment, queue_number, oldSlotId } = result;
+
+        // Trigger notifications for BOTH old and new slots
+        if (oldSlotId) {
+            checkAndNotifySlotWaiters(oldSlotId).catch(err => console.error(`[Reschedule-Notify-Old] Error:`, err));
+        }
+        if (appointment.slot_id) {
+            checkAndNotifySlotWaiters(appointment.slot_id).catch(err => console.error(`[Reschedule-Notify-New] Error:`, err));
+        }
 
         // Trigger waitlist/rebalance logic if needed - optional enhancement
 
@@ -782,6 +790,80 @@ const checkAndNotifySlotWaiters = async (slotId) => {
     }
 };
 
+/**
+ * Propose a reschedule (Admin)
+ */
+const proposeReschedule = async (appointmentId, orgId, proposedSlotId, reason) => {
+    try {
+        const appointment = await appointmentModel.proposeReschedule(appointmentId, orgId, proposedSlotId, reason);
+        
+        // Notify User
+        (async () => {
+            try {
+                const user = await userModel.getUserById(appointment.user_id);
+                const slot = await slotModel.getSlotById(proposedSlotId);
+                const timeStr = new Date(slot.start_time).toLocaleString();
+
+                await notificationService.sendNotification(
+                    appointment.user_id,
+                    'Reschedule Proposed',
+                    `Business has proposed a new time: ${timeStr}. Reason: ${reason}. Accept for priority!`,
+                    'appointment',
+                    `/appointments`
+                );
+
+                if (user && user.email) {
+                    await emailService.sendGenericEmail(user.email, 'Reschedule Proposal', `The business has proposed a new time for your appointment: ${timeStr}. \n\nReason: ${reason}\n\nPlease visit your dashboard to accept or decline.`);
+                }
+            } catch (e) { console.error('[Propose-Async] Error:', e); }
+        })();
+
+        return appointment;
+    } catch (error) {
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, error.message);
+    }
+};
+
+/**
+ * Respond to a reschedule proposal (User)
+ */
+const respondToReschedule = async (appointmentId, userId, action) => {
+    try {
+        const result = await appointmentModel.respondToReschedule(appointmentId, userId, action);
+        
+        // Notify Admins on response
+        (async () => {
+            try {
+                const appointment = action === 'accept' ? result.appointment : result;
+                const admins = await userModel.getAdminsByOrg(appointment.org_id);
+                const user = await userModel.getUserById(userId);
+                
+                const message = `${user?.name || 'User'} has ${action}ed the reschedule proposal.`;
+                
+                for (const admin of admins) {
+                    await notificationService.sendNotification(
+                        admin.id,
+                        'Reschedule Response',
+                        message,
+                        'appointment',
+                        `/admin/appointments?search=${appointmentId}`
+                    );
+                }
+
+                // If accepted, trigger slot notifications for both slots
+                if (action === 'accept') {
+                    if (result.oldSlotId) checkAndNotifySlotWaiters(result.oldSlotId);
+                    if (appointment.slot_id) checkAndNotifySlotWaiters(appointment.slot_id);
+                }
+            } catch (e) { console.error('[Respond-Async] Error:', e); }
+        })();
+
+        return result;
+    } catch (error) {
+        throw new ApiError(httpStatus.BAD_REQUEST, error.message);
+    }
+};
+
 module.exports = {
     bookAppointment,
     cancelAppointment,
@@ -791,5 +873,7 @@ module.exports = {
     advanceQueueAutomatically,
     getSystemAverageSpeed,
     rescheduleAppointment,
-    checkAndNotifySlotWaiters
+    checkAndNotifySlotWaiters,
+    proposeReschedule,
+    respondToReschedule
 };

@@ -28,6 +28,14 @@ router
     .route('/:appointmentId/reschedule')
     .patch(auth('user', 'admin'), validate(appointmentValidation.rescheduleAppointment), appointmentController.rescheduleAppointment);
 
+router
+    .route('/:appointmentId/propose-reschedule')
+    .patch(auth('admin'), validate(appointmentValidation.proposeReschedule), appointmentController.proposeReschedule);
+
+router
+    .route('/:appointmentId/respond-reschedule')
+    .patch(auth('user'), validate(appointmentValidation.respondToReschedule), appointmentController.respondToReschedule);
+
 router.get('/:appointmentId/queue', auth(), appointmentController.getQueueStatus);
 
 

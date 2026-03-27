@@ -163,13 +163,16 @@ const getAppointmentById = async (id) => {
                      r.name as resource_name,
                      o.name as org_name, o.contact_email as org_contact_email, o.address as org_address,
                      u.name as user_name, u.email as user_email,
-                     sl.start_time, sl.end_time
+                     sl.start_time, sl.end_time, a.reschedule_count,
+                     a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
+                     psl.start_time as proposed_start_time, psl.end_time as proposed_end_time
              FROM appointments a
              LEFT JOIN services s ON a.service_id = s.id
              LEFT JOIN resources r ON a.resource_id = r.id
              LEFT JOIN organizations o ON a.org_id = o.id
              LEFT JOIN users u ON a.user_id = u.id
              LEFT JOIN slots sl ON a.slot_id = sl.id
+          LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
              WHERE a.id = $1::uuid`,
             [id]
         );
@@ -196,7 +199,9 @@ const getAppointmentsByUserId = async (userId) => {
                 COALESCE(q.calculated_queue, 0) as live_queue_number,
                 s.name as service_name, r.name as resource_name,
                 o.name as org_name, o.address as org_address,
-                sl.start_time, sl.end_time,
+                sl.start_time, sl.end_time, a.reschedule_count,
+                a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
+                psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
                 rv.id as review_id, rv.rating as review_rating
          FROM appointments a
          LEFT JOIN QueueRanks q ON a.id = q.id
@@ -204,6 +209,7 @@ const getAppointmentsByUserId = async (userId) => {
          LEFT JOIN organizations o ON a.org_id = o.id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
+         LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
          LEFT JOIN reviews rv ON a.id = rv.appointment_id
          WHERE a.user_id = $1::uuid 
          ORDER BY a.created_at DESC`,
@@ -228,7 +234,9 @@ const getAppointmentsByOrgId = async (orgId) => {
                 COALESCE(q.calculated_queue, 0) as live_queue_number,
                 u.name as user_name, u.email as user_email,
                 s.name as service_name, r.name as resource_name,
-                sl.start_time, sl.end_time,
+                sl.start_time, sl.end_time, a.reschedule_count,
+                a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
+                psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
                 rv.id as review_id, rv.rating as review_rating
          FROM appointments a
          LEFT JOIN QueueRanks q ON a.id = q.id
@@ -236,6 +244,7 @@ const getAppointmentsByOrgId = async (orgId) => {
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
+         LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
          LEFT JOIN reviews rv ON a.id = rv.appointment_id
          WHERE a.org_id = $1::uuid
          ORDER BY a.created_at DESC`,
@@ -322,6 +331,10 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
             throw new Error(`Cannot reschedule appointment in ${appt.status} status`);
         }
 
+        if (!isAdmin && appt.reschedule_count >= 1) {
+            throw new Error('This appointment has already been rescheduled once and cannot be moved again');
+        }
+
         if (appt.slot_id === newSlotId) {
             throw new Error('Already booked for this slot');
         }
@@ -375,7 +388,8 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
         // 7. Update Appointment
         const updatedApptRes = await client.query(
             `UPDATE appointments 
-             SET slot_id = $1, resource_id = $2, preferred_date = $3, created_at = NOW() 
+             SET slot_id = $1, resource_id = $2, preferred_date = $3, created_at = NOW(),
+                 reschedule_count = reschedule_count + 1 
              WHERE id = $4 RETURNING *`,
             [newSlotId, newSlot.resource_id, newPreferredDate, appointmentId]
         );
@@ -413,11 +427,116 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
 
         return {
             appointment: updatedAppt,
-            queue_number: rank
+            queue_number: rank,
+            oldSlotId: appt.slot_id
         };
     } catch (e) {
         await client.query('ROLLBACK');
         console.error('Error in rescheduleAppointment:', e);
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+const proposeReschedule = async (appointmentId, orgId, proposedSlotId, reason) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // Ensure slot exists and belongs to the same org/service
+        const slotRes = await client.query('SELECT service_id, org_id FROM slots WHERE id = $1', [proposedSlotId]);
+        if (slotRes.rows.length === 0) throw new Error('Slot not found');
+        if (slotRes.rows[0].org_id !== orgId) throw new Error('Slot does not belong to this organization');
+        
+        const result = await client.query(
+            `UPDATE appointments 
+             SET proposed_slot_id = $1, reschedule_status = 'pending', reschedule_reason = $2 
+             WHERE id = $3 AND org_id = $4 RETURNING *`,
+            [proposedSlotId, reason, appointmentId, orgId]
+        );
+        
+        if (result.rows.length === 0) throw new Error('Appointment not found');
+        
+        await client.query('COMMIT');
+        return result.rows[0];
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+const respondToReschedule = async (appointmentId, userId, action) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // 1. Fetch appointment
+        const apptRes = await client.query(
+            'SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE',
+            [appointmentId, userId]
+        );
+        if (apptRes.rows.length === 0) throw new Error('Appointment not found');
+        const appt = apptRes.rows[0];
+        
+        if (appt.reschedule_status !== 'pending') throw new Error('No pending reschedule proposal found');
+        
+        if (action === 'decline') {
+            await client.query(
+                `UPDATE appointments 
+                 SET proposed_slot_id = NULL, reschedule_status = 'declined' 
+                 WHERE id = $1`,
+                [appointmentId]
+            );
+            await client.query('COMMIT');
+            return { ...appt, reschedule_status: 'declined' };
+        }
+        
+        // action === 'accept'
+        const newSlotId = appt.proposed_slot_id;
+        
+        // 2. Fetch and Lock new slot
+        const slotRes = await client.query(
+            'SELECT * FROM slots WHERE id = $1 AND is_active = TRUE FOR UPDATE',
+            [newSlotId]
+        );
+        const newSlot = slotRes.rows[0];
+        if (!newSlot) throw new Error('Proposed slot no longer available');
+        if (newSlot.booked_count >= newSlot.max_capacity) throw new Error('Proposed slot is now full');
+
+        // 3. Update occupancy
+        if (appt.slot_id) {
+            await client.query(
+                'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1',
+                [appt.slot_id]
+            );
+        }
+        await client.query(
+            'UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1',
+            [newSlotId]
+        );
+
+        const newPreferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(newSlot.start_time));
+
+        // 4. Update Appointment with PRIORITY (Token #1 logic)
+        // To ensure Token #1, we set created_at to a very early timestamp for this partition
+        const updatedApptRes = await client.query(
+            `UPDATE appointments 
+             SET slot_id = $1, resource_id = $2, preferred_date = $3, 
+                 created_at = '1970-01-01 00:00:00', -- This ensures they are FIRST in Rank calculation
+                 is_priority = TRUE, reschedule_status = 'accepted', reschedule_count = 0,
+                 proposed_slot_id = NULL
+             WHERE id = $4 RETURNING *`,
+            [newSlotId, newSlot.resource_id, newPreferredDate, appointmentId]
+        );
+        
+        await client.query('COMMIT');
+        return { appointment: updatedApptRes.rows[0], oldSlotId: appt.slot_id };
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error('Error in respondToReschedule:', e);
         throw e;
     } finally {
         client.release();
@@ -432,5 +551,7 @@ module.exports = {
     updateAppointmentStatus,
     cancelAppointment,
     rescheduleAppointment,
+    proposeReschedule,
+    respondToReschedule,
     pool
 };

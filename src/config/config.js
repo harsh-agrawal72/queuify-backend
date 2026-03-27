@@ -23,7 +23,8 @@ const envVarsSchema = Joi.object()
         EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
         CLIENT_URL: Joi.string().required().description('Client url'),
         GOOGLE_CLIENT_ID: Joi.string().required().description('Google Client ID'),
-        ENABLE_EMAIL: Joi.boolean().default(true).description('Global email toggle'),
+        BASE_URL: Joi.string().description('Base URL of the server'),
+        ENABLE_EMAIL: Joi.any().default(true).description('Global email toggle'),
     })
     .unknown();
 
@@ -65,7 +66,7 @@ module.exports = {
             apiKey: envVars.RESEND_API_KEY,
         },
         from: envVars.EMAIL_FROM,
-        enabled: envVars.ENABLE_EMAIL,
+        enabled: envVars.ENABLE_EMAIL === true || envVars.ENABLE_EMAIL === 'true',
     },
     clientUrl: envVars.CLIENT_URL,
     baseUrl: envVars.BASE_URL || `http://localhost:${envVars.PORT}`,
