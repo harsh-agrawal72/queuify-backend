@@ -87,6 +87,9 @@ const bookAppointment = async (appointmentBody) => {
                         console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
                     }
                 }
+                if (appointment.slot_id) {
+                    await checkAndNotifySlotWaiters(appointment.slot_id);
+                }
             } catch (e) {
                 console.error('[Booking-Async] FAILURE:', e);
             }
@@ -199,6 +202,9 @@ const cancelAppointment = async (appointmentId, userId) => {
                     } catch (emailErr) {
                         console.error(`[Cancel-Async] Admin/Org email failed:`, emailErr.message);
                     }
+                }
+                if (appointment.slot_id) {
+                    await checkAndNotifySlotWaiters(appointment.slot_id);
                 }
             } catch (e) { console.error('[Cancel-Async] FAILURE:', e); }
         })();
@@ -442,6 +448,9 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
                     } catch (emailErr) {
                         console.error(`[UserUpdate-Async] Admin/Org email failed:`, emailErr.message);
                     }
+                }
+                if (appointment.slot_id) {
+                    await checkAndNotifySlotWaiters(appointment.slot_id);
                 }
             } catch (e) {
                 console.error('[UserUpdate-Async] FAILURE:', e);
@@ -691,6 +700,88 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
     }
 };
 
+/**
+ * Check and notify users who are waiting for a slot to reach their preferred time
+ */
+const checkAndNotifySlotWaiters = async (slotId) => {
+    const slotNotificationModel = require('../models/slot_notification.model');
+    const slotModel = require('../models/slot.model');
+    
+    try {
+        // 1. Get current slot status
+        const slot = await slotModel.getSlotById(slotId);
+        if (!slot) return;
+
+        // 2. Fetch service duration
+        const res = await pool.query(`
+            SELECT s.estimated_service_time, s.name as service_name, o.name as org_name
+            FROM services s
+            JOIN organizations o ON s.org_id = o.id
+            WHERE s.id = (
+                SELECT service_id FROM resource_services WHERE resource_id = $1 LIMIT 1
+            )
+        `, [slot.resource_id]);
+        
+        const serviceData = res.rows[0];
+        const estimatedServiceTime = serviceData?.estimated_service_time || 30;
+
+        const now = new Date();
+        const slotStart = new Date(slot.start_time);
+        const baseTime = slotStart > now ? slotStart : now;
+        const minutesToAdd = slot.booked_count * estimatedServiceTime;
+        const currentEstimatedTime = new Date(baseTime.getTime() + minutesToAdd * 60000);
+
+        // 3. Find pending notifications that match (desired_time <= currentEstimatedTime)
+        const pending = await slotNotificationModel.getPendingNotificationsForSlot(slotId, currentEstimatedTime);
+        
+        if (pending.length > 0) {
+            const notificationIds = [];
+            const timeStr = new Intl.DateTimeFormat('en-IN', {
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: true,
+                timeZone: 'Asia/Kolkata'
+            }).format(currentEstimatedTime);
+
+            for (const req of pending) {
+                try {
+                    // Internal Notification
+                    await notificationService.sendNotification(
+                        req.user_id,
+                        'Slot Time Reached!',
+                        `The estimated time for ${serviceData?.service_name || 'your slot'} at ${serviceData?.org_name || 'Organization'} has reached ${timeStr}. Book now!`,
+                        'slot_update',
+                        `/dashboard`
+                    );
+                    
+                    notificationIds.push(req.id);
+                    
+                    // Email Notification
+                    if (req.user_email) {
+                        await emailService.sendSlotTimeReachedEmail(req.user_email, {
+                            userName: req.user_name,
+                            orgName: serviceData?.org_name || 'Organization',
+                            serviceName: serviceData?.service_name || 'Service',
+                            estimatedTime: timeStr,
+                            desiredTime: new Intl.DateTimeFormat('en-IN', {
+                                hour: 'numeric',
+                                minute: 'numeric',
+                                hour12: true,
+                                timeZone: 'Asia/Kolkata'
+                            }).format(new Date(req.desired_time))
+                        });
+                    }
+                } catch (e) {
+                    console.error(`[NotifyWaiters] Failed for user ${req.user_id}:`, e.message);
+                }
+            }
+            await slotNotificationModel.markAsNotified(notificationIds);
+        }
+    } catch (e) {
+        console.error('[NotifyWaiters] Error:', e.message);
+    }
+};
+
 module.exports = {
     bookAppointment,
     cancelAppointment,
@@ -699,5 +790,6 @@ module.exports = {
     getQueueStatus,
     advanceQueueAutomatically,
     getSystemAverageSpeed,
-    rescheduleAppointment
+    rescheduleAppointment,
+    checkAndNotifySlotWaiters
 };

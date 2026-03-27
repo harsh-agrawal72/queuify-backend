@@ -21,4 +21,13 @@ router
     .route('/available/:orgId')
     .get(auth('user', 'admin'), checkOrgStatus, slotController.getAvailableSlots);
 
+router
+    .route('/:slotId/notify')
+    .post(auth('user'), slotController.requestSlotNotification);
+
+module.exports = {
+    router
+};
+
+// Fixed export to match other routes if needed, but the original was using module.exports = router
 module.exports = router;

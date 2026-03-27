@@ -88,19 +88,54 @@ const getSlotsWithDetails = async (filters) => {
 const getAvailableSlots = async (orgId, filters = {}) => {
     const slots = await slotModel.getAvailableSlots(orgId, filters);
     const now = new Date();
+
+    let estimatedServiceTime = 30; // Default
+    if (filters.serviceId) {
+        try {
+            // We need a lightweight way to get service time without potentially throwing 404
+            const res = await pool.query('SELECT estimated_service_time FROM services WHERE id = $1', [filters.serviceId]);
+            if (res.rows.length > 0) {
+                estimatedServiceTime = res.rows[0].estimated_service_time || 30;
+            }
+        } catch (e) {
+            console.error('[getAvailableSlots] Service fetch error:', e.message);
+        }
+    }
+
     return slots
-        .filter(slot => new Date(slot.start_time) > now)
-        .map(slot => ({
-            slot_id: slot.id,
-            id: slot.id, // compatibility
-            start_time: slot.start_time,
-            end_time: slot.end_time,
-            remaining_capacity: slot.max_capacity - slot.booked_count,
-            org_id: slot.org_id,
-            resource_id: slot.resource_id,
-            max_capacity: slot.max_capacity,
-            booked_count: slot.booked_count
-        }));
+        // .filter(slot => new Date(slot.start_time) > now) // Removed to allow booking current on-going slots if capacity exists
+        .map(slot => {
+            const slotStart = new Date(slot.start_time);
+            // If the slot has already started, calculation starts from 'now', 
+            // otherwise it starts from the slot's start_time.
+            const baseTime = slotStart > now ? slotStart : now;
+            const minutesToAdd = slot.booked_count * estimatedServiceTime;
+            const estimatedNextTime = new Date(baseTime.getTime() + minutesToAdd * 60000);
+
+            // Format time for the message (IST)
+            const timeStr = new Intl.DateTimeFormat('en-IN', {
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: true,
+                timeZone: 'Asia/Kolkata'
+            }).format(estimatedNextTime);
+
+            const message = `If you book now, your appointment is expected at **${timeStr}**. If you want a slightly later time, you can wait or check back later.`;
+
+            return {
+                slot_id: slot.id,
+                id: slot.id, // compatibility
+                start_time: slot.start_time,
+                end_time: slot.end_time,
+                remaining_capacity: slot.max_capacity - slot.booked_count,
+                org_id: slot.org_id,
+                resource_id: slot.resource_id,
+                max_capacity: slot.max_capacity,
+                booked_count: slot.booked_count,
+                estimated_next_time: estimatedNextTime.toISOString(),
+                descriptive_message: message
+            };
+        });
 };
 
 const getSlotsByOrgId = async (orgId) => {
@@ -226,6 +261,11 @@ const updateSlot = async (slotId, orgId, updateBody) => {
     }
 };
 
+const requestSlotNotification = async (userId, slotId, desiredTime) => {
+    const slotNotificationModel = require('../models/slot_notification.model');
+    return slotNotificationModel.createNotificationRequest(userId, slotId, desiredTime);
+};
+
 module.exports = {
     createSlot,
     getSlotsWithDetails,
@@ -233,5 +273,6 @@ module.exports = {
     getSlotsByResourceId,
     deleteSlot,
     updateSlot,
-    getAvailableSlots
+    getAvailableSlots,
+    requestSlotNotification
 };

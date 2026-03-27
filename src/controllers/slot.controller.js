@@ -56,9 +56,18 @@ const deleteSlot = catchAsync(async (req, res) => {
     res.status(httpStatus.OK).json({ success: true, message: 'Slot soft deleted successfully' });
 });
 
+const requestSlotNotification = catchAsync(async (req, res) => {
+    const { slotId } = req.params;
+    const { desiredTime } = req.body;
+    const userId = req.user.id;
+    const notification = await slotService.requestSlotNotification(userId, slotId, desiredTime);
+    res.status(httpStatus.CREATED).send(notification);
+});
+
 module.exports = {
     createSlot,
     getSlots,
     deleteSlot,
-    getAvailableSlots
+    getAvailableSlots,
+    requestSlotNotification
 };

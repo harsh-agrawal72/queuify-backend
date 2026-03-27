@@ -443,5 +443,31 @@ module.exports = {
             <p style="font-size: 12px; color: #64748b; text-align: center;">This message was generated from the Queuify contact form.</p>
         `, `New Message from ${name}: ${subject}`);
         await sendEmail(adminEmail, emailSubject, html);
+    },
+
+    sendSlotTimeReachedEmail: async (to, data) => {
+        const subject = 'Slot Time Reached Your Preference - Queuify';
+        const { userName, orgName, serviceName, estimatedTime, desiredTime } = data;
+        
+        const html = wrapInProfessionalLayout(`
+            <h2 style="margin: 0; font-size: 24px; color: #4f46e5;">Preferred Time Reached!</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello <strong>${userName}</strong>, the estimated time for your desired slot at <strong>${orgName}</strong> has reached your preference.</p>
+            
+            <div class="info-card">
+                <div class="detail-label">Current Estimated Time</div>
+                <div style="font-size: 24px; font-weight: 800; color: #1e293b; margin: 12px 0;">${estimatedTime}</div>
+                <p style="font-size: 14px; color: #64748b; margin: 0;">(Matches your preference of ${desiredTime})</p>
+            </div>
+
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin: 24px 0;">
+                <p style="margin: 0; color: #1e293b; font-weight: 600;">Service: ${serviceName}</p>
+                <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px;">Book now before others take the spot!</p>
+            </div>
+
+            <div style="text-align: center; margin-top: 32px;">
+                <a href="${config.clientUrl}/dashboard" class="button">Book Appointment Now</a>
+            </div>
+        `, `Alert: Slot time reached ${estimatedTime} for ${serviceName}`);
+        await sendEmail(to, subject, html);
     }
 };
