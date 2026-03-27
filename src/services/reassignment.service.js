@@ -244,7 +244,8 @@ const fillSlotFromWaitlist = async (slotId) => {
                    )
                    AND (
                         -- For both urgent and pending, we pick them up if their preferred date has come or past
-                        a.preferred_date <= $3::date
+                        -- Force date-only comparison to avoid timestamp/timezone mismatch issues
+                        a.preferred_date::date <= $3::date
                    )
                  ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,

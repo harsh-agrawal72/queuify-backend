@@ -91,7 +91,7 @@ const createAppointment = async (appointmentBody) => {
                 userId || null, 
                 serviceId, 
                 resourceId || null, 
-                'confirmed', 
+                slotId ? 'confirmed' : 'pending', 
                 pref_resource || 'ANY', 
                 pref_time || 'FLEXIBLE', 
                 preferredDate, 

@@ -5,17 +5,21 @@ const VERSION_TAG = "[EMAIL-SERVICE]";
 console.log(`${VERSION_TAG} Initializing Nodemailer SMTP...`);
 
 const transporter = nodemailer.createTransport({
-    host: config.email.smtp.host,
+    // Direct IPv4 address for smtp.hostinger.com to bypass DNS-forced IPv6 routing issues
+    host: '172.65.255.143', 
     port: config.email.smtp.port,
     secure: config.email.smtp.port === 465, // true for 465, false for 587
     auth: {
         user: config.email.smtp.user,
         pass: config.email.smtp.pass,
     },
-    // Force IPv4 to avoid ENETUNREACH issues with IPv6 on some networks
-    family: 4,
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,
+    tls: {
+        // Ensure certificate validation still works against the original hostname
+        servername: config.email.smtp.host,
+        rejectUnauthorized: true
+    },
+    connectionTimeout: 15000, // 15 seconds
+    greetingTimeout: 15000,
 });
 
 transporter.verify().then(() => {
