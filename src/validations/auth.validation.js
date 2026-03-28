@@ -17,6 +17,7 @@ const register = {
             then: Joi.string().uuid().optional().allow('', null),
             otherwise: Joi.string().optional().allow('', null),
         }),
+        terms_accepted: Joi.boolean().optional(),
     }),
 };
 
@@ -55,6 +56,7 @@ const registerOrg = {
         adminEmail: Joi.string().required().email(),
         password: Joi.string().required().custom(password),
         type: Joi.string().valid('Clinic', 'Hospital', 'Salon', 'Bank', 'Government Office', 'Consultancy', 'Coaching Institute', 'Service Center', 'Other').required(),
+        terms_accepted: Joi.boolean().optional(),
     }),
 };
 
