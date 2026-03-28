@@ -36,6 +36,8 @@ router
     .route('/:appointmentId/respond-reschedule')
     .patch(auth('user'), validate(appointmentValidation.respondToReschedule), appointmentController.respondToReschedule);
 
+router.post('/emergency-mode', auth('admin'), validate(appointmentValidation.triggerEmergencyMode), appointmentController.triggerEmergencyMode);
+
 router.get('/:appointmentId/queue', auth(), appointmentController.getQueueStatus);
 
 

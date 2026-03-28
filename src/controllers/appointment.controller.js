@@ -105,6 +105,18 @@ module.exports = {
             message: `Proposal ${action}ed successfully`,
             result
         });
+    }),
+    triggerEmergencyMode: catchAsync(async (req, res) => {
+        const { resourceId, date } = req.body;
+        const result = await appointmentService.triggerEmergencyMode(
+            req.user.org_id,
+            resourceId,
+            date
+        );
+        res.send({
+            success: true,
+            ...result
+        });
     })
 };
 

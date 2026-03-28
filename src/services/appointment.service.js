@@ -89,6 +89,22 @@ const bookAppointment = async (appointmentBody) => {
                             console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
                         }
                 }
+
+                // 3. Emit Queue Update for real-time dashboard refresh
+                try {
+                    socket.emitQueueUpdate({
+                        orgId: appointment.org_id,
+                        serviceId: appointment.service_id,
+                        resourceId: appointment.resource_id
+                    }, {
+                        type: 'new_booking',
+                        appointmentId: appointment.id,
+                        slotId: appointment.slot_id
+                    });
+                } catch (socketErr) {
+                    console.error('[Booking-Async] Socket update failed:', socketErr.message);
+                }
+
                 if (appointment.slot_id) {
                     await checkAndNotifySlotWaiters(appointment.slot_id);
                 }
@@ -132,7 +148,7 @@ const cancelAppointment = async (appointmentId, userId) => {
 
         try {
             const io = socket.getIO();
-            io.to(appointment.org_id).emit('queue_update', {
+            io.to(`org_${appointment.org_id}`).emit('queue_update', {
                 type: 'cancellation',
                 slotId: appointment.slot_id
             });
@@ -690,8 +706,9 @@ const getQueueStatus = async (appointmentId) => {
 
         // 6. Drift Detection (AI Difference)
         const nominalAvg = service.estimated_service_time || 15;
-        const nominalWait = peopleAhead * nominalAvg;
-        const timeDriftMinutes = Math.round(estimatedWaitMinutes - nominalWait);
+        const waitMinutesTillStartVal = Math.max(0, waitMinutesTillStart || 0);
+        const nominalWaitUntilTurn = waitMinutesTillStartVal + (peopleAhead * nominalAvg);
+        const timeDriftMinutes = Math.round(estimatedWaitMinutes - nominalWaitUntilTurn);
 
         return {
             queue_number: myRank,
@@ -745,7 +762,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
         // Socket update
         try {
             const io = socket.getIO();
-            io.to(appointment.org_id).emit('queue_update', {
+            io.to(`org_${appointment.org_id}`).emit('queue_update', {
                 type: 'reschedule',
                 appointmentId: appointment.id,
                 newSlotId: appointment.slot_id
@@ -1023,10 +1040,17 @@ const respondToReschedule = async (appointmentId, userId, action) => {
             } catch (e) { console.error('[Respond-Async] Error:', e); }
         })();
 
-        return result;
     } catch (error) {
         throw new ApiError(httpStatus.BAD_REQUEST, error.message);
     }
+};
+
+/**
+ * Trigger Emergency Mode (Bulk Reschedule)
+ */
+const triggerEmergencyMode = async (orgId, resourceId, date) => {
+    const reassignmentService = require('./reassignment.service');
+    return reassignmentService.triggerEmergencyMode(orgId, resourceId, date);
 };
 
 module.exports = {
@@ -1040,5 +1064,6 @@ module.exports = {
     rescheduleAppointment,
     checkAndNotifySlotWaiters,
     proposeReschedule,
-    respondToReschedule
+    respondToReschedule,
+    triggerEmergencyMode
 };

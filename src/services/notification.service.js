@@ -24,11 +24,8 @@ const sendNotification = async (userId, title, message, type, link) => {
         const io = socket.getIO();
         if (io) {
             io.to(`user_${userId}`).emit('new_notification', {
-                title,
-                message,
-                type,
-                link,
-                createdAt: new Date().toISOString()
+                ...notification,
+                time: notification.created_at // Alias for admin layout
             });
         }
     } catch (err) {

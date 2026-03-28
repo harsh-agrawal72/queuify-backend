@@ -606,8 +606,15 @@ const getAppointments = async (orgId, queryParams) => {
             a.preferred_date,
             a.reschedule_status,
             a.reschedule_reason,
-            a.proposed_slot_id
+            a.proposed_slot_id,
+            COALESCE(loyalty.completed_count, 0) >= 3 as is_frequent_visitor
         FROM appointments a
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) as completed_count
+            FROM appointments
+            WHERE org_id = $1 AND status = 'completed'
+            GROUP BY user_id
+        ) loyalty ON a.user_id = loyalty.user_id
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN slots s ON a.slot_id = s.id
         LEFT JOIN services svc ON a.service_id = svc.id
@@ -1382,6 +1389,59 @@ const deleteOrganization = async (orgId) => {
     }
 };
 
+/**
+ * Get User Loyalty Metrics
+ */
+const getUserLoyalty = async (orgId, userId) => {
+    if (!userId) return null;
+
+    const res = await query(`
+        SELECT 
+            COUNT(*) FILTER (WHERE status = 'completed') as completed_count,
+            MAX(completed_at) as last_visit,
+            COUNT(*) FILTER (WHERE status = 'cancelled' AND cancelled_by = 'user') as user_cancellation_count
+        FROM appointments 
+        WHERE org_id = $1 AND user_id = $2
+    `, [orgId, userId]);
+
+    const metrics = res.rows[0];
+    const visitCount = parseInt(metrics.completed_count) || 0;
+
+    return {
+        visitCount,
+        lastVisit: metrics.last_visit,
+        userCancellationCount: parseInt(metrics.user_cancellation_count) || 0,
+        isFrequentVisitor: visitCount >= 3,
+        loyaltyTier: visitCount >= 10 ? 'Gold' : (visitCount >= 5 ? 'Silver' : 'Bronze')
+    };
+};
+
+/**
+ * Get Detailed User Appointment History
+ */
+const getUserHistory = async (orgId, userId) => {
+    if (!userId) return [];
+
+    const res = await query(`
+        SELECT 
+            a.id, a.status, a.created_at, a.completed_at, a.preferred_date,
+            s.name as service_name,
+            r.name as resource_name,
+            sl.start_time, sl.end_time,
+            rv.rating as review_rating,
+            rv.comment as review_comment
+        FROM appointments a
+        LEFT JOIN services s ON a.service_id = s.id
+        LEFT JOIN resources r ON a.resource_id = r.id
+        LEFT JOIN slots sl ON a.slot_id = sl.id
+        LEFT JOIN reviews rv ON a.id = rv.appointment_id
+        WHERE a.org_id = $1 AND a.user_id = $2
+        ORDER BY a.created_at DESC
+    `, [orgId, userId]);
+
+    return res.rows;
+};
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -1394,7 +1454,9 @@ module.exports = {
     deleteSlot: hardDeleteSlot,
     getAppointments,
     updateAppointmentStatus,
-    deleteAppointment,
+    deleteAppointment: async (orgId, appointmentId, reason) => {
+        return updateAppointmentStatus(orgId, appointmentId, 'cancelled', reason);
+    },
     getLiveQueue,
     getNotifications,
     markAllNotificationsAsRead,
@@ -1404,6 +1466,8 @@ module.exports = {
     deleteAdmin,
     deleteOrganization,
     getPredictiveInsights,
-    createManualAppointment
+    createManualAppointment,
+    getUserLoyalty,
+    getUserHistory
 };
 

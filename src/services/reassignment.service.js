@@ -250,11 +250,12 @@ const fillSlotFromWaitlist = async (slotId) => {
                    )
                    AND (
                         a.pref_resource = 'ANY' 
-                        OR (a.pref_resource = 'SPECIFIC' AND a.resource_id = $2)
+                        OR (a.pref_resource = 'SPECIFIC' AND (a.resource_id = $2 OR a.slot_id IS NULL))
+                        -- ^ RELAXED: If slot_id is NULL, it means their original resource is gone/unavailable,
+                        -- so we allow them to be picked up by ANY resource that fits the service.
                    )
                    AND (
                         -- For both urgent and pending, we pick them up if their preferred date has come or past
-                        -- Force date-only comparison to avoid timestamp/timezone mismatch issues
                         a.preferred_date::date <= $3::date
                    )
                  ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
@@ -305,6 +306,78 @@ const fillSlotFromWaitlist = async (slotId) => {
     } catch (error) {
         if (client) await client.query('ROLLBACK');
         console.error('[Waitlist-Fill] Error:', error.message);
+    } finally {
+        client.release();
+    }
+};
+
+/**
+ * Emergency Mode: Bulk Reschedule
+ * Deactivates slots for a resource and marks appointments for reassessment.
+ */
+const triggerEmergencyMode = async (orgId, resourceId, date) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        console.log(`[Emergency] Triggered for Resource: ${resourceId}, Date: ${date}`);
+
+        // 1. Get all active slots for this resource on this date
+        const slotsRes = await client.query(
+            `SELECT id FROM slots 
+             WHERE resource_id = $1 AND org_id = $2
+               AND TO_CHAR(start_time AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = $3
+               AND is_active = TRUE`,
+            [resourceId, orgId, date]
+        );
+
+        if (slotsRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return { message: 'No active slots found for this resource on this date', affectedCount: 0 };
+        }
+
+        const slotIds = slotsRes.rows.map(s => s.id);
+
+        // 2. Deactivate all those slots
+        await client.query(
+            `UPDATE slots SET is_active = FALSE WHERE id = ANY($1)`,
+            [slotIds]
+        );
+
+        // 3. Mark all appointments as pending & slot-less
+        // This makes them eligible for the relaxed 'fillSlotFromWaitlist' logic
+        const apptRes = await client.query(
+            `UPDATE appointments 
+             SET status = 'pending', slot_id = NULL, updated_at = NOW()
+             WHERE slot_id = ANY($1) AND status IN ('confirmed', 'pending')
+             RETURNING id, user_id`,
+            [slotIds]
+        );
+
+        await client.query('COMMIT');
+
+        console.log(`[Emergency] Deactivated ${slotIds.length} slots. Marked ${apptRes.rows.length} appointments for reassignment.`);
+
+        // 4. Notify affected users
+        for (const appt of apptRes.rows) {
+            try {
+                socket.getIO().to(`user_${appt.user_id}`).emit('notification', {
+                    title: 'Service Interruption',
+                    message: 'Due to an emergency, your appointment has been moved to our priority waitlist. We will notify you as soon as a new slot is available.',
+                    type: 'emergency'
+                });
+            } catch (err) { /* ignore socket errors */ }
+        }
+
+        return { 
+            message: 'Emergency mode activated', 
+            slotsDeactivated: slotIds.length, 
+            appointmentsAffected: apptRes.rows.length 
+        };
+
+    } catch (error) {
+        if (client) await client.query('ROLLBACK');
+        throw error;
     } finally {
         client.release();
     }
@@ -472,5 +545,6 @@ const rebalanceResourceSlots = async (resourceId, date) => {
 module.exports = {
     reassignAppointments,
     rebalanceResourceSlots,
-    fillSlotFromWaitlist
+    fillSlotFromWaitlist,
+    triggerEmergencyMode
 };

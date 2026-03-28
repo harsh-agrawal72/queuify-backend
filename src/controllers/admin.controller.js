@@ -137,6 +137,16 @@ const createManualAppointment = catchAsync(async (req, res) => {
     res.status(httpStatus.CREATED).json({ success: true, data: appointment });
 });
 
+const getUserLoyalty = catchAsync(async (req, res) => {
+    const loyalty = await adminService.getUserLoyalty(req.user.org_id, req.params.userId);
+    res.send(loyalty);
+});
+
+const getUserHistory = catchAsync(async (req, res) => {
+    const history = await adminService.getUserHistory(req.user.org_id, req.params.userId);
+    res.send(history);
+});
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -160,5 +170,7 @@ module.exports = {
     deleteOrganization,
     rebalanceSlots,
     getPredictiveInsights,
-    createManualAppointment
+    createManualAppointment,
+    getUserLoyalty,
+    getUserHistory
 };
