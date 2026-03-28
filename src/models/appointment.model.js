@@ -82,23 +82,39 @@ const createAppointment = async (appointmentBody) => {
             preferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
         }
 
+        // 3. Dynamic Column Detection for Resilience
+        const apptTableCheck = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'appointments'
+        `);
+        const existingCols = apptTableCheck.rows.map(r => r.column_name);
+
+        const columns = ['org_id', 'slot_id', 'user_id', 'service_id', 'resource_id', 'status', 'pref_resource', 'pref_time', 'preferred_date'];
+        const values = [orgId, slotId || null, userId || null, serviceId, resourceId || null, slotId ? 'confirmed' : 'pending', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate];
+        const valuePlaceholders = ['$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9'];
+
+        // Add optional/new columns if they exist in the DB
+        if (existingCols.includes('customer_name')) {
+            columns.push('customer_name');
+            values.push(customer_name || null);
+            valuePlaceholders.push(`$${values.length}`);
+        }
+        if (existingCols.includes('customer_phone')) {
+            columns.push('customer_phone');
+            values.push(customer_phone || null);
+            valuePlaceholders.push(`$${values.length}`);
+        }
+        if (existingCols.includes('token_number')) {
+            columns.push('token_number');
+            values.push(appointmentBody.token_number || null);
+            valuePlaceholders.push(`$${values.length}`);
+        }
+
         const appointmentRes = await client.query(
-            `INSERT INTO appointments (org_id, slot_id, user_id, service_id, resource_id, status, pref_resource, pref_time, preferred_date, customer_name, customer_phone, token_number) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-            [
-                orgId, 
-                slotId || null, 
-                userId || null, 
-                serviceId, 
-                resourceId || null, 
-                slotId ? 'confirmed' : 'pending', 
-                pref_resource || 'ANY', 
-                pref_time || 'FLEXIBLE', 
-                preferredDate, 
-                customer_name || null, 
-                customer_phone || null,
-                appointmentBody.token_number || null
-            ]
+            `INSERT INTO appointments (${columns.join(', ')}) 
+             VALUES (${valuePlaceholders.join(', ')}) RETURNING *`,
+            values
         );
 
         const appointmentId = appointmentRes.rows[0].id;

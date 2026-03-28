@@ -314,14 +314,14 @@ const getAnalytics = async (orgId, filters = {}) => {
     const bookedTotal = total; // Use the same total shown in the KPI card
     
     // Utilization = (Bookings / Capacity) * 100. 
-    // Fallback: If no slots exist but bookings do, show 100%.
+    // We cap at 100% to represent 'Full Saturation'.
     const utilization = capacityTotal > 0 
-        ? Math.round((bookedTotal / capacityTotal) * 100) 
+        ? Math.min(Math.round((bookedTotal / capacityTotal) * 100), 100)
         : (bookedTotal > 0 ? 100 : 0);
 
     const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
     const prevUtilization = prevCapacity > 0 
-        ? Math.round((prevTotal / prevCapacity) * 100) 
+        ? Math.min(Math.round((prevTotal / prevCapacity) * 100), 100)
         : (prevTotal > 0 ? 100 : 0);
 
     // ── Daily Trend Processing ──
@@ -1202,11 +1202,10 @@ const createManualAppointment = async (orgId, appointmentData) => {
     const appointmentModel = require('../models/appointment.model');
     console.log('[createManualAppointment] Incoming Data:', JSON.stringify(appointmentData, null, 2));
     
-    // Generate a token number if not provided
+    // Generate a short numeric OR alphanumeric token (e.g., W-123)
     if (!appointmentData.token_number) {
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const suffix = Math.random().toString(36).substring(2, 5).toUpperCase();
-        appointmentData.token_number = `WALK-${dateStr}-${suffix}`;
+        const rand = Math.floor(100 + Math.random() * 899); // 3 digits
+        appointmentData.token_number = `W-${rand}`;
     }
 
     const result = await appointmentModel.createAppointment({

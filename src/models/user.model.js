@@ -6,14 +6,27 @@ const { pool } = require('../config/db');
 const createUser = async (userBody) => {
     const { name, email, password, role, orgId, isPasswordSet, provider, google_id, phone, terms_accepted } = userBody;
     const isPwdSet = isPasswordSet !== undefined ? isPasswordSet : true;
-    const termsAccepted = terms_accepted === true;
-    const termsAcceptedAt = termsAccepted ? new Date() : null;
 
+    // 1. Create the user with core columns first (avoids crash if terms columns are missing)
     const result = await pool.query(
-        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone, terms_accepted, terms_accepted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
-        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null, termsAccepted, termsAcceptedAt]
+        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null]
     );
-    return result.rows[0];
+    const user = result.rows[0];
+
+    // 2. Try to update terms_accepted (optional step, prevents crash if columns don't exist yet)
+    if (terms_accepted) {
+        try {
+            await pool.query(
+                'UPDATE users SET terms_accepted = $1, terms_accepted_at = NOW() WHERE id = $2',
+                [true, user.id]
+            );
+        } catch (e) {
+            console.warn('[USER-MODEL] Terms columns not found yet. Signup succeeded but terms not recorded.', e.message);
+        }
+    }
+
+    return user;
 };
 
 /**
