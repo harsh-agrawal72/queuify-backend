@@ -39,8 +39,9 @@ const startServer = () => {
         console.warn('Reminder cron init failed:', e.message);
     }
 
-    server = httpServer.listen(config.port, () => {
-        console.log(`Server running on port ${config.port}`);
+    console.log(`Attempting to start server on port ${config.port}...`);
+    server = httpServer.listen(config.port, '0.0.0.0', () => {
+        console.log(`🚀 SUCCESS: Server is now globally listening on port ${config.port}`);
     });
 };
 
