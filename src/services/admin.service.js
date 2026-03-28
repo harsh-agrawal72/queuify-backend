@@ -63,6 +63,10 @@ const getOverview = async (orgId) => {
         console.log("Next Slot:", nextSlotRes.rows[0]);
         const orgType = orgRes.rows[0]?.industry_type || 'Other';
 
+        const totalCapacity = parseInt(totalCapacityRes.rows[0].cap) || 0;
+        const totalBooked = parseInt(totalBookedRes.rows[0].booked) || 0;
+        const utilization = totalCapacity > 0 ? Math.round((totalBooked / totalCapacity) * 100) : 0;
+
         return {
             totalSlots: parseInt(totalSlotsRes.rows[0].count),
             totalBookingsToday: parseInt(totalBookingsRes.rows[0].count),
@@ -193,12 +197,24 @@ const getAnalytics = async (orgId, filters = {}) => {
 
     const utilQuery = `
         SELECT
-            COALESCE(SUM(s.booked_count), 0) AS booked,
             COALESCE(SUM(s.max_capacity), 0) AS capacity
         FROM slots s
         WHERE s.org_id = $1 
         AND s.start_time >= $2::timestamptz 
         AND s.start_time <= $3::timestamptz${slotExtraWhere}
+    `;
+
+    // To accurately reflect utilization including walk-ins/waitlist (unassigned tokens),
+    // we count non-cancelled appointments in this range.
+    const volumeQuery = `
+        SELECT COUNT(*) as volume
+        FROM appointments a
+        WHERE a.org_id = $1
+        AND a.status NOT IN ('cancelled', 'no_show')
+        AND (
+            (a.slot_id IS NOT NULL AND EXISTS (SELECT 1 FROM slots s WHERE s.id = a.slot_id AND s.start_time >= $2::timestamptz AND s.start_time <= $3::timestamptz))
+            OR (a.slot_id IS NULL AND a.created_at >= $2::timestamptz AND a.created_at <= $3::timestamptz)
+        )${extraWhere}
     `;
 
     const trendQuery = `
@@ -250,19 +266,23 @@ const getAnalytics = async (orgId, filters = {}) => {
     `;
 
     const [
-        kpiRes,
-        prevKpiRes,
-        utilRes,
-        prevUtilRes,
-        trendRes,
-        byServiceRes,
-        byResourceRes,
-        heatmapRes
+        kpiRes,           // 0
+        prevKpiRes,       // 1
+        utilRes,          // 2
+        prevUtilRes,      // 3
+        volumeRes,        // 4
+        prevVolumeRes,    // 5
+        trendRes,         // 6
+        byServiceRes,     // 7
+        byResourceRes,    // 8
+        heatmapRes        // 9
     ] = await Promise.all([
         query(kpiQuery, baseParams),
-        query(kpiQuery.replace(/\$2/g, '$2').replace(/\$3/g, '$3'), prevParams),
+        query(kpiQuery, prevParams),
         query(utilQuery, baseParams),
         query(utilQuery, prevParams),
+        query(volumeQuery, baseParams),
+        query(volumeQuery, prevParams),
         query(trendQuery, baseParams),
         query(byServiceQuery, baseParams),
         query(byResourceQuery, baseParams),
@@ -282,12 +302,12 @@ const getAnalytics = async (orgId, filters = {}) => {
     const prevCancelled = parseInt(prevKpi.cancelled) || 0;
 
     // ── Utilization Processing ──
-    const bookedTotal = parseInt(utilRes.rows[0].booked) || 0;
     const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
+    const bookedTotal = parseInt(volumeRes.rows[0].volume) || 0;
     const utilization = capacityTotal > 0 ? Math.round((bookedTotal / capacityTotal) * 100) : 0;
 
     const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
-    const prevBooked = parseInt(prevUtilRes.rows[0].booked) || 0;
+    const prevBooked = parseInt(prevVolumeRes.rows[0].volume) || 0;
     const prevUtilization = prevCapacity > 0 ? Math.round((prevBooked / prevCapacity) * 100) : 0;
 
     // ── Daily Trend Processing ──
@@ -359,6 +379,11 @@ const getAnalytics = async (orgId, filters = {}) => {
         insights.push({ type: 'success', title: 'Everything Looks Good', message: 'Steady performance across all metrics.' });
     }
 
+    // 10. Organization Meta
+    const orgMetaRes = await query('SELECT name, industry_type FROM organizations WHERE id = $1', [orgId]);
+    const orgName = orgMetaRes.rows[0]?.name || 'Organization';
+    const orgType = orgMetaRes.rows[0]?.industry_type || 'Other';
+
     // ═══════════════════════════════════════
     // Return
     // ═══════════════════════════════════════
@@ -374,7 +399,7 @@ const getAnalytics = async (orgId, filters = {}) => {
         growth: {
             bookings: bookingChange,
             cancellation: prevCancRate > 0 ? cancellationRate - prevCancRate : 0,
-            utilization: prevUtilization > 0 ? utilization - prevUtilization : 0,
+            utilization: prevUtilization > 0 ? (utilization - prevUtilization) : 0,
         },
         // Charts
         dailyBookings,
@@ -389,8 +414,8 @@ const getAnalytics = async (orgId, filters = {}) => {
             start: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(startDate), 
             end: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(endDateEnd) 
         },
-        orgName: (await query('SELECT name FROM organizations WHERE id = $1', [orgId])).rows[0]?.name || 'Organization',
-        orgType: (await query('SELECT industry_type FROM organizations WHERE id = $1', [orgId])).rows[0]?.industry_type || 'Other'
+        orgName,
+        orgType
     };
 };
 
