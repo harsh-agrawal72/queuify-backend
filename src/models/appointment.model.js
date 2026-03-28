@@ -121,10 +121,18 @@ const createAppointment = async (appointmentBody) => {
 
         // 4. Update slot booked count if applicable
         if (slotId) {
-            await client.query(
-                'UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1',
-                [slotId]
-            );
+            // For manual/admin appointments, we allow overbooking by expanding capacity if needed
+            if (bypassDuplicate) {
+                await client.query(
+                    'UPDATE slots SET booked_count = booked_count + 1, max_capacity = GREATEST(max_capacity, booked_count + 1) WHERE id = $1',
+                    [slotId]
+                );
+            } else {
+                await client.query(
+                    'UPDATE slots SET booked_count = booked_count + 1 WHERE id = $1',
+                    [slotId]
+                );
+            }
         }
 
         // 5. Calculate Dynamic Rank (Queue Number)

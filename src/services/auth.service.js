@@ -141,7 +141,8 @@ const registerOrganization = async (orgBody, adminBody) => {
         password: hashedPassword,
         role: 'admin',
         orgId: org.id,
-        is_email_verified: true
+        is_email_verified: true,
+        terms_accepted: true
     });
     
     // Send Welcome Email
