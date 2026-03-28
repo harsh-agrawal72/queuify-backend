@@ -28,47 +28,39 @@ const getOverview = async (orgId) => {
         // Granular Logging
         console.log("Fetching Overview for Org:", orgId);
 
-        const totalSlotsRes = await query('SELECT COUNT(*) FROM slots WHERE org_id = $1', [orgId]);
-        
-        // Range-based date filtering for index usage
-        const totalBookingsRes = await query(
-            "SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + interval '1 day'",
-            [orgId]
-        );
+        // Parallelize all independent KPI queries
+        const [
+            totalSlotsRes,
+            totalBookingsRes,
+            activeBookingsRes,
+            completedBookingsRes,
+            cancelledBookingsRes,
+            nextSlotRes,
+            totalCapacityRes,
+            totalBookedRes,
+            recentActivityRes,
+            orgRes
+        ] = await Promise.all([
+            query('SELECT COUNT(*) FROM slots WHERE org_id = $1', [orgId]),
+            query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + interval '1 day'", [orgId]),
+            query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'confirmed'", [orgId]),
+            query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'completed'", [orgId]),
+            query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'cancelled'", [orgId]),
+            query("SELECT * FROM slots WHERE org_id = $1 AND start_time > NOW() ORDER BY start_time ASC LIMIT 1", [orgId]),
+            query("SELECT COALESCE(SUM(max_capacity), 0) as cap FROM slots WHERE org_id = $1", [orgId]),
+            query("SELECT COALESCE(SUM(booked_count), 0) as booked FROM slots WHERE org_id = $1", [orgId]),
+            query(`
+                SELECT a.id, u.name as user_name, a.status, a.created_at 
+                FROM appointments a
+                LEFT JOIN users u ON a.user_id = u.id
+                WHERE a.org_id = $1
+                ORDER BY a.created_at DESC
+                LIMIT 5
+            `, [orgId]),
+            query('SELECT industry_type FROM organizations WHERE id = $1', [orgId])
+        ]);
 
-        const activeBookingsRes = await query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'confirmed'", [orgId]);
-
-        const completedBookingsRes = await query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'completed'", [orgId]);
-
-        const cancelledBookingsRes = await query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'cancelled'", [orgId]);
-
-        // Next upcoming slot
-        const nextSlotRes = await query("SELECT * FROM slots WHERE org_id = $1 AND start_time > NOW() ORDER BY start_time ASC LIMIT 1", [orgId]);
         console.log("Next Slot:", nextSlotRes.rows[0]);
-
-        // Utilization calculation
-        const totalCapacityRes = await query("SELECT COALESCE(SUM(max_capacity), 0) as cap FROM slots WHERE org_id = $1", [orgId]);
-        const totalBookedRes = await query("SELECT COALESCE(SUM(booked_count), 0) as booked FROM slots WHERE org_id = $1", [orgId]);
-
-        let utilization = 0;
-        const cap = parseInt(totalCapacityRes.rows[0].cap);
-        const booked = parseInt(totalBookedRes.rows[0].booked);
-
-        if (cap > 0) {
-            utilization = Math.round((booked / cap) * 100);
-        }
-
-        // Recent Activity (for Overview)
-        const recentActivityRes = await query(`
-            SELECT a.id, u.name as user_name, a.status, a.created_at 
-            FROM appointments a
-            LEFT JOIN users u ON a.user_id = u.id
-            WHERE a.org_id = $1
-            ORDER BY a.created_at DESC
-            LIMIT 5
-        `, [orgId]); // CHECK: u.name might be null if user deleted?
-
-        const orgRes = await query('SELECT industry_type FROM organizations WHERE id = $1', [orgId]);
         const orgType = orgRes.rows[0]?.industry_type || 'Other';
 
         return {
@@ -126,7 +118,8 @@ const getTodayQueue = async (orgId) => {
                 END
             )
             ORDER BY a.created_at ASC
-        ) as queue_number,
+        ) as queue_number
+        FROM appointments a
         JOIN services svc ON a.service_id = svc.id
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN resources r ON a.resource_id = r.id
@@ -183,7 +176,7 @@ const getAnalytics = async (orgId, filters = {}) => {
     }
 
     // ═══════════════════════════════════════
-    // 1. KPI: Appointment counts by status
+    // 1. All Analytical Queries (Parallelized)
     // ═══════════════════════════════════════
     const kpiQuery = `
         SELECT
@@ -197,23 +190,7 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND a.created_at >= $2::timestamptz 
         AND a.created_at <= $3::timestamptz${extraWhere}
     `;
-    const kpiRes = await query(kpiQuery, baseParams);
-    const kpi = kpiRes.rows[0];
-    const total = parseInt(kpi.total) || 0;
-    const cancelled = parseInt(kpi.cancelled) || 0;
-    const confirmed = parseInt(kpi.confirmed) || 0;
-    const completed = parseInt(kpi.completed) || 0;
-    const pending = parseInt(kpi.pending) || 0;
 
-    // Previous period KPI
-    const prevKpiRes = await query(kpiQuery.replace(/\$2/g, '$2').replace(/\$3/g, '$3'), prevParams);
-    const prevKpi = prevKpiRes.rows[0];
-    const prevTotal = parseInt(prevKpi.total) || 0;
-    const prevCancelled = parseInt(prevKpi.cancelled) || 0;
-
-    // ═══════════════════════════════════════
-    // 3. KPI: Slot Utilization
-    // ═══════════════════════════════════════
     const utilQuery = `
         SELECT
             COALESCE(SUM(s.booked_count), 0) AS booked,
@@ -223,20 +200,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND s.start_time >= $2::timestamptz 
         AND s.start_time <= $3::timestamptz${slotExtraWhere}
     `;
-    const utilRes = await query(utilQuery, baseParams);
-    const bookedTotal = parseInt(utilRes.rows[0].booked) || 0;
-    const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
-    const utilization = capacityTotal > 0 ? Math.round((bookedTotal / capacityTotal) * 100) : 0;
 
-    const prevUtilRes = await query(utilQuery, prevParams);
-    const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
-    const prevBooked = parseInt(prevUtilRes.rows[0].booked) || 0;
-    const prevUtilization = prevCapacity > 0 ? Math.round((prevBooked / prevCapacity) * 100) : 0;
-
-    // ═══════════════════════════════════════
-    // 4. Chart: Booking Trend (daily)
-    // ═══════════════════════════════════════
-    const trendRes = await query(`
+    const trendQuery = `
         SELECT 
             TO_CHAR(a.created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS date, 
             COUNT(*) AS count
@@ -246,27 +211,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY date
         ORDER BY date ASC
-    `, baseParams);
+    `;
 
-    // Fill missing dates
-    const dailyBookings = [];
-    const cursor = new Date(startDate);
-    while (cursor <= endDateEnd) {
-        // Fix: Use local date string instead of toISOString (which converts to UTC)
-        const year = cursor.getFullYear();
-        const month = String(cursor.getMonth() + 1).padStart(2, '0');
-        const day = String(cursor.getDate()).padStart(2, '0');
-        const ds = `${year}-${month}-${day}`;
-
-        const found = trendRes.rows.find(r => r.date === ds);
-        dailyBookings.push({ date: ds, count: parseInt(found?.count || 0) });
-        cursor.setDate(cursor.getDate() + 1);
-    }
-
-    // ═══════════════════════════════════════
-    // 5. Chart: Bookings by Service
-    // ═══════════════════════════════════════
-    const byServiceRes = await query(`
+    const byServiceQuery = `
         SELECT svc.name AS service_name, COUNT(a.id) AS count
         FROM appointments a
         JOIN services svc ON a.service_id = svc.id
@@ -275,12 +222,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY svc.name
         ORDER BY count DESC
-    `, baseParams);
+    `;
 
-    // ═══════════════════════════════════════
-    // 6. Chart: Bookings by Resource
-    // ═══════════════════════════════════════
-    const byResourceRes = await query(`
+    const byResourceQuery = `
         SELECT COALESCE(r.name, 'Unassigned') AS resource_name, COUNT(a.id) AS count
         FROM appointments a
         LEFT JOIN resources r ON a.resource_id = r.id
@@ -289,18 +233,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY r.name
         ORDER BY count DESC
-    `, baseParams);
-    const statusDistribution = [
-        { name: 'Confirmed', value: confirmed, color: '#6366f1' },
-        { name: 'Completed', value: completed, color: '#10b981' },
-        { name: 'Cancelled', value: cancelled, color: '#ef4444' },
-        { name: 'Pending', value: pending, color: '#f59e0b' },
-    ].filter(s => s.value > 0);
+    `;
 
-    // ═══════════════════════════════════════
-    // 8. Chart: Peak Hours Heatmap (day × hour)
-    // ═══════════════════════════════════════
-    const heatmapRes = await query(`
+    const heatmapQuery = `
         SELECT
             EXTRACT(DOW FROM sl.start_time AT TIME ZONE 'Asia/Kolkata')::int AS day,
             EXTRACT(HOUR FROM sl.start_time AT TIME ZONE 'Asia/Kolkata')::int AS hour,
@@ -312,7 +247,69 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND a.created_at <= $3::timestamptz${extraWhere}
         GROUP BY day, hour
         ORDER BY count DESC
-    `, baseParams);
+    `;
+
+    const [
+        kpiRes,
+        prevKpiRes,
+        utilRes,
+        prevUtilRes,
+        trendRes,
+        byServiceRes,
+        byResourceRes,
+        heatmapRes
+    ] = await Promise.all([
+        query(kpiQuery, baseParams),
+        query(kpiQuery.replace(/\$2/g, '$2').replace(/\$3/g, '$3'), prevParams),
+        query(utilQuery, baseParams),
+        query(utilQuery, prevParams),
+        query(trendQuery, baseParams),
+        query(byServiceQuery, baseParams),
+        query(byResourceQuery, baseParams),
+        query(heatmapQuery, baseParams)
+    ]);
+
+    // ── KPI Processing ──
+    const kpi = kpiRes.rows[0];
+    const total = parseInt(kpi.total) || 0;
+    const cancelled = parseInt(kpi.cancelled) || 0;
+    const confirmed = parseInt(kpi.confirmed) || 0;
+    const completed = parseInt(kpi.completed) || 0;
+    const pending = parseInt(kpi.pending) || 0;
+
+    const prevKpi = prevKpiRes.rows[0];
+    const prevTotal = parseInt(prevKpi.total) || 0;
+    const prevCancelled = parseInt(prevKpi.cancelled) || 0;
+
+    // ── Utilization Processing ──
+    const bookedTotal = parseInt(utilRes.rows[0].booked) || 0;
+    const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
+    const utilization = capacityTotal > 0 ? Math.round((bookedTotal / capacityTotal) * 100) : 0;
+
+    const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
+    const prevBooked = parseInt(prevUtilRes.rows[0].booked) || 0;
+    const prevUtilization = prevCapacity > 0 ? Math.round((prevBooked / prevCapacity) * 100) : 0;
+
+    // ── Daily Trend Processing ──
+    const dailyBookings = [];
+    const cursor = new Date(startDate);
+    while (cursor <= endDateEnd) {
+        const year = cursor.getFullYear();
+        const month = String(cursor.getMonth() + 1).padStart(2, '0');
+        const day = String(cursor.getDate()).padStart(2, '0');
+        const ds = `${year}-${month}-${day}`;
+
+        const found = trendRes.rows.find(r => r.date === ds);
+        dailyBookings.push({ date: ds, count: parseInt(found?.count || 0) });
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const statusDistribution = [
+        { name: 'Confirmed', value: confirmed, color: '#6366f1' },
+        { name: 'Completed', value: completed, color: '#10b981' },
+        { name: 'Cancelled', value: cancelled, color: '#ef4444' },
+        { name: 'Pending', value: pending, color: '#f59e0b' },
+    ].filter(s => s.value > 0);
 
     // ═══════════════════════════════════════
     // 9. Smart Insights
