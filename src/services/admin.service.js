@@ -607,7 +607,7 @@ const getAppointments = async (orgId, queryParams) => {
             a.reschedule_status,
             a.reschedule_reason,
             a.proposed_slot_id,
-            COALESCE(loyalty.completed_count, 0) >= 3 as is_frequent_visitor
+            COALESCE(loyalty.completed_count, 0) as completed_count
         FROM appointments a
         LEFT JOIN (
             SELECT user_id, COUNT(*) as completed_count
@@ -759,6 +759,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
 
         const appointment = check.rows[0];
 
+        const apptCols = await getColumnNames('appointments');
+        const hasCancelledBy = apptCols.includes('cancelled_by');
+        const hasCancellationReason = apptCols.includes('cancellation_reason');
+
         // If cancelling an appointment, decrement slot count and save reason
         let updateQuery = `UPDATE appointments SET status = $1, updated_at = NOW()`;
         const updateParams = [status, appointmentId];
@@ -772,8 +776,13 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         }
 
         if (status === 'cancelled') {
-            updateQuery = `UPDATE appointments SET status = $1, cancelled_by = 'admin', cancellation_reason = $3, updated_at = NOW()`;
-            updateParams.push(reason);
+            let cancelSet = `status = $1`;
+            if (hasCancelledBy) cancelSet += `, cancelled_by = 'admin'`;
+            if (hasCancellationReason) {
+                cancelSet += `, cancellation_reason = $3`;
+                updateParams.push(reason);
+            }
+            updateQuery = `UPDATE appointments SET ${cancelSet}, updated_at = NOW()`;
             
             if (appointment.status !== 'cancelled') {
                 await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
@@ -783,13 +792,14 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
         const updatedAppointment = res.rows[0];
 
-        // If status changed to completed, cancelled, or no_show, trigger auto-advancement and waitlist filling
+        // Trigger waitlist filling and notifications
         if (['completed', 'cancelled', 'no_show'].includes(status)) {
-            // Use local require to avoid circular dependency
-            const { advanceQueueAutomatically } = require('./appointment.service');
-            const reassignmentService = require('./reassignment.service');
-            await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+            // USER REQUEST: Disable automatic "Start Serving" for the next appointment when an admin completes/cancels one.
+            // This allows admins to have manual control over the queue flow.
+            // const { advanceQueueAutomatically } = require('./appointment.service');
+            // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
             
+            const reassignmentService = require('./reassignment.service');
             if (status === 'cancelled') {
                 try {
                     await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
@@ -936,10 +946,11 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
             );
             const cancelledAppt = res.rows[0];
 
-            // Trigger auto-advancement and waitlist filling
-            const { advanceQueueAutomatically } = require('./appointment.service');
+            // USER REQUEST: Disable automatic "Start Serving" for the next appointment.
+            // const { advanceQueueAutomatically } = require('./appointment.service');
+            // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+            
             const reassignmentService = require('./reassignment.service');
-            await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
             try {
                 await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
             } catch (e) {
@@ -1427,7 +1438,7 @@ const getUserLoyalty = async (orgId, userId) => {
         lastVisit: metrics.last_visit,
         userCancellationCount: parseInt(metrics.user_cancellation_count) || 0,
         isFrequentVisitor: visitCount >= 3,
-        loyaltyTier: visitCount >= 10 ? 'Gold' : (visitCount >= 5 ? 'Silver' : 'Bronze')
+        loyaltyTier: visitCount >= 10 ? 'Diamond' : (visitCount >= 5 ? 'Gold' : (visitCount >= 3 ? 'Silver' : (visitCount >= 1 ? 'Bronze' : 'None')))
     };
 };
 

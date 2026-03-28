@@ -371,7 +371,8 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
 
     // If status changed to completed, cancelled, or no_show, trigger auto-advancement
     if (['completed', 'cancelled', 'no_show'].includes(status)) {
-        await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
+        // USER REQUEST: Disable automatic "Start Serving" for the next appointment.
+        // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
         
         // Also trigger waitlist fill if space opened up
         if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
