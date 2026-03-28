@@ -337,10 +337,10 @@ const getAnalytics = async (orgId, filters = {}) => {
     const cancellationRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
     const prevCancRate = prevTotal > 0 ? Math.round((prevCancelled / prevTotal) * 100) : 0;
 
-    const bookingChange = prevTotal > 0 ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0;
+    const bookingChange = (prevTotal > 0 && isFinite(total)) ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0;
 
     // Find peak hour from heatmap
-    const peakEntry = heatmapRes.rows[0]; // Already ordered by count DESC
+    const peakEntry = (heatmapRes.rows && heatmapRes.rows[0]) ? heatmapRes.rows[0] : null;
 
     const insights = [];
 
@@ -352,25 +352,32 @@ const getAnalytics = async (orgId, filters = {}) => {
     }
 
     // 2. Cancellation Analysis
-    if (cancellationRate > 25) {
+    if (isFinite(cancellationRate) && cancellationRate > 25) {
         insights.push({ type: 'danger', title: 'High Cancellations', message: `${cancellationRate}% cancellation rate.` });
     }
 
     // 3. Peak Times
-    if (peakEntry && parseInt(peakEntry.count) > 2) {
+    if (peakEntry && isFinite(peakEntry.count) && parseInt(peakEntry.count) > 2) {
         const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        insights.push({ type: 'info', title: 'Busiest Time', message: `Expect high traffic on ${dayNames[peakEntry.day]}s at ${peakEntry.hour}:00.` });
+        const pDay = parseInt(peakEntry.day);
+        const pHour = parseInt(peakEntry.hour);
+        if (isFinite(pDay) && isFinite(pHour) && dayNames[pDay]) {
+            insights.push({ type: 'info', title: 'Busiest Time', message: `Expect high traffic on ${dayNames[pDay]}s at ${pHour}:00.` });
+        }
     }
 
     // 4. Top Service
-    if (byServiceRes.rows.length > 0) {
+    if (byServiceRes.rows && byServiceRes.rows.length > 0) {
         const topSvc = byServiceRes.rows[0];
-        const share = Math.round((parseInt(topSvc.count) / total) * 100);
-        insights.push({ type: 'success', title: 'Top Service', message: `"${topSvc.service_name}" drives ${share}% of your appointments.` });
+        const topSvcCount = parseInt(topSvc.count);
+        if (total > 0 && isFinite(topSvcCount)) {
+            const share = Math.round((topSvcCount / total) * 100);
+            insights.push({ type: 'success', title: 'Top Service', message: `"${topSvc.service_name}" drives ${share}% of your appointments.` });
+        }
     }
 
     // 5. Utilization
-    if (utilization < 40 && capacityTotal > 50) {
+    if (isFinite(utilization) && utilization < 40 && capacityTotal > 50) {
         insights.push({ type: 'info', title: 'Efficiency', message: `Slot utilization is low (${utilization}%). Try bundling services or off-peak discounts.` });
     }
 
@@ -405,30 +412,37 @@ const getAnalytics = async (orgId, filters = {}) => {
     // ═══════════════════════════════════════
     // Return
     // ═══════════════════════════════════════
+    const safeNum = (val) => (isFinite(val) && !isNaN(val)) ? val : 0;
+    
     return {
         // KPIs
-        totalBookings: total,
-        confirmedBookings: confirmed,
-        cancelledBookings: cancelled,
-        completedBookings: completed,
-        utilization: utilization || 0,
-        cancellationRate: cancellationRate || 0,
+        totalBookings: safeNum(total),
+        confirmedBookings: safeNum(confirmed),
+        cancelledBookings: safeNum(cancelled),
+        completedBookings: safeNum(completed),
+        utilization: safeNum(utilization),
+        cancellationRate: safeNum(cancellationRate),
         // Growth vs previous period
         growth: {
-            bookings: bookingChange || 0,
-            cancellation: prevCancRate > 0 ? (cancellationRate - prevCancRate) : 0,
-            utilization: prevUtilization > 0 ? (utilization - prevUtilization) : 0,
+            bookings: safeNum(bookingChange),
+            cancellation: (prevCancRate > 0 && isFinite(prevCancRate)) ? safeNum(cancellationRate - prevCancRate) : 0,
+            utilization: (prevUtilization > 0 && isFinite(prevUtilization)) ? safeNum(utilization - prevUtilization) : 0,
         },
         // Charts
         dailyBookings: dailyBookings || [],
-        bookingsByService: (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: parseInt(r.count) || 0 })),
-        bookingsByResource: (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: parseInt(r.count) || 0 })),
+        bookingsByService: (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })),
+        bookingsByResource: (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })),
         statusDistribution: statusDistribution || [],
-        peakHoursHeatmap: (heatmapRes.rows || []).map(r => ({ 
-            day: r.day !== null ? parseInt(r.day) : 0, 
-            hour: r.hour !== null ? parseInt(r.hour) : 0, 
-            count: parseInt(r.count) || 0 
-        })),
+        peakHoursHeatmap: (heatmapRes.rows || []).map(r => {
+            const d = parseInt(r.day);
+            const h = parseInt(r.hour);
+            const c = parseInt(r.count);
+            return { 
+                day: isFinite(d) ? d : 0, 
+                hour: isFinite(h) ? h : 0, 
+                count: isFinite(c) ? c : 0 
+            };
+        }),
         // Insights
         insights: insights || [],
         // Meta
