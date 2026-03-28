@@ -590,7 +590,7 @@ const getAppointments = async (orgId, queryParams) => {
 
     let queryText = `
         SELECT 
-            a.id, a.org_id, a.service_id, a.resource_id, a.slot_id,
+            a.id, a.org_id, a.user_id, a.service_id, a.resource_id, a.slot_id,
             a.status, 
             ${hasCancelledBy ? 'a.cancelled_by,' : "NULL as cancelled_by,"}
             a.created_at, 
