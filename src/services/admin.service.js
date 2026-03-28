@@ -195,6 +195,7 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND a.created_at <= $3::timestamptz${extraWhere}
     `;
 
+    // 3. Utilization / Volume (Denominator)
     const utilQuery = `
         SELECT
             COALESCE(SUM(s.max_capacity), 0) AS capacity
@@ -204,8 +205,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         AND s.start_time <= $3::timestamptz${slotExtraWhere}
     `;
 
-    // To accurately reflect utilization including walk-ins/waitlist (unassigned tokens),
-    // we count non-cancelled appointments in this range.
+    // Utilization / Volume (Numerator)
+    // We count non-cancelled appointments that are either in a slot in this range
+    // OR are walk-ins created in this range.
     const volumeQuery = `
         SELECT COUNT(*) as volume
         FROM appointments a
@@ -304,11 +306,18 @@ const getAnalytics = async (orgId, filters = {}) => {
     // ── Utilization Processing ──
     const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
     const bookedTotal = parseInt(volumeRes.rows[0].volume) || 0;
-    const utilization = capacityTotal > 0 ? Math.round((bookedTotal / capacityTotal) * 100) : 0;
+    
+    // Fallback: If no slots exist, we use the bookings as those "unplanned slots" and show 100% utilization.
+    // If slots exist, we show the actual utilization percentage.
+    const utilization = capacityTotal > 0 
+        ? Math.round((bookedTotal / capacityTotal) * 100) 
+        : (bookedTotal > 0 ? 100 : 0);
 
     const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
     const prevBooked = parseInt(prevVolumeRes.rows[0].volume) || 0;
-    const prevUtilization = prevCapacity > 0 ? Math.round((prevBooked / prevCapacity) * 100) : 0;
+    const prevUtilization = prevCapacity > 0 
+        ? Math.round((prevBooked / prevCapacity) * 100) 
+        : (prevBooked > 0 ? 100 : 0);
 
     // ── Daily Trend Processing ──
     const dailyBookings = [];
