@@ -255,10 +255,10 @@ const fillSlotFromWaitlist = async (slotId) => {
                         -- so we allow them to be picked up by ANY resource that fits the service.
                    )
                    AND (
-                        -- For both urgent and pending, we pick them up if their preferred date has come or past
                         a.preferred_date::date <= $3::date
+                        OR (a.slot_id IS NULL AND a.status = 'pending')
                    )
-                 ORDER BY (a.status = 'waitlisted_urgent') DESC, a.created_at ASC
+                 ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.preferred_date = $3::date) DESC, a.created_at ASC
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,
                 [slot.org_id, slot.resource_id, localDate]
             );

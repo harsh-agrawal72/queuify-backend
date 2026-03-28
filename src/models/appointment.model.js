@@ -505,7 +505,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
         if (action === 'decline') {
             await client.query(
                 `UPDATE appointments 
-                 SET proposed_slot_id = NULL, reschedule_status = 'declined' 
+                 SET proposed_slot_id = NULL, reschedule_status = NULL 
                  WHERE id = $1::uuid`,
                 [appointmentId]
             );

@@ -734,7 +734,22 @@ const getAppointments = async (orgId, queryParams) => {
     }
 };
 
-const updateAppointmentStatus = async (orgId, appointmentId, status, reason = null) => {
+const updateAppointmentStatus = async (orgId, appointmentId, status, reason = null, slotId = null) => {
+    // 1. Direct Reschedule / Force Move
+    if (slotId) {
+        const appointmentModel = require('../models/appointment.model');
+        const appointmentService = require('./appointment.service');
+        const result = await appointmentModel.rescheduleAppointment(appointmentId, null, slotId, true, orgId);
+        
+        // Trigger notifications for new slot
+        if (result.appointment.slot_id) {
+            const { checkAndNotifySlotWaiters } = require('./appointment.service');
+            checkAndNotifySlotWaiters(result.appointment.slot_id).catch(err => console.error(`[Admin-ForceMove-Notify] Error:`, err));
+        }
+        
+        return result.appointment;
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');

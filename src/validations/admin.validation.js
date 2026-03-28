@@ -33,9 +33,10 @@ const updateAppointmentStatus = {
         appointmentId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
     }),
     body: Joi.object().keys({
-        status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').required(),
+        status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').optional(),
+        slotId: Joi.string().uuid().optional(),
         reason: Joi.string().optional().allow('', null),
-    }),
+    }).min(1),
 };
 
 const deleteAppointment = {
