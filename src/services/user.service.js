@@ -175,7 +175,17 @@ const updateProfile = async (userId, updateBody) => {
         idx++;
     }
 
-    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, profile_picture_url, address, city, state, pincode, email_notification_enabled, notification_enabled, created_at';
+    if (updateBody.terms_accepted !== undefined) {
+        query += `, terms_accepted = $${idx}`;
+        params.push(updateBody.terms_accepted);
+        idx++;
+        // Automatically set the timestamp if accepted
+        if (updateBody.terms_accepted === true) {
+            query += `, terms_accepted_at = NOW()`;
+        }
+    }
+
+    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, terms_accepted, terms_accepted_at, profile_picture_url, address, city, state, pincode, email_notification_enabled, notification_enabled, created_at';
 
     try {
         const result = await pool.query(query, params);
