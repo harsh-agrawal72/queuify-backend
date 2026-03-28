@@ -670,6 +670,7 @@ const getQueueStatus = async (appointmentId) => {
         let estimatedWaitMinutes = 0;
         const avgTime = (await getSystemAverageSpeed(appointment.service_id, appointment.resource_id)) || service.estimated_service_time || 15;
         const now = new Date();
+        let waitMinutesTillStart = 0;
         
         if (appointment.status === 'serving') {
             estimatedWaitMinutes = 0;
@@ -687,7 +688,7 @@ const getQueueStatus = async (appointmentId) => {
         } else {
             const baseDate = referenceDate ? new Date(referenceDate) : now;
             const baseStartTime = isNaN(baseDate.getTime()) || baseDate < now ? now : baseDate;
-            const waitMinutesTillStart = (baseStartTime - now) / 60000;
+            waitMinutesTillStart = (baseStartTime - now) / 60000;
             const peopleWaitingAhead = Math.max(0, myRank - 1);
             estimatedWaitMinutes = Math.max(0, waitMinutesTillStart) + (peopleWaitingAhead * avgTime);
         }
