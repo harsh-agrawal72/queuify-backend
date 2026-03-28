@@ -1480,9 +1480,7 @@ module.exports = {
     deleteSlot: hardDeleteSlot,
     getAppointments,
     updateAppointmentStatus,
-    deleteAppointment: async (orgId, appointmentId, reason) => {
-        return updateAppointmentStatus(orgId, appointmentId, 'cancelled', reason);
-    },
+    deleteAppointment,
     getLiveQueue,
     getNotifications,
     markAllNotificationsAsRead,

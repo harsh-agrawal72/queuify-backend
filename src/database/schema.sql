@@ -137,6 +137,8 @@ CREATE TABLE appointments (
     customer_phone VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    cancellation_reason TEXT,
     reminder_sent BOOLEAN DEFAULT FALSE,
     is_deleted_permanent BOOLEAN DEFAULT FALSE
 );

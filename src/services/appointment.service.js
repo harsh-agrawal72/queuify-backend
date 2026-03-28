@@ -134,9 +134,9 @@ const bookAppointment = async (appointmentBody) => {
  * @param {string} userId
  * @returns {Promise<Object>}
  */
-const cancelAppointment = async (appointmentId, userId) => {
+const cancelAppointment = async (appointmentId, userId, reason = null) => {
     try {
-        const appointment = await appointmentModel.cancelAppointment(appointmentId, userId);
+        const appointment = await appointmentModel.cancelAppointment(appointmentId, userId, reason);
 
         // Trigger waitlist filling after space opens up
         try {

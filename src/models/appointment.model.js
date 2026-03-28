@@ -288,7 +288,7 @@ const updateAppointmentStatus = async (id, status) => {
     return result.rows[0];
 };
 
-const cancelAppointment = async (id, userId) => {
+const cancelAppointment = async (id, userId, reason = null) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -303,8 +303,8 @@ const cancelAppointment = async (id, userId) => {
         if (appt.status === 'cancelled') throw new Error('Already cancelled');
 
         await client.query(
-            "UPDATE appointments SET status = 'cancelled', cancelled_by = 'user' WHERE id = $1",
-            [id]
+            "UPDATE appointments SET status = 'cancelled', cancelled_by = 'user', cancellation_reason = $1 WHERE id = $2",
+            [reason, id]
         );
 
         // Decrement booked count

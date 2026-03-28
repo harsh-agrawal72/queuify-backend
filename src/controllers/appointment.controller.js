@@ -32,7 +32,8 @@ const getAppointments = catchAsync(async (req, res) => {
 });
 
 const cancelAppointment = catchAsync(async (req, res) => {
-    const appointment = await appointmentService.cancelAppointment(req.params.appointmentId, req.user.id);
+    const { reason } = req.body;
+    const appointment = await appointmentService.cancelAppointment(req.params.appointmentId, req.user.id, reason);
     res.send(appointment);
 });
 
