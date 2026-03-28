@@ -51,33 +51,43 @@ const connectDB = async () => {
         console.log('Connected to PostgreSQL');
 
         // Apply any pending schema columns (e.g. email_notification_enabled) gracefully
-        try {
-            console.log('Checking and applying schema migrations if needed...');
-            const migrations = ['fix_500_errors.sql', 'fix_email_notifications.sql', 'add_org_email_verified.sql', 'priority_reassignment.sql'];
-            for (const migration of migrations) {
+        console.log('Checking and applying schema migrations if needed...');
+        const migrations = [
+            'fix_500_errors.sql', 
+            'fix_email_notifications.sql', 
+            'add_org_email_verified.sql', 
+            'priority_reassignment.sql',
+            '20260328_fix_cancellation_columns.sql'
+        ];
+        
+        for (const migration of migrations) {
+            try {
                 const sqlPath = path.join(__dirname, 'database', 'migrations', migration);
                 if (fs.existsSync(sqlPath)) {
                     const sqlQuery = fs.readFileSync(sqlPath, { encoding: 'utf-8' });
-                    await client.query(sqlQuery);
+                    // Use pool directly so we don't have to manage client lifecycle here
+                    await pool.query(sqlQuery);
                     console.log(`Migration ${migration} validated successfully!`);
                 }
+            } catch (migErr) {
+                console.error(`Migration ${migration} notice:`, migErr.message);
             }
-            console.log('All DB Schema columns validated successfully!');
-        } catch (migErr) {
-            console.error('Migration notice:', migErr.message);
         }
+        console.log('All DB Schema columns validated successfully!');
 
         client.release();
     } catch (err) {
         console.error('PostgreSQL connection error:', err.message);
-        console.warn('Server will start but database operations will fail until PostgreSQL is available.');
+        console.warn('Database operations will fail until PostgreSQL is available.');
     }
 };
 
-connectDB().then(startServer).catch((err) => {
-    console.error('Fatal startup error:', err);
-    // Still try to start the server
-    startServer();
+// Start server IMMEDIATELY so Render sees an open port
+startServer();
+
+// Connect to DB and run migrations ASYNCHRONOUSLY
+connectDB().catch((err) => {
+    console.error('Migration Background Error:', err);
 });
 
 const exitHandler = () => {
