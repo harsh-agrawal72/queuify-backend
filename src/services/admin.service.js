@@ -157,11 +157,17 @@ const getAnalytics = async (orgId, filters = {}) => {
     prevStart.setDate(prevStart.getDate() - rangeDays + 1);
     prevStart.setHours(0, 0, 0, 0);
 
+    // ── Pre-process dates to standardized strings ──
+    const dStart = startDate.toISOString().split('T')[0];
+    const dEnd = endDateEnd.toISOString().split('T')[0];
+    const dPrevStart = prevStart.toISOString().split('T')[0];
+    const dPrevEnd = prevEnd.toISOString().split('T')[0];
+
     // ── Dynamic WHERE fragments for optional service/resource filters ──
     let extraWhere = '';
     let slotExtraWhere = '';
-    const baseParams = [orgId, startDate.toISOString(), endDateEnd.toISOString()];
-    const prevParams = [orgId, prevStart.toISOString(), prevEnd.toISOString()];
+    const baseParams = [orgId, dStart, dEnd];
+    const prevParams = [orgId, dPrevStart, dPrevEnd];
     let pIdx = 4; // next param index after orgId, start, end
 
     if (filters.serviceId) {
@@ -185,14 +191,14 @@ const getAnalytics = async (orgId, filters = {}) => {
     const kpiQuery = `
         SELECT
             COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE a.status::text IN ('confirmed', 'booked', 'serving')) AS confirmed,
+            COUNT(*) FILTER (WHERE a.status::text IN ('confirmed', 'booked', 'serving', 'completed')) AS confirmed,
             COUNT(*) FILTER (WHERE a.status::text = 'cancelled') AS cancelled,
             COUNT(*) FILTER (WHERE a.status::text = 'completed') AS completed,
             COUNT(*) FILTER (WHERE a.status::text = 'pending')   AS pending
         FROM appointments a
         WHERE a.org_id = $1 
-        AND a.created_at >= $2::timestamptz 
-        AND a.created_at <= $3::timestamptz${extraWhere}
+        AND a.created_at::date >= $2::date 
+        AND a.created_at::date <= $3::date${extraWhere}
     `;
 
     // 3. Utilization / Volume (Denominator)
@@ -201,8 +207,8 @@ const getAnalytics = async (orgId, filters = {}) => {
             COALESCE(SUM(s.max_capacity), 0) AS capacity
         FROM slots s
         WHERE s.org_id = $1 
-        AND s.start_time >= $2::timestamptz 
-        AND s.start_time <= $3::timestamptz${slotExtraWhere}
+        AND s.start_time::date >= $2::date 
+        AND s.start_time::date <= $3::date${slotExtraWhere}
     `;
 
     // Utilization / Volume (Numerator)
@@ -214,8 +220,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         WHERE a.org_id = $1
         AND a.status NOT IN ('cancelled', 'no_show')
         AND (
-            (a.slot_id IS NOT NULL AND EXISTS (SELECT 1 FROM slots s WHERE s.id = a.slot_id AND s.start_time >= $2::timestamptz AND s.start_time <= $3::timestamptz))
-            OR (a.slot_id IS NULL AND a.created_at >= $2::timestamptz AND a.created_at <= $3::timestamptz)
+            (a.slot_id IS NOT NULL AND EXISTS (SELECT 1 FROM slots s WHERE s.id = a.slot_id AND s.start_time::date >= $2::date AND s.start_time::date <= $3::date))
+            OR (a.slot_id IS NULL AND a.created_at::date >= $2::date AND a.created_at::date <= $3::date)
         )${extraWhere}
     `;
 
@@ -225,8 +231,8 @@ const getAnalytics = async (orgId, filters = {}) => {
             COUNT(*) AS count
         FROM appointments a
         WHERE a.org_id = $1 
-        AND a.created_at >= $2::timestamptz 
-        AND a.created_at <= $3::timestamptz${extraWhere}
+        AND a.created_at::date >= $2::date 
+        AND a.created_at::date <= $3::date${extraWhere}
         GROUP BY date
         ORDER BY date ASC
     `;
@@ -236,8 +242,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         FROM appointments a
         JOIN services svc ON a.service_id = svc.id
         WHERE a.org_id = $1 
-        AND a.created_at >= $2::timestamptz 
-        AND a.created_at <= $3::timestamptz${extraWhere}
+        AND a.created_at::date >= $2::date 
+        AND a.created_at::date <= $3::date${extraWhere}
         GROUP BY svc.name
         ORDER BY count DESC
     `;
@@ -247,8 +253,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         FROM appointments a
         LEFT JOIN resources r ON a.resource_id = r.id
         WHERE a.org_id = $1 
-        AND a.created_at >= $2::timestamptz 
-        AND a.created_at <= $3::timestamptz${extraWhere}
+        AND a.created_at::date >= $2::date 
+        AND a.created_at::date <= $3::date${extraWhere}
         GROUP BY r.name
         ORDER BY count DESC
     `;
