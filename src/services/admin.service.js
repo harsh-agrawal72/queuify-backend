@@ -380,9 +380,27 @@ const getAnalytics = async (orgId, filters = {}) => {
     }
 
     // 10. Organization Meta
-    const orgMetaRes = await query('SELECT name, industry_type FROM organizations WHERE id = $1', [orgId]);
-    const orgName = orgMetaRes.rows[0]?.name || 'Organization';
-    const orgType = orgMetaRes.rows[0]?.industry_type || 'Other';
+    let orgName = 'Organization';
+    let orgType = 'Other';
+    try {
+        const orgMetaRes = await query('SELECT name, industry_type FROM organizations WHERE id = $1', [orgId]);
+        if (orgMetaRes.rows && orgMetaRes.rows[0]) {
+            orgName = orgMetaRes.rows[0].name || 'Organization';
+            orgType = orgMetaRes.rows[0].industry_type || 'Other';
+        }
+    } catch (e) { console.error('OrgMeta fetch error:', e); }
+
+    // 11. Date Range Formatting
+    let startStr = '';
+    let endStr = '';
+    try {
+        const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' });
+        startStr = formatter.format(startDate);
+        endStr = formatter.format(endDateEnd);
+    } catch (e) {
+        startStr = startDate.toISOString().split('T')[0];
+        endStr = endDateEnd.toISOString().split('T')[0];
+    }
 
     // ═══════════════════════════════════════
     // Return
@@ -393,26 +411,30 @@ const getAnalytics = async (orgId, filters = {}) => {
         confirmedBookings: confirmed,
         cancelledBookings: cancelled,
         completedBookings: completed,
-        utilization,
-        cancellationRate,
+        utilization: utilization || 0,
+        cancellationRate: cancellationRate || 0,
         // Growth vs previous period
         growth: {
-            bookings: bookingChange,
-            cancellation: prevCancRate > 0 ? cancellationRate - prevCancRate : 0,
+            bookings: bookingChange || 0,
+            cancellation: prevCancRate > 0 ? (cancellationRate - prevCancRate) : 0,
             utilization: prevUtilization > 0 ? (utilization - prevUtilization) : 0,
         },
         // Charts
-        dailyBookings,
-        bookingsByService: byServiceRes.rows.map(r => ({ name: r.service_name, value: parseInt(r.count) })),
-        bookingsByResource: byResourceRes.rows.map(r => ({ name: r.resource_name, value: parseInt(r.count) })),
-        statusDistribution,
-        peakHoursHeatmap: heatmapRes.rows.map(r => ({ day: parseInt(r.day), hour: parseInt(r.hour), count: parseInt(r.count) })),
+        dailyBookings: dailyBookings || [],
+        bookingsByService: (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: parseInt(r.count) || 0 })),
+        bookingsByResource: (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: parseInt(r.count) || 0 })),
+        statusDistribution: statusDistribution || [],
+        peakHoursHeatmap: (heatmapRes.rows || []).map(r => ({ 
+            day: r.day !== null ? parseInt(r.day) : 0, 
+            hour: r.hour !== null ? parseInt(r.hour) : 0, 
+            count: parseInt(r.count) || 0 
+        })),
         // Insights
-        insights,
+        insights: insights || [],
         // Meta
         dateRange: { 
-            start: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(startDate), 
-            end: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(endDateEnd) 
+            start: startStr, 
+            end: endStr 
         },
         orgName,
         orgType
@@ -1059,7 +1081,14 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
 };
 
 const getLiveQueue = async (orgId, date) => {
-    const queryDate = date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    let queryDate = date;
+    if (!queryDate) {
+        try {
+            queryDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        } catch (e) {
+            queryDate = new Date().toISOString().split('T')[0];
+        }
+    }
 
     const apptCols = await getColumnNames('appointments');
     const hasTokenNumber = apptCols.includes('token_number');
