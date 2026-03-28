@@ -206,7 +206,8 @@ const register = async (userBody) => {
         password: hashedPassword,
         role: finalRole,
         orgId: finalOrgId,
-        phone: phone || null
+        phone: phone || null,
+        terms_accepted: true // Manual registration implies acceptance via modal
     });
 
     // Send Welcome Email

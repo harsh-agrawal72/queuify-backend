@@ -4,12 +4,14 @@ const { pool } = require('../config/db');
  * Create a new user
  */
 const createUser = async (userBody) => {
-    const { name, email, password, role, orgId, isPasswordSet, provider, google_id, phone } = userBody;
-    const isPwdSet = isPasswordSet !== undefined ? isPasswordSet : true; // Default true for direct registration
+    const { name, email, password, role, orgId, isPasswordSet, provider, google_id, phone, terms_accepted } = userBody;
+    const isPwdSet = isPasswordSet !== undefined ? isPasswordSet : true;
+    const termsAccepted = terms_accepted === true;
+    const termsAcceptedAt = termsAccepted ? new Date() : null;
 
     const result = await pool.query(
-        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, name, email, role, org_id, is_password_set, activated_at, created_at, provider, google_id, is_suspended, phone',
-        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null]
+        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone, terms_accepted, terms_accepted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
+        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null, termsAccepted, termsAcceptedAt]
     );
     return result.rows[0];
 };

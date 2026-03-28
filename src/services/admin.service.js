@@ -309,21 +309,20 @@ const getAnalytics = async (orgId, filters = {}) => {
     const prevTotal = parseInt(prevKpi.total) || 0;
     const prevCancelled = parseInt(prevKpi.cancelled) || 0;
 
-    // ── Utilization Processing ──
+    // ── Utilization Processing (The Simple Formula) ──
     const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
-    const bookedTotal = parseInt(volumeRes.rows[0].volume) || 0;
+    const bookedTotal = total; // Use the same total shown in the KPI card
     
-    // Fallback: If no slots exist, we use the bookings as those "unplanned slots" and show 100% utilization.
-    // If slots exist, we show the actual utilization percentage.
+    // Utilization = (Bookings / Capacity) * 100. 
+    // Fallback: If no slots exist but bookings do, show 100%.
     const utilization = capacityTotal > 0 
         ? Math.round((bookedTotal / capacityTotal) * 100) 
         : (bookedTotal > 0 ? 100 : 0);
 
     const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
-    const prevBooked = parseInt(prevVolumeRes.rows[0].volume) || 0;
     const prevUtilization = prevCapacity > 0 
-        ? Math.round((prevBooked / prevCapacity) * 100) 
-        : (prevBooked > 0 ? 100 : 0);
+        ? Math.round((prevTotal / prevCapacity) * 100) 
+        : (prevTotal > 0 ? 100 : 0);
 
     // ── Daily Trend Processing ──
     const dailyBookings = [];
