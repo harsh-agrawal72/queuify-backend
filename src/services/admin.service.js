@@ -309,20 +309,21 @@ const getAnalytics = async (orgId, filters = {}) => {
     const prevTotal = parseInt(prevKpi.total) || 0;
     const prevCancelled = parseInt(prevKpi.cancelled) || 0;
 
-    // ── Utilization Processing (The Simple Formula) ──
+    // ── Utilization Processing (The Precise Formula) ──
     const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
-    const bookedTotal = total; // Use the same total shown in the KPI card
+    const bookedVolume = parseInt(volumeRes.rows[0].volume) || 0; 
     
-    // Utilization = (Bookings / Capacity) * 100. 
-    // We cap at 100% to represent 'Full Saturation'.
+    // Utilization = (Bookings linked to slots in period / Capacity of slots in period) * 100. 
+    // We cap at 100% and show 0% if no capacity is defined.
     const utilization = capacityTotal > 0 
-        ? Math.min(Math.round((bookedTotal / capacityTotal) * 100), 100)
-        : (bookedTotal > 0 ? 100 : 0);
+        ? Math.min(Math.round((bookedVolume / capacityTotal) * 100), 100)
+        : 0;
 
     const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
+    const prevBookedVolume = parseInt(prevVolumeRes.rows[0].volume) || 0;
     const prevUtilization = prevCapacity > 0 
-        ? Math.min(Math.round((prevTotal / prevCapacity) * 100), 100)
-        : (prevTotal > 0 ? 100 : 0);
+        ? Math.min(Math.round((prevBookedVolume / prevCapacity) * 100), 100)
+        : 0;
 
     // ── Daily Trend Processing ──
     const dailyBookings = [];
