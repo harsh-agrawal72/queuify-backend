@@ -17,10 +17,13 @@ const createUser = async (userBody) => {
     // 2. Try to update terms_accepted (optional step, prevents crash if columns don't exist yet)
     if (terms_accepted) {
         try {
-            await pool.query(
-                'UPDATE users SET terms_accepted = $1, terms_accepted_at = NOW() WHERE id = $2',
+            const updateResult = await pool.query(
+                'UPDATE users SET terms_accepted = $1, terms_accepted_at = NOW() WHERE id = $2 RETURNING *',
                 [true, user.id]
             );
+            if (updateResult.rows.length > 0) {
+                return updateResult.rows[0];
+            }
         } catch (e) {
             console.warn('[USER-MODEL] Terms columns not found yet. Signup succeeded but terms not recorded.', e.message);
         }
