@@ -1,31 +1,37 @@
 // src/services/razorpay.service.js
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const config = require('../config/config');
 const ApiError = require('../utils/ApiError');
 const httpStatus = require('../utils/httpStatus');
 
-// Initialize Razorpay instance
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+let razorpayInstance = null;
 
-/**
- * Create a new Razorpay order
- * @param {number} amount - Amount in paise (1 INR = 100 paise)
- * @param {string} currency - Currency (default: 'INR')
- * @param {string} receipt - Receipt identifier (e.g. appointment_id)
- * @returns {Promise<Object>}
- */
+const getRazorpayInstance = () => {
+    if (razorpayInstance) return razorpayInstance;
+
+    const { keyId, keySecret } = config.razorpay;
+    if (!keyId || !keySecret) {
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Razorpay configuration is missing. Please check your environment variables.');
+    }
+
+    razorpayInstance = new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+    });
+    return razorpayInstance;
+};
+
 const createOrder = async (amount, currency = 'INR', receipt) => {
     try {
+        const rzp = getRazorpayInstance();
         const options = {
             amount: Math.round(amount), // must be an integer
             currency,
             receipt,
             payment_capture: 1 // auto capture
         };
-        const order = await razorpay.orders.create(options);
+        const order = await rzp.orders.create(options);
         return order;
     } catch (error) {
         console.error('[RazorpayService] Create Order Error:', error);
@@ -43,7 +49,7 @@ const createOrder = async (amount, currency = 'INR', receipt) => {
 const verifySignature = (orderId, paymentId, signature) => {
     const text = orderId + '|' + paymentId;
     const generated_signature = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .createHmac('sha256', config.razorpay.keySecret)
         .update(text)
         .digest('hex');
     
@@ -53,5 +59,5 @@ const verifySignature = (orderId, paymentId, signature) => {
 module.exports = {
     createOrder,
     verifySignature,
-    razorpayInstance: razorpay
+    getRazorpayInstance
 };

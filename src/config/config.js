@@ -25,6 +25,8 @@ const envVarsSchema = Joi.object()
         GOOGLE_CLIENT_ID: Joi.string().required().description('Google Client ID'),
         BASE_URL: Joi.string().description('Base URL of the server'),
         ENABLE_EMAIL: Joi.any().default(true).description('Global email toggle'),
+        RAZORPAY_KEY_ID: Joi.string().description('Razorpay Key ID'),
+        RAZORPAY_KEY_SECRET: Joi.string().description('Razorpay Key Secret'),
     })
     .unknown();
 
@@ -71,4 +73,8 @@ module.exports = {
     clientUrl: envVars.CLIENT_URL,
     baseUrl: envVars.BASE_URL || `http://localhost:${envVars.PORT}`,
     googleClientId: envVars.GOOGLE_CLIENT_ID,
+    razorpay: {
+        keyId: envVars.RAZORPAY_KEY_ID,
+        keySecret: envVars.RAZORPAY_KEY_SECRET,
+    },
 };
