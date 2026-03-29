@@ -85,13 +85,22 @@ const getOverview = async (orgId) => {
 };
 
 const getOrgDetails = async (orgId) => {
-    const res = await query('SELECT id, name, contact_email, org_code, industry_type, status, open_time, close_time, phone, address, email_notification, new_booking_notification, queue_mode_default FROM organizations WHERE id = $1', [orgId]);
+    const res = await query(`
+        SELECT id, name, contact_email, org_code, industry_type, status, 
+               open_time, close_time, phone, address, 
+               email_notification, new_booking_notification, queue_mode_default,
+               payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id
+        FROM organizations WHERE id = $1`, [orgId]);
     if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
     return res.rows[0];
 };
 
 const updateOrgDetails = async (orgId, updateBody) => {
-    const { name, contactEmail, openTime, closeTime, phone, address, email_notification, new_booking_notification, queue_mode_default } = updateBody;
+    const { 
+        name, contactEmail, openTime, closeTime, phone, address, 
+        email_notification, new_booking_notification, queue_mode_default,
+        payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id
+    } = updateBody;
     const res = await query(
         `UPDATE organizations 
          SET name = COALESCE($1, name), 
@@ -103,10 +112,20 @@ const updateOrgDetails = async (orgId, updateBody) => {
              email_notification = COALESCE($7, email_notification),
              new_booking_notification = COALESCE($8, new_booking_notification),
              queue_mode_default = COALESCE($9, queue_mode_default),
+             payout_bank_name = COALESCE($10, payout_bank_name),
+             payout_account_holder = COALESCE($11, payout_account_holder),
+             payout_account_number = COALESCE($12, payout_account_number),
+             payout_ifsc = COALESCE($13, payout_ifsc),
+             payout_upi_id = COALESCE($14, payout_upi_id),
              updated_at = NOW()
-         WHERE id = $10
+         WHERE id = $15
          RETURNING *`,
-        [name, contactEmail, openTime, closeTime, phone, address, email_notification, new_booking_notification, queue_mode_default, orgId]
+        [
+            name, contactEmail, openTime, closeTime, phone, address, 
+            email_notification, new_booking_notification, queue_mode_default,
+            payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id,
+            orgId
+        ]
     );
     return res.rows[0];
 };

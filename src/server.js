@@ -83,7 +83,12 @@ const connectDB = async () => {
             'fix_email_notifications.sql', 
             'add_org_email_verified.sql', 
             'priority_reassignment.sql',
-            '20260328_fix_cancellation_columns.sql'
+            '20260328_fix_cancellation_columns.sql',
+            '20260329_add_price_to_appointments.sql',
+            '20260329_service_base_price.sql',
+            '20260329_fix_wallet_schema.sql',
+            '20260329_deep_automated_escrow.sql',
+            '20260329_add_org_payout_details.sql'
         ];
         
         for (const migration of migrations) {
