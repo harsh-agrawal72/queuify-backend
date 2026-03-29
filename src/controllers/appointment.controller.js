@@ -124,6 +124,15 @@ module.exports = {
         const { otp } = req.body;
         const result = await appointmentService.verifyOtp(req.params.appointmentId, otp, req.user.org_id);
         res.send(result);
+    }),
+    markArrived: catchAsync(async (req, res) => {
+        const result = await appointmentService.markArrived(req.params.appointmentId, req.user.id);
+        res.send(result);
+    }),
+    flagDispute: catchAsync(async (req, res) => {
+        const { reason } = req.body;
+        const result = await appointmentService.flagDispute(req.params.appointmentId, req.user.id, reason);
+        res.send(result);
     })
 };
 

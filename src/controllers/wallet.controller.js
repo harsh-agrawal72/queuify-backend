@@ -42,8 +42,21 @@ const requestPayout = catchAsync(async (req, res) => {
     res.status(httpStatus.CREATED).send(payout);
 });
 
+const withdraw = catchAsync(async (req, res) => {
+    const orgId = req.user.org_id;
+    if (!orgId) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Only organization administrators can initiate withdrawals');
+    }
+
+    const { amount } = req.body;
+    const result = await require('../services/payout.service').withdrawToBank(orgId, parseFloat(amount));
+    
+    res.status(httpStatus.OK).send(result);
+});
+
 module.exports = {
     getWalletStatus,
     getTransactionHistory,
-    requestPayout
+    requestPayout,
+    withdraw
 };

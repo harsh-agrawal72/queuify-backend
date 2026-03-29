@@ -204,11 +204,126 @@ const requestPayout = async (orgId, amount, bankDetails) => {
     }
 };
 
+/**
+ * Hold funds in a disputed state
+ * Moves from locked_funds to disputed_balance
+ */
+const holdFundsForDispute = async (orgId, appointmentId, reason) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const wallet = await getWalletByOrgId(orgId);
+
+        // 1. Find the locked transaction
+        const txRes = await client.query(
+            "SELECT * FROM wallet_transactions WHERE reference_id = $1 AND type = 'credit' AND status = 'locked' FOR UPDATE",
+            [appointmentId]
+        );
+        if (txRes.rows.length === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'No locked funds found for this appointment');
+        }
+        const tx = txRes.rows[0];
+
+        // 2. Update wallet: locked -> disputed
+        await client.query(
+            'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), disputed_balance = disputed_balance + $1 WHERE id = $2',
+            [tx.amount, wallet.id]
+        );
+
+        // 3. Update transaction status
+        await client.query(
+            "UPDATE wallet_transactions SET status = 'disputed', description = description || $1 WHERE id = $2",
+            [` — Disputed: ${reason}`, tx.id]
+        );
+
+        await client.query('COMMIT');
+        return true;
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+/**
+ * Resolve a dispute
+ * @param {string} decision - 'release' (to admin) | 'refund' (to user)
+ */
+const resolveDispute = async (orgId, appointmentId, decision) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const wallet = await getWalletByOrgId(orgId);
+
+        // 1. Find the disputed transaction
+        const txRes = await client.query(
+            "SELECT * FROM wallet_transactions WHERE reference_id = $1 AND type = 'credit' AND status = 'disputed' FOR UPDATE",
+            [appointmentId]
+        );
+        if (txRes.rows.length === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'No disputed funds found for this appointment');
+        }
+        const tx = txRes.rows[0];
+
+        if (decision === 'release') {
+            // Move to available
+            await client.query(
+                'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), balance = balance + $1 WHERE id = $2',
+                [tx.amount, wallet.id]
+            );
+            await client.query("UPDATE wallet_transactions SET status = 'available' WHERE id = $1", [tx.id]);
+        } else {
+            // Refund to user (simulated)
+            await client.query(
+                'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                [tx.amount, wallet.id]
+            );
+            await client.query("UPDATE wallet_transactions SET status = 'cancelled' WHERE id = $1", [tx.id]);
+            await client.query(
+                'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
+                [wallet.id, -tx.amount, 'refund', 'completed', appointmentId, `Dispute Resolved: Refunded to User`]
+            );
+        }
+
+        await client.query('COMMIT');
+        return true;
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+/**
+ * Get Transaction History for an organization
+ */
+const getTransactionHistory = async (orgId, limit = 50, offset = 0) => {
+    const wallet = await getWalletByOrgId(orgId);
+    const res = await pool.query(
+        'SELECT * FROM wallet_transactions WHERE wallet_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+        [wallet.id, limit, offset]
+    );
+    
+    const countRes = await pool.query('SELECT COUNT(*) FROM wallet_transactions WHERE wallet_id = $1', [wallet.id]);
+    
+    return {
+        transactions: res.rows,
+        total: parseInt(countRes.rows[0].count),
+        limit,
+        offset
+    };
+};
+
 module.exports = {
     initWallet,
     getWalletByOrgId,
     creditLockedFunds,
     releaseFunds,
     refundFunds,
-    requestPayout
+    requestPayout,
+    holdFundsForDispute,
+    resolveDispute,
+    getTransactionHistory
 };

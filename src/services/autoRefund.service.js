@@ -35,14 +35,12 @@ const getRefundPolicy = (slotStartTime, cancelledBy) => {
     const now = new Date();
     const hoursUntilSlot = (new Date(slotStartTime) - now) / (1000 * 60 * 60);
 
-    if (hoursUntilSlot > 24) {
+    if (hoursUntilSlot >= 24) {
         return { percentage: 100, label: 'Full refund (>24h notice)' };
-    } else if (hoursUntilSlot > 4) {
-        return { percentage: 75, label: '75% refund (4–24h notice)' };
-    } else if (hoursUntilSlot > 1) {
-        return { percentage: 50, label: '50% refund (1–4h notice)' };
+    } else if (hoursUntilSlot >= 4) {
+        return { percentage: 70, label: '70% refund (4–24h notice)' };
     } else {
-        return { percentage: 0, label: 'No refund (<1h notice)' };
+        return { percentage: 0, label: 'No refund (<4h notice)' };
     }
 };
 

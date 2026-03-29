@@ -1136,6 +1136,61 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
     }
 };
 
+/**
+ * User signals arrival at the clinic
+ */
+const markArrived = async (appointmentId, userId) => {
+    const res = await pool.query(
+        "UPDATE appointments SET check_in_method = 'user_signal', updated_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING *",
+        [appointmentId, userId]
+    );
+    if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found or unauthorized');
+    return res.rows[0];
+};
+
+/**
+ * User flags a dispute for an appointment
+ */
+const flagDispute = async (appointmentId, userId, reason) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Verify appointment exists and belongs to user
+        const apptRes = await client.query(
+            "SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE",
+            [appointmentId, userId]
+        );
+        if (apptRes.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+        const appt = apptRes.rows[0];
+
+        // 2. Only allow flagging if not already resolved
+        if (appt.dispute_status === 'resolved') {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Dispute already resolved');
+        }
+
+        // 3. Update appointment status
+        await client.query(
+            "UPDATE appointments SET dispute_status = 'flagged', dispute_reason = $1, updated_at = NOW() WHERE id = $2",
+            [reason, appointmentId]
+        );
+
+        // 4. Hold funds if paid
+        if (appt.payment_status === 'paid' && parseFloat(appt.price) > 0) {
+            const walletService = require('./wallet.service');
+            await walletService.holdFundsForDispute(appt.org_id, appointmentId, reason);
+        }
+
+        await client.query('COMMIT');
+        return { success: true, message: 'Dispute flagged and funds held' };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     bookAppointment,
     cancelAppointment,
@@ -1149,5 +1204,7 @@ module.exports = {
     proposeReschedule,
     respondToReschedule,
     triggerEmergencyMode,
-    verifyOtp
+    verifyOtp,
+    markArrived,
+    flagDispute
 };

@@ -910,6 +910,88 @@ const getPlatformAuditTrail = async (filters, options) => {
     };
 };
 
+const getPlatformFinances = async () => {
+    // 1. Total Incoming Today
+    const incomingRes = await pool.query(`
+        SELECT COALESCE(SUM(amount), 0) as total
+        FROM wallet_transactions 
+        WHERE type = 'credit' AND DATE(created_at) = CURRENT_DATE
+    `);
+
+    // 2. Pending Payouts
+    const payoutsRes = await pool.query(`
+        SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total
+        FROM payout_requests
+        WHERE status = 'pending'
+    `);
+
+    // 3. Active Disputes
+    const disputesRes = await pool.query(`
+        SELECT COUNT(*) as count, COALESCE(SUM(price), 0) as total
+        FROM appointments
+        WHERE dispute_status = 'flagged'
+    `);
+
+    // 4. Global Wallet Summary
+    const walletRes = await pool.query(`
+        SELECT 
+            SUM(balance) as available,
+            SUM(locked_funds) as locked,
+            SUM(disputed_balance) as disputed
+        FROM wallets
+    `);
+
+    return {
+        todayIncoming: parseFloat(incomingRes.rows[0].total),
+        pendingPayouts: {
+            count: parseInt(payoutsRes.rows[0].count),
+            amount: parseFloat(payoutsRes.rows[0].total)
+        },
+        activeDisputes: {
+            count: parseInt(disputesRes.rows[0].count),
+            amount: parseFloat(disputesRes.rows[0].total)
+        },
+        globalWallet: {
+            available: parseFloat(walletRes.rows[0].available) || 0,
+            locked: parseFloat(walletRes.rows[0].locked) || 0,
+            disputed: parseFloat(walletRes.rows[0].disputed) || 0
+        }
+    };
+};
+
+const getActiveDisputes = async () => {
+    const res = await pool.query(`
+        SELECT 
+            a.id, a.customer_name, a.customer_phone, a.price, a.dispute_reason, 
+            a.dispute_status, a.created_at, o.name as org_name
+        FROM appointments a
+        JOIN organizations o ON a.org_id = o.id
+        WHERE a.dispute_status = 'flagged'
+        ORDER BY a.updated_at DESC
+    `);
+    return res.rows;
+};
+
+const resolvePlatformDispute = async (appointmentId, decision, superadminId) => {
+    const apptRes = await pool.query('SELECT org_id FROM appointments WHERE id = $1', [appointmentId]);
+    if (apptRes.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+    const { org_id } = apptRes.rows[0];
+
+    const walletService = require('./wallet.service');
+    await walletService.resolveDispute(org_id, appointmentId, decision);
+
+    // Update appointment status
+    await pool.query(
+        "UPDATE appointments SET dispute_status = 'resolved', updated_at = NOW() WHERE id = $1",
+        [appointmentId]
+    );
+
+    // Log superadmin action
+    await logAdminActivity(superadminId, `RESOLVE_DISPUTE_${decision.toUpperCase()}`, superadminId, { appointmentId });
+
+    return { success: true, message: `Dispute resolved with decision: ${decision}` };
+};
+
 module.exports = {
     getRevenueAnalytics,
     getOrgHealthScores,
@@ -937,5 +1019,8 @@ module.exports = {
     deleteAdmin,
     verifyOrganization,
     unverifyOrganization,
+    getPlatformFinances,
+    getActiveDisputes,
+    resolvePlatformDispute,
     getRecentActivity: activityService.getRecentActivity
 };

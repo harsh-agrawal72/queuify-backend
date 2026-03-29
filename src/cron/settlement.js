@@ -54,33 +54,36 @@ const runSettlement = async () => {
             }
         }
 
-        // ── Case 2: Stale confirmed/serving appointments (slot ended > 2 hrs ago) ──
-        // Admin safety net: if no OTP was verified for a paid confirmed appointment,
-        // auto-release the funds to avoid funds being locked indefinitely.
+        // ── Case 2: No-Shows & Stale appointments (slot ended > 2 hrs ago) ──
+        // Admin gets paid for No-Shows. Stale appointments are also auto-released
+        // as a safety net, UNLESS there is an active dispute.
         const staleQuery = `
             SELECT DISTINCT a.id as appointment_id, a.org_id, a.price, s.end_time
             FROM appointments a
             JOIN slots s ON a.slot_id = s.id
             JOIN wallet_transactions wt ON wt.reference_id::text = a.id::text
-            WHERE a.status IN ('confirmed', 'serving', 'pending')
+            WHERE (a.status IN ('confirmed', 'serving', 'pending') OR a.status = 'no_show')
+              -- ONLY release if NOT disputed
+              AND a.dispute_status = 'none'
               AND a.payment_status = 'paid'
               AND wt.type = 'credit'
               AND wt.status = 'locked'
               AND s.end_time < NOW() - INTERVAL '2 hours'
         `;
         const staleRes = await pool.query(staleQuery);
-        console.log(`[Settlement] Found ${staleRes.rows.length} stale appointments with locked funds`);
+        console.log(`[Settlement] Found ${staleRes.rows.length} no-show/stale appointments with locked funds`);
 
         for (const row of staleRes.rows) {
             try {
-                // Mark as completed (service was presumably delivered)
+                // Mark as completed/settled (Case D: No-show earns admin money)
+                // If it was still 'confirmed', we auto-complete it.
                 await pool.query(
-                    "UPDATE appointments SET status = 'completed', updated_at = NOW() WHERE id = $1",
+                    "UPDATE appointments SET status = CASE WHEN status = 'no_show' THEN 'no_show' ELSE 'completed' END, updated_at = NOW() WHERE id = $1",
                     [row.appointment_id]
                 );
                 await walletService.releaseFunds(row.org_id, row.appointment_id);
                 released++;
-                console.log(`[Settlement] Auto-completed and released stale appointment ${row.appointment_id}`);
+                console.log(`[Settlement] Settled no-show/stale appointment ${row.appointment_id}`);
             } catch (e) {
                 errors++;
                 console.error(`[Settlement] Error processing stale appt ${row.appointment_id}:`, e.message);

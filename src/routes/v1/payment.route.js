@@ -10,6 +10,7 @@ const router = express.Router();
 // ─── Wallet (Admin) ───
 router.get('/status', auth('admin'), walletController.getWalletStatus);
 router.get('/transactions', auth('admin'), walletController.getTransactionHistory);
+router.post('/withdraw', auth('admin'), walletController.withdraw);
 
 const payoutValidation = {
     body: Joi.object().keys({
