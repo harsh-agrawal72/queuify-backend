@@ -85,7 +85,7 @@ const releaseFunds = async (orgId, appointmentId, externalClient = null) => {
 
         // 2. Update wallet: locked -> available
         await client.query(
-            'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), balance = balance + $1 WHERE id = $2',
+            'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
             [amount, wallet_id]
         );
 
@@ -136,7 +136,7 @@ const refundFunds = async (orgId, appointmentId, amount, isFullRefund = true) =>
             );
         } else if (tx.status === 'available') {
             await client.query(
-                'UPDATE wallets SET balance = GREATEST(balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                'UPDATE wallets SET available_balance = GREATEST(available_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
                 [amount, wallet.id]
             );
         }
@@ -172,13 +172,13 @@ const requestPayout = async (orgId, amount, bankDetails) => {
         await client.query('BEGIN');
         
         const wallet = await getWalletByOrgId(orgId);
-        if (wallet.balance < amount) {
+        if (wallet.available_balance < amount) {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Insufficient available balance for payout');
         }
 
         // 1. Decuct from wallet balance
         await client.query(
-            'UPDATE wallets SET balance = balance - $1 WHERE id = $2',
+            'UPDATE wallets SET available_balance = available_balance - $1 WHERE id = $2',
             [amount, wallet.id]
         );
 
@@ -269,7 +269,7 @@ const resolveDispute = async (orgId, appointmentId, decision) => {
         if (decision === 'release') {
             // Move to available
             await client.query(
-                'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), balance = balance + $1 WHERE id = $2',
+                'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
                 [tx.amount, wallet.id]
             );
             await client.query("UPDATE wallet_transactions SET status = 'available' WHERE id = $1", [tx.id]);
