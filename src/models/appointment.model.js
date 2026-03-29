@@ -10,15 +10,60 @@ const createAppointment = async (appointmentBody) => {
     try {
         await client.query('BEGIN');
 
-        // 0. Prevent duplicate bookings for the same user and same slot (unless bypassed)
-        if (slotId && !bypassDuplicate && userId) {
-            const duplicateCheck = await client.query(
-                `SELECT id FROM appointments 
-                 WHERE user_id = $1 AND slot_id = $2 AND status IN ('confirmed', 'pending', 'serving')`,
+        // 0. Prevent duplicate bookings for the same user and same slot
+        if (slotId && userId) {
+            const existingCheck = await client.query(
+                `SELECT id, status, queue_number, price FROM appointments 
+                 WHERE user_id = $1 AND slot_id = $2 AND status != 'cancelled'`,
                 [userId, slotId]
             );
-            if (duplicateCheck.rows.length > 0) {
-                throw new Error("DUPLICATE_BOOKING_WARNING");
+
+            if (existingCheck.rows.length > 0) {
+                const existing = existingCheck.rows[0];
+                
+                // If they already have an active/serving booking, block them
+                if (['confirmed', 'pending', 'serving'].includes(existing.status) && !bypassDuplicate) {
+                    throw new Error("DUPLICATE_BOOKING_WARNING");
+                }
+                
+                // If it's pending_payment, we can "resume" this appointment instead of creating a new one
+                if (existing.status === 'pending_payment') {
+                    // Calculate rank for existing
+                    const serviceRes = await client.query('SELECT queue_scope FROM services WHERE id = $1', [serviceId]);
+                    const service = serviceRes.rows[0];
+                    const preferredDateRes = await client.query('SELECT start_time FROM slots WHERE id = $1', [slotId]);
+                    const preferredDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(preferredDateRes.rows[0].start_time));
+
+                    let partitionBy, filterClause, filterParams;
+                    if (service.queue_scope === 'PER_RESOURCE') {
+                        partitionBy = 'service_id, resource_id, preferred_date, slot_id';
+                        filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND slot_id = $4';
+                        filterParams = [serviceId, resourceId, preferredDate, slotId];
+                    } else {
+                        partitionBy = 'service_id, preferred_date, slot_id';
+                        filterClause = 'service_id = $1 AND preferred_date = $2 AND slot_id = $3';
+                        filterParams = [serviceId, preferredDate, slotId];
+                    }
+
+                    const queueRes = await client.query(
+                        `WITH RankedQueue AS (
+                            SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY created_at ASC) as q_rank
+                            FROM appointments
+                            WHERE status IN ('pending', 'confirmed', 'serving', 'completed')
+                            AND ${filterClause}
+                         )
+                         SELECT q_rank FROM RankedQueue WHERE id = $${filterParams.length + 1}`,
+                        [...filterParams, existing.id]
+                    );
+
+                    const rank = queueRes.rows.length > 0 ? parseInt(queueRes.rows[0].q_rank) : 0;
+
+                    await client.query('COMMIT');
+                    return {
+                        appointment: existing,
+                        queue_number: rank
+                    };
+                }
             }
         }
 
