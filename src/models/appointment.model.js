@@ -104,26 +104,36 @@ const createAppointment = async (appointmentBody) => {
             valuePlaceholders.push(`$${values.length}`);
         }
 
-        // Fetch Price from Mapping (with fallback to Service Base Price)
+        // Fetch Price from Mapping (with fallback to Resource Price then Service Base Price)
         if (existingCols.includes('price')) {
             let price = 0;
+            
             if (resourceId) {
-                const priceRes = await client.query(
+                // 1. Check for specific Service + Resource combo price
+                const rsPriceRes = await client.query(
                     'SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2',
                     [resourceId, serviceId]
                 );
-                if (priceRes.rows.length > 0) {
-                    price = priceRes.rows[0].price;
+                
+                if (rsPriceRes.rows.length > 0 && parseFloat(rsPriceRes.rows[0].price) > 0) {
+                    price = rsPriceRes.rows[0].price;
                 } else {
-                    // Fallback if not specifically linked with a price
-                    const svcPrice = await client.query('SELECT price FROM services WHERE id = $1', [serviceId]);
-                    price = svcPrice.rows[0] ? svcPrice.rows[0].price : 0;
+                    // 2. Check for general Resource price
+                    const rPriceRes = await client.query('SELECT price FROM resources WHERE id = $1', [resourceId]);
+                    if (rPriceRes.rows.length > 0 && parseFloat(rPriceRes.rows[0].price) > 0) {
+                        price = rPriceRes.rows[0].price;
+                    } else {
+                        // 3. Fallback to Service Base Price
+                        const svcPrice = await client.query('SELECT price FROM services WHERE id = $1', [serviceId]);
+                        price = svcPrice.rows[0]?.price || 0;
+                    }
                 }
             } else {
-                // Central/Any fallback
+                // Central/Any fallback - check Service Base Price
                 const svcPrice = await client.query('SELECT price FROM services WHERE id = $1', [serviceId]);
-                price = svcPrice.rows[0] ? svcPrice.rows[0].price : 0;
+                price = svcPrice.rows[0]?.price || 0;
             }
+
             columns.push('price');
             values.push(price);
             valuePlaceholders.push(`$${values.length}`);

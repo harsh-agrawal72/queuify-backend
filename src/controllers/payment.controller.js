@@ -1,7 +1,7 @@
 // backend/src/controllers/payment.controller.js
 const httpStatus = require('../utils/httpStatus');
 const catchAsync = require('../utils/catchAsync');
-const mockPaymentService = require('../services/mockPayment.service');
+const razorpayService = require('../services/razorpay.service');
 const walletService = require('../services/wallet.service');
 const appointmentModel = require('../models/appointment.model');
 const { pool } = require('../config/db');
@@ -25,9 +25,10 @@ const createOrder = catchAsync(async (req, res) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'This appointment is free or has no price set');
     }
 
-    // 2. Create Realistic Mock Order
+    // 2. Create Real Razorpay Order
+    // Amount in paise (1 INR = 100 paise)
     const amountInPaise = Math.round(appointmentAmount * 100);
-    const order = await mockPaymentService.createOrder(amountInPaise, 'INR', `appt_${appointmentId}`);
+    const order = await razorpayService.createOrder(amountInPaise, 'INR', `appt_${appointmentId}`);
 
     res.status(httpStatus.OK).send({
         order_id: order.id,
@@ -49,8 +50,8 @@ const verifyPayment = catchAsync(async (req, res) => {
         razorpay_signature 
     } = req.body;
 
-    // 1. Verify Signature (Mock)
-    const isValid = await mockPaymentService.verifySignature(
+    // 1. Verify Real Signature
+    const isValid = razorpayService.verifySignature(
         razorpay_order_id, 
         razorpay_payment_id, 
         razorpay_signature

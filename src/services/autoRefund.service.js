@@ -115,7 +115,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             await client.query(
                 `UPDATE wallets SET
                     locked_funds = GREATEST(locked_funds - $1, 0),
-                    balance = balance + $1
+                    available_balance = available_balance + $1
                  WHERE org_id = $2`,
                 [originalAmount, appt.org_id]
             );
@@ -148,7 +148,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             const remainder = originalAmount - refundAmount;
             if (remainder > 0) {
                 await client.query(
-                    'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), balance = balance + $1 WHERE id = $2',
+                    'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
                     [remainder, walletId]
                 );
             }

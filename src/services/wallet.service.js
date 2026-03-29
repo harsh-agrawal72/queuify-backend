@@ -176,7 +176,7 @@ const requestPayout = async (orgId, amount, bankDetails) => {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Insufficient available balance for payout');
         }
 
-        // 1. Decuct from wallet balance
+        // 1. Deduct from wallet balance
         await client.query(
             'UPDATE wallets SET available_balance = available_balance - $1 WHERE id = $2',
             [amount, wallet.id]
