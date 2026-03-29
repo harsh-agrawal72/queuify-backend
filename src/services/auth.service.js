@@ -12,6 +12,8 @@ const emailService = require('./email.service');
 const templates = require('../config/templates');
 const serviceService = require('./service.service');
 const resourceService = require('./resource.service');
+const walletService = require('./wallet.service');
+
 
 /**
  * Login with Google
@@ -149,6 +151,14 @@ const registerOrganization = async (orgBody, adminBody) => {
     try {
         await emailService.sendWelcomeEmail(user.email, user.name);
     } catch (e) { console.error('Welcome email failed:', e); }
+
+    // Initialize Wallet for the organization
+    try {
+        await walletService.initWallet(org.id);
+    } catch (e) {
+        console.error('Wallet initialization failed for org:', org.id, e.message);
+        // We don't throw here to avoid failing registration if wallet fails
+    }
 
     return { user, org };
 };

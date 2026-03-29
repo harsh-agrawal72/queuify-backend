@@ -90,9 +90,31 @@ const createAppointment = async (appointmentBody) => {
         `);
         const existingCols = apptTableCheck.rows.map(r => r.column_name);
 
+        // Generate 4-digit OTP code
+        const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
+
         const columns = ['org_id', 'slot_id', 'user_id', 'service_id', 'resource_id', 'status', 'pref_resource', 'pref_time', 'preferred_date'];
         const values = [orgId, slotId || null, userId || null, serviceId, resourceId || null, slotId ? 'confirmed' : 'pending', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate];
         const valuePlaceholders = ['$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9'];
+
+        // Add Automated Payment Columns
+        if (existingCols.includes('otp_code')) {
+            columns.push('otp_code');
+            values.push(otpCode);
+            valuePlaceholders.push(`$${values.length}`);
+        }
+
+        // Fetch Price from Mapping
+        if (existingCols.includes('price')) {
+            const priceRes = await client.query(
+                'SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2',
+                [resourceId, serviceId]
+            );
+            const price = priceRes.rows[0] ? priceRes.rows[0].price : 0;
+            columns.push('price');
+            values.push(price);
+            valuePlaceholders.push(`$${values.length}`);
+        }
 
         // Add optional/new columns if they exist in the DB
         if (existingCols.includes('customer_name')) {

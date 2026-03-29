@@ -38,6 +38,12 @@ router
 
 router.post('/emergency-mode', auth('admin'), validate(appointmentValidation.triggerEmergencyMode), appointmentController.triggerEmergencyMode);
 
+router.post('/:appointmentId/verify-otp', auth('admin'), validate({
+    body: require('joi').object().keys({
+        otp: require('joi').string().length(4).required()
+    })
+}), appointmentController.verifyOtp);
+
 router.get('/:appointmentId/queue', auth(), appointmentController.getQueueStatus);
 
 

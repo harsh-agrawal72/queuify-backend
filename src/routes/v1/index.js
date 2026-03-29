@@ -12,6 +12,8 @@ const resourceRoute = require('./resource.route');
 const planRoute = require('./plan.route');
 const contactRoute = require('./contact.route');
 const chatRoute = require('./chat.route');
+const paymentRoute = require('./payment.route');
+
 
 const router = express.Router();
 
@@ -75,6 +77,10 @@ const defaultRoutes = [
     {
         path: '/chat',
         route: chatRoute,
+    },
+    {
+        path: '/payments',
+        route: paymentRoute,
     },
 ];
 

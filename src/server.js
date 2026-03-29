@@ -7,6 +7,7 @@ const path = require('path');
 const http = require('http');
 let socket;
 let reminderCron;
+let settlementCron;
 
 try {
     socket = require('./socket/index');
@@ -20,6 +21,13 @@ try {
 } catch (e) {
     console.warn('Reminder cron module not loaded:', e.message);
     reminderCron = { init: () => { } };
+}
+
+try {
+    settlementCron = require('./cron/settlement');
+} catch (e) {
+    console.warn('Settlement cron module not loaded:', e.message);
+    settlementCron = { init: () => { }, runSettlement: async () => ({}) };
 }
 
 let server;
@@ -38,6 +46,23 @@ const startServer = () => {
     } catch (e) {
         console.warn('Reminder cron init failed:', e.message);
     }
+
+    try {
+        settlementCron.init();
+    } catch (e) {
+        console.warn('Settlement cron init failed:', e.message);
+    }
+
+    // ── Manual Test Trigger for Settlement (DEV only) ──
+    const auth = require('./middlewares/auth');
+    app.post('/v1/test/run-settlement', auth('admin'), async (req, res) => {
+        try {
+            const result = await settlementCron.runSettlement();
+            res.json({ success: true, result });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
 
     console.log(`Attempting to start server on port ${config.port}...`);
     server = httpServer.listen(config.port, '0.0.0.0', () => {

@@ -22,7 +22,8 @@ const bookAppointment = catchAsync(async (req, res) => {
         appointmentId: appointment.id,
         queueNumber: queue_number,
         slotId: appointment.slot_id,
-        status: appointment.status
+        status: appointment.status,
+        appointment  // full object so frontend can read price, otp, etc.
     });
 });
 
@@ -118,6 +119,11 @@ module.exports = {
             success: true,
             ...result
         });
+    }),
+    verifyOtp: catchAsync(async (req, res) => {
+        const { otp } = req.body;
+        const result = await appointmentService.verifyOtp(req.params.appointmentId, otp, req.user.org_id);
+        res.send(result);
     })
 };
 

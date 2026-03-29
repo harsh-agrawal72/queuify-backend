@@ -22,10 +22,14 @@ const createResource = async (orgId, resourceBody) => {
         }
 
         if (allServiceIds.length > 0) {
-            for (const serviceId of allServiceIds) {
+            for (const serviceItem of allServiceIds) {
+                // Support both simple ID array or array of objects { id, price }
+                const serviceId = typeof serviceItem === 'object' ? serviceItem.id : serviceItem;
+                const price = typeof serviceItem === 'object' ? serviceItem.price : 0;
+                
                 await client.query(
-                    'INSERT INTO resource_services (resource_id, service_id) VALUES ($1, $2)',
-                    [resource.id, serviceId]
+                    'INSERT INTO resource_services (resource_id, service_id, price) VALUES ($1, $2, $3)',
+                    [resource.id, serviceId, price || 0]
                 );
             }
         }
@@ -42,7 +46,7 @@ const createResource = async (orgId, resourceBody) => {
 
 const getResourcesByServiceId = async (serviceId, publicOnly = false) => {
     let sql = `
-        SELECT r.* 
+        SELECT r.*, rs.price 
         FROM resources r
         JOIN resource_services rs ON r.id = rs.resource_id
         WHERE rs.service_id = $1
@@ -115,11 +119,15 @@ const updateResource = async (orgId, resourceId, updateBody) => {
         if (finalServiceIds !== undefined) {
             // Sync services
             await client.query('DELETE FROM resource_services WHERE resource_id = $1', [resourceId]);
-            if (Array.from(finalServiceIds).length > 0) {
-                for (const serviceId of finalServiceIds) {
+            const serviceArray = Array.from(finalServiceIds);
+            if (serviceArray.length > 0) {
+                for (const serviceItem of serviceArray) {
+                    const serviceId = typeof serviceItem === 'object' ? serviceItem.id : serviceItem;
+                    const price = typeof serviceItem === 'object' ? serviceItem.price : 0;
+                    
                     await client.query(
-                        'INSERT INTO resource_services (resource_id, service_id) VALUES ($1, $2)',
-                        [resourceId, serviceId]
+                        'INSERT INTO resource_services (resource_id, service_id, price) VALUES ($1, $2, $3)',
+                        [resourceId, serviceId, price || 0]
                     );
                 }
             }
