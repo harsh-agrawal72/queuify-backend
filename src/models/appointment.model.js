@@ -104,13 +104,26 @@ const createAppointment = async (appointmentBody) => {
             valuePlaceholders.push(`$${values.length}`);
         }
 
-        // Fetch Price from Mapping
+        // Fetch Price from Mapping (with fallback to Service Base Price)
         if (existingCols.includes('price')) {
-            const priceRes = await client.query(
-                'SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2',
-                [resourceId, serviceId]
-            );
-            const price = priceRes.rows[0] ? priceRes.rows[0].price : 0;
+            let price = 0;
+            if (resourceId) {
+                const priceRes = await client.query(
+                    'SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2',
+                    [resourceId, serviceId]
+                );
+                if (priceRes.rows.length > 0) {
+                    price = priceRes.rows[0].price;
+                } else {
+                    // Fallback if not specifically linked with a price
+                    const svcPrice = await client.query('SELECT price FROM services WHERE id = $1', [serviceId]);
+                    price = svcPrice.rows[0] ? svcPrice.rows[0].price : 0;
+                }
+            } else {
+                // Central/Any fallback
+                const svcPrice = await client.query('SELECT price FROM services WHERE id = $1', [serviceId]);
+                price = svcPrice.rows[0] ? svcPrice.rows[0].price : 0;
+            }
             columns.push('price');
             values.push(price);
             valuePlaceholders.push(`$${values.length}`);

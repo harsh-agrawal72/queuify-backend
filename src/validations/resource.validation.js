@@ -6,7 +6,15 @@ const createResource = {
         type: Joi.string().valid('staff', 'room', 'equipment', 'counter').default('staff'),
         description: Joi.string().allow('', null),
         concurrent_capacity: Joi.number().integer().min(1).default(1),
-        serviceIds: Joi.array().items(Joi.string().uuid()).optional(),
+        serviceIds: Joi.array().items(
+            Joi.alternatives().try(
+                Joi.string().uuid(),
+                Joi.object().keys({
+                    id: Joi.string().uuid().required(),
+                    price: Joi.number().min(0).default(0)
+                })
+            )
+        ).optional(),
         serviceId: Joi.string().uuid().optional(),
     }),
 };
@@ -21,7 +29,15 @@ const updateResource = {
         description: Joi.string().allow('', null),
         concurrent_capacity: Joi.number().integer().min(1),
         is_active: Joi.boolean(),
-        serviceIds: Joi.array().items(Joi.string().uuid()),
+        serviceIds: Joi.array().items(
+            Joi.alternatives().try(
+                Joi.string().uuid(),
+                Joi.object().keys({
+                    id: Joi.string().uuid().required(),
+                    price: Joi.number().min(0).default(0)
+                })
+            )
+        ),
         serviceId: Joi.string().uuid().optional(),
     }).min(1),
 };

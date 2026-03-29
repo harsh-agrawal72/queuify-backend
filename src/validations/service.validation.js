@@ -6,6 +6,7 @@ const createService = {
         description: Joi.string().allow('', null),
         queue_scope: Joi.string().valid('CENTRAL', 'PER_RESOURCE').default('CENTRAL'),
         estimated_service_time: Joi.number().integer().min(1).default(30),
+        price: Joi.number().min(0).default(0),
     }),
 };
 
@@ -34,6 +35,7 @@ const updateService = {
         is_active: Joi.boolean(),
         queue_scope: Joi.string().valid('CENTRAL', 'PER_RESOURCE'),
         estimated_service_time: Joi.number().integer().min(1),
+        price: Joi.number().min(0),
     }).min(1),
 };
 

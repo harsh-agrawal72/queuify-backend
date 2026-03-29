@@ -13,9 +13,9 @@ const createService = async (orgId, serviceBody) => {
     const res = await query(
         `INSERT INTO services (
             org_id, name, description,
-            queue_type, estimated_service_time, queue_scope
+            queue_type, estimated_service_time, queue_scope, price
         )
-         VALUES ($1, $2, $3, $4, $5, $6)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
         [
             orgId,
@@ -23,7 +23,8 @@ const createService = async (orgId, serviceBody) => {
             description,
             'DYNAMIC',
             estimated_service_time || 30,
-            queue_scope || 'CENTRAL'
+            queue_scope || 'CENTRAL',
+            serviceBody.price || 0
         ]
     );
     return res.rows[0];
@@ -50,7 +51,7 @@ const updateService = async (orgId, serviceId, updateBody) => {
 
     const allowed = [
         'name', 'description', 'is_active',
-        'estimated_service_time', 'queue_scope'
+        'estimated_service_time', 'queue_scope', 'price'
     ];
     const keys = Object.keys(updateBody).filter(k => allowed.includes(k));
     const values = keys.map(k => updateBody[k]);
