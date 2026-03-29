@@ -1097,7 +1097,7 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
         }
 
         // 3. Verify OTP
-        if (appointment.otp_code !== otp) {
+        if (String(appointment.otp_code) !== String(otp)) {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid 4-digit OTP provided');
         }
 

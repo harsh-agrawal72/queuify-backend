@@ -168,10 +168,10 @@ const processRefund = async (appointmentId, cancelledBy) => {
             );
         }
 
-        // 6. Update appointment refund status
+        // 6. Update appointment refund status and amount
         await client.query(
-            `UPDATE appointments SET payment_status = 'refunded', updated_at = NOW() WHERE id = $1`,
-            [appointmentId]
+            `UPDATE appointments SET payment_status = 'refunded', refund_amount = $2, updated_at = NOW() WHERE id = $1`,
+            [appointmentId, refundAmount]
         );
 
         await client.query('COMMIT');

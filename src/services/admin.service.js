@@ -4,6 +4,8 @@ const ApiError = require('../utils/ApiError');
 const emailService = require('./email.service');
 const notificationService = require('./notification.service');
 const userModel = require('../models/user.model');
+const walletService = require('./wallet.service');
+const socket = require('../socket/index');
 
 // Helper to query DB
 const query = (text, params) => {
@@ -888,11 +890,35 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             
             if (appointment.status !== 'cancelled') {
                 await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+                
+                // --- 100% REFUND FOR ADMIN CANCELLATION ---
+                // If it was paid, trigger a full refund
+                const paymentCheck = await client.query('SELECT payment_status FROM appointments WHERE id = $1', [appointmentId]);
+                if (paymentCheck.rows[0]?.payment_status === 'paid' && price > 0) {
+                    console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
+                    await walletService.refundFunds(orgId, appointmentId, price, true);
+                }
             }
         }
 
         const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
         const updatedAppointment = res.rows[0];
+
+        // --- REAL-TIME UPDATE (Socket) ---
+        try {
+            socket.emitQueueUpdate({
+                orgId,
+                serviceId: updatedAppointment.service_id,
+                resourceId: updatedAppointment.resource_id
+            }, {
+                type: 'status_change',
+                appointmentId,
+                status,
+                queue_number: updatedAppointment.queue_number
+            });
+        } catch (socketErr) {
+            console.error('[Admin-StatusUpdate-Socket] Failed silently:', socketErr.message);
+        }
 
         // Trigger waitlist filling and notifications
         if (['completed', 'cancelled', 'no_show'].includes(status)) {
@@ -1047,6 +1073,15 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
                 [appointmentId, orgId, reason]
             );
             const cancelledAppt = res.rows[0];
+
+            // --- 100% REFUND FOR ADMIN DELETION/CANCELLATION ---
+            const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
+            const price = parseFloat(priceRes.rows[0]?.price || 0);
+
+            if (appointment.payment_status === 'paid' && price > 0) {
+                console.log(`[Admin-Delete-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
+                await walletService.refundFunds(orgId, appointmentId, price, true);
+            }
 
             // USER REQUEST: Disable automatic "Start Serving" for the next appointment.
             // const { advanceQueueAutomatically } = require('./appointment.service');
