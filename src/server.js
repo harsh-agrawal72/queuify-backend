@@ -88,7 +88,8 @@ const connectDB = async () => {
             '20260329_service_base_price.sql',
             '20260329_fix_wallet_schema.sql',
             '20260329_deep_automated_escrow.sql',
-            '20260329_add_org_payout_details.sql'
+            '20260329_add_org_payout_details.sql',
+            '20260330_fix_appointment_enum.sql'
         ];
         
         for (const migration of migrations) {

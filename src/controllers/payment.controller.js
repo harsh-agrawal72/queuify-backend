@@ -32,7 +32,7 @@ const createOrder = catchAsync(async (req, res) => {
     console.log(`[PaymentController] Creating order for ${amountInPaise} paise`);
     
     try {
-        const order = await razorpayService.createOrder(amountInPaise, 'INR', `appt_${appointmentId}`);
+        const order = await razorpayService.createOrder(amountInPaise, 'INR', `a_${appointmentId}`);
         console.log(`[PaymentController] Razorpay Order Created: ${order.id}`);
         res.status(httpStatus.OK).send({
             order_id: order.id,
