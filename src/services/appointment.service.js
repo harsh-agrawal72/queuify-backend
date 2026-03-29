@@ -1078,7 +1078,7 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
 
         // 1. Fetch appointment details
         const res = await client.query(
-            'SELECT id, otp, org_id, price, payment_status, status FROM appointments WHERE id = $1',
+            'SELECT id, otp_code, org_id, price, payment_status, status FROM appointments WHERE id = $1',
             [appointmentId]
         );
         const appointment = res.rows[0];
@@ -1097,7 +1097,7 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
         }
 
         // 3. Verify OTP
-        if (appointment.otp !== otp) {
+        if (appointment.otp_code !== otp) {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid 4-digit OTP provided');
         }
 
