@@ -35,9 +35,11 @@ const createOrder = catchAsync(async (req, res) => {
         const order = await razorpayService.createOrder(amountInPaise, 'INR', `a_${appointmentId}`);
         console.log(`[PaymentController] Razorpay Order Created: ${order.id}`);
         res.status(httpStatus.OK).send({
-            order_id: order.id,
-            amount: order.amount,
-            currency: order.currency,
+            order: {
+                id: order.id,
+                amount: order.amount,
+                currency: order.currency
+            },
             appointment_id: appointmentId
         });
     } catch (razorpayError) {
