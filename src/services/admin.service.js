@@ -832,6 +832,16 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
 
         const appointment = check.rows[0];
 
+        // --- PAYMENT SECURITY CHECK ---
+        // If the appointment has a price and it's being marked as 'completed', 
+        // it MUST go through the OTP verification flow to release escrow funds.
+        const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
+        const price = parseFloat(priceRes.rows[0]?.price || 0);
+        
+        if (status === 'completed' && price > 0) {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Paid appointments must be verified via OTP to release escrow funds.');
+        }
+
         const apptCols = await getColumnNames('appointments');
         const hasCancelledBy = apptCols.includes('cancelled_by');
         const hasCancellationReason = apptCols.includes('cancellation_reason');
