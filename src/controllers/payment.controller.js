@@ -21,21 +21,29 @@ const createOrder = catchAsync(async (req, res) => {
     if (appointment.status === 'cancelled') throw new ApiError(httpStatus.BAD_REQUEST, 'Appointment is cancelled');
 
     const appointmentAmount = parseFloat(appointment.price);
-    if (!appointmentAmount || appointmentAmount <= 0) {
-        throw new ApiError(httpStatus.BAD_REQUEST, 'This appointment is free or has no price set');
+    console.log(`[PaymentController] Appointment ${appointmentId} price: ${appointment.price} -> parsed: ${appointmentAmount}`);
+    
+    if (isNaN(appointmentAmount) || appointmentAmount <= 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, `Invalid appointment price: ${appointment.price}`);
     }
 
     // 2. Create Real Razorpay Order
-    // Amount in paise (1 INR = 100 paise)
     const amountInPaise = Math.round(appointmentAmount * 100);
-    const order = await razorpayService.createOrder(amountInPaise, 'INR', `appt_${appointmentId}`);
-
-    res.status(httpStatus.OK).send({
-        order_id: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        appointment_id: appointmentId
-    });
+    console.log(`[PaymentController] Creating order for ${amountInPaise} paise`);
+    
+    try {
+        const order = await razorpayService.createOrder(amountInPaise, 'INR', `appt_${appointmentId}`);
+        console.log(`[PaymentController] Razorpay Order Created: ${order.id}`);
+        res.status(httpStatus.OK).send({
+            order_id: order.id,
+            amount: order.amount,
+            currency: order.currency,
+            appointment_id: appointmentId
+        });
+    } catch (razorpayError) {
+        console.error('[PaymentController] Razorpay order creation failed:', razorpayError.message);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Razorpay Order Error: ${razorpayError.message}`);
+    }
 });
 
 /**

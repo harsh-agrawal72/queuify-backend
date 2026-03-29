@@ -16,6 +16,7 @@ const reassignmentService = require('./reassignment.service');
 const organizationImageService = require('./organization_image.service');
 const organizationProfileService = require('./organization_profile.service');
 const chatService = require('./chat.service');
+const razorpayService = require('./razorpay.service');
 
 module.exports = {
     authService,
@@ -35,5 +36,6 @@ module.exports = {
     reassignmentService,
     organizationImageService,
     organizationProfileService,
-    chatService
+    chatService,
+    razorpayService
 };
