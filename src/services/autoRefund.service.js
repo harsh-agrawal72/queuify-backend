@@ -82,7 +82,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
         // 3. Verify there's actually a locked transaction to refund
         const lockedTxRes = await client.query(
             `SELECT id, amount FROM wallet_transactions
-             WHERE reference_id::text = $1 AND type = 'credit' AND status = 'locked'
+             WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'
              LIMIT 1`,
             [appointmentId]
         );
@@ -91,11 +91,12 @@ const processRefund = async (appointmentId, cancelledBy) => {
             // Check if funds were already released (completed case) — refund from available
             const availableTxRes = await client.query(
                 `SELECT id, amount FROM wallet_transactions
-                 WHERE reference_id::text = $1 AND type = 'credit' AND status = 'available'
+                 WHERE reference_id = $1 AND type = 'credit' AND status = 'available'
                  LIMIT 1`,
                 [appointmentId]
             );
             if (availableTxRes.rows.length === 0) {
+                console.log(`[AutoRefund] No locked or available funds for Appointment ${appointmentId}. Skipping refund.`);
                 await client.query('ROLLBACK');
                 return { refunded: false, reason: 'No locked or available funds found for this appointment' };
             }
@@ -106,11 +107,14 @@ const processRefund = async (appointmentId, cancelledBy) => {
         const originalAmount = parseFloat(appt.price);
         const refundAmount = parseFloat(((policy.percentage / 100) * originalAmount).toFixed(2));
 
+        console.log(`[AutoRefund] Policy: "${policy.label}", Refund Percentage: ${policy.percentage}%, Amount: ₹${refundAmount}`);
+
         if (refundAmount <= 0) {
+            console.log(`[AutoRefund] 0% refund policy applied. Forfeiting funds to organization.`);
             // Mark locked funds as forfeited (moved to available for org)
             await client.query(
                 `UPDATE wallet_transactions SET status = 'available', description = description || ' (Forfeited - late cancellation)'
-                 WHERE reference_id::text = $1 AND type = 'credit' AND status = 'locked'`,
+                 WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
                 [appointmentId]
             );
             await client.query(
@@ -136,10 +140,11 @@ const processRefund = async (appointmentId, cancelledBy) => {
         
         if (refundAmount > 0 && appt.payment_id) {
             try {
-                console.log(`[AutoRefund] Triggering actual Razorpay refund for appt=${appointmentId}, payment=${appt.payment_id}`);
+                console.log(`[AutoRefund] Triggering actual Razorpay refund for appt=${appointmentId}, payment=${appt.payment_id}, amount=₹${refundAmount}`);
                 const rzpRefund = await razorpayService.refundPayment(appt.payment_id, refundAmount, {
                     appointment_id: appointmentId,
-                    reason: policy.label
+                    reason: policy.label,
+                    cancelled_by: cancelledBy
                 });
                 razorpayRefundId = rzpRefund.id;
                 console.log(`[AutoRefund] Razorpay API success: ${razorpayRefundId}`);
@@ -147,6 +152,9 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 console.error(`[AutoRefund] Razorpay API refund FAILED for appt=${appointmentId}:`, rzpErr.message);
                 refundSuccessful = false;
             }
+        } else {
+            console.warn(`[AutoRefund] Skipping Razorpay API call: refundAmount=${refundAmount}, payment_id=${appt.payment_id}`);
+            refundSuccessful = false;
         }
 
         // 7. Finalize status based on refund success
@@ -165,11 +173,12 @@ const processRefund = async (appointmentId, cancelledBy) => {
         );
 
         if (updateApptRes.rowCount > 0) {
-            console.log(`[AutoRefund] Appointment updated to: ${finalPaymentStatus}`);
+            console.log(`[AutoRefund] Appointment status updated to: cancelled, payment_status to: ${finalPaymentStatus}`);
         }
 
         // 8. Wallet finalize
         if (refundSuccessful) {
+            console.log(`[AutoRefund] Finalizing internal wallet ledger for successfully refunded appt ${appointmentId}`);
             const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
             if (walletRes.rows.length > 0) {
                 const walletId = walletRes.rows[0].id;
@@ -182,14 +191,14 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 const remainder = originalAmount - refundAmount;
                 if (remainder > 0) {
                     await client.query(
-                        'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
+                         'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
                         [remainder, walletId]
                     );
                 }
                 // Update the original locked transaction
                 await client.query(
                     `UPDATE wallet_transactions SET status = 'cancelled', description = description || $1
-                     WHERE reference_id::text = $2 AND type = 'credit' AND status = 'locked'`,
+                     WHERE reference_id = $2 AND type = 'credit' AND status = 'locked'`,
                     [` — ${policy.label}`, appointmentId]
                 );
                 // Log the refund transaction
@@ -204,7 +213,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             await client.query(
                 `UPDATE wallet_transactions 
                  SET description = description || ' (Auto-refund failed: Manual action required)'
-                 WHERE reference_id::text = $1 AND type = 'credit' AND status = 'locked'`,
+                 WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
                 [appointmentId]
             );
         }
@@ -228,7 +237,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             console.error('[AutoRefund] Socket update failed:', socketErr.message);
         }
 
-        console.log(`[AutoRefund] Processed: appt=${appointmentId}, amount=₹${refundAmount}, policy="${policy.label}"`);
+        console.log(`[AutoRefund] Finished processing: appt=${appointmentId}, amount=₹${refundAmount}, policy="${policy.label}"`);
 
         return {
             refunded: refundSuccessful,

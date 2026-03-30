@@ -883,20 +883,25 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
         const updatedAppointment = res.rows[0];
 
-        // 11. Async/Tolerant Refund logic (if cancelling AND it wasn't already cancelled)
+        // 11. Decrement booked count if cancelling
         if (status === 'cancelled' && appointment.status !== 'cancelled') {
             await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
-            
+        }
+
+        await client.query('COMMIT');
+
+        // --- POST-COMMIT ACTIONS ---
+        // 12. Async/Tolerant Refund logic
+        if (status === 'cancelled' && appointment.status !== 'cancelled') {
             if (appointment.payment_status === 'paid' && price > 0) {
                 console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
                 // Use autoRefundService to handle both Razorpay and Wallet
+                // Calling AFTER commit to ensure processRefund (new connection) can see the changes and avoid deadlocks
                 autoRefundService.processRefund(appointmentId, 'admin')
                     .then(result => console.log(`[Admin-Cancel-Refund] Success:`, result))
                     .catch(err => console.error(`[Admin-Cancel-Refund] FAILED:`, err.message));
             }
         }
-
-        await client.query('COMMIT');
 
         // --- POST-COMMIT ACTIONS ---
         // Real-time update

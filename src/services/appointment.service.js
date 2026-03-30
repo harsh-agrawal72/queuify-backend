@@ -243,10 +243,10 @@ const cancelAppointment = async (appointmentId, userId, reason = null) => {
                 // Fire refund asynchronously so it doesn't block the cancellation response
                 if (appointment.payment_status === 'paid' && parseFloat(appointment.price) > 0) {
                     const autoRefundService = require('./autoRefund.service');
-                    const cancelledBy = userId ? 'user' : 'admin';
-                    autoRefundService.processRefund(appointment.id, cancelledBy)
-                        .then(result => console.log(`[Cancel-Async] Refund processed:`, result))
-                        .catch(e => console.error('[Cancel-Async] Refund failed:', e.message));
+                    console.log(`[User-Cancel-Refund] Triggering automated refund for Appointment ${appointment.id}`);
+                    autoRefundService.processRefund(appointment.id, 'user')
+                        .then(result => console.log(`[User-Cancel-Refund] Success:`, result))
+                        .catch(e => console.error('[User-Cancel-Refund] FAILED:', e.message));
                 }
             } catch (e) { console.error('[Cancel-Async] FAILURE:', e); }
         })();
