@@ -221,6 +221,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 type: 'status_update',
                 appointmentId,
                 status: 'cancelled',
+                cancelled_by: cancelledBy,
                 payment_status: finalPaymentStatus
             });
         } catch (socketErr) {

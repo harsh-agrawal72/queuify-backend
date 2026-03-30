@@ -809,21 +809,19 @@ const getAppointments = async (orgId, queryParams) => {
             if (!displayToken) {
                 const dateStr = new Date(apt.created_at).toISOString().slice(0, 10).replace(/-/g, '');
                 const suffix = apt.id.slice(-3).toUpperCase();
-                displayToken = `TOKEN-${dateStr}-${suffix}`;
+                displayToken = `${dateStr}-${suffix}`;
             }
-            return {
-                ...apt,
-                token_number: displayToken
-            };
+            return { ...apt, display_token: displayToken };
         });
 
         return {
             appointments: formattedAppointments,
-            totalPages: Math.ceil(parseInt(countRes.rows[0].count) / limit),
-            currentPage: parseInt(page)
+            total: parseInt(countRes.rows[0].count),
+            page: parseInt(page),
+            limit: parseInt(limit)
         };
     } catch (e) {
-        console.error('[admin.service.getAppointments] Database Error:', e);
+        console.error('[Admin-GetAppointments] Error:', e);
         throw e;
     }
 };
@@ -832,10 +830,8 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
     // 1. Direct Reschedule / Force Move
     if (slotId) {
         const appointmentModel = require('../models/appointment.model');
-        const appointmentService = require('./appointment.service');
         const result = await appointmentModel.rescheduleAppointment(appointmentId, null, slotId, true, orgId);
         
-        // Trigger notifications for new slot
         if (result.appointment.slot_id) {
             const { checkAndNotifySlotWaiters } = require('./appointment.service');
             checkAndNotifySlotWaiters(result.appointment.slot_id).catch(err => console.error(`[Admin-ForceMove-Notify] Error:`, err));
@@ -848,14 +844,12 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
     try {
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
+        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
 
         // --- PAYMENT SECURITY CHECK ---
-        // If the appointment has a price and it's being marked as 'completed', 
-        // it MUST go through the OTP verification flow to release escrow funds.
         const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
         const price = parseFloat(priceRes.rows[0]?.price || 0);
         
@@ -867,19 +861,14 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const hasCancelledBy = apptCols.includes('cancelled_by');
         const hasCancellationReason = apptCols.includes('cancellation_reason');
 
-        // If cancelling an appointment, decrement slot count and save reason
         let updateQuery = `UPDATE appointments SET status = $1, updated_at = NOW()`;
         const updateParams = [status, appointmentId];
 
         if (status === 'serving') {
             updateQuery = `UPDATE appointments SET status = $1, serving_started_at = NOW(), updated_at = NOW()`;
-        }
-
-        if (status === 'completed') {
+        } else if (status === 'completed') {
             updateQuery = `UPDATE appointments SET status = $1, completed_at = NOW(), updated_at = NOW()`;
-        }
-
-        if (status === 'cancelled') {
+        } else if (status === 'cancelled') {
             let cancelSet = `status = $1`;
             if (hasCancelledBy) cancelSet += `, cancelled_by = 'admin'`;
             if (hasCancellationReason) {
@@ -887,155 +876,94 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                 updateParams.push(reason);
             }
             updateQuery = `UPDATE appointments SET ${cancelSet}, updated_at = NOW()`;
+        }
+
+        // 10. Persist the status change
+        const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
+        const updatedAppointment = res.rows[0];
+
+        // 11. Async/Tolerant Refund logic (if cancelling AND it wasn't already cancelled)
+        if (status === 'cancelled' && appointment.status !== 'cancelled') {
+            await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
             
-            if (appointment.status !== 'cancelled') {
-                await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
-                
-                // --- 100% REFUND FOR ADMIN CANCELLATION ---
-                // If it was paid, trigger a full refund
-                const paymentCheck = await client.query('SELECT payment_status FROM appointments WHERE id = $1', [appointmentId]);
-                if (paymentCheck.rows[0]?.payment_status === 'paid' && price > 0) {
-                    console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
+            if (appointment.payment_status === 'paid' && price > 0) {
+                console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
+                try {
                     await walletService.refundFunds(orgId, appointmentId, price, true);
+                } catch (refundErr) {
+                    console.error('[Admin-Cancel-Refund] FAILED, but allowing cancellation:', refundErr.message);
                 }
             }
         }
 
-        const res = await client.query(`${updateQuery} WHERE id = $2 RETURNING *`, updateParams);
-        const updatedAppointment = res.rows[0];
+        await client.query('COMMIT');
 
-        // --- REAL-TIME UPDATE (Socket) ---
+        // --- POST-COMMIT ACTIONS ---
+        // Real-time update
         try {
             socket.emitQueueUpdate({
                 orgId,
                 serviceId: updatedAppointment.service_id,
-                resourceId: updatedAppointment.resource_id
+                resourceId: updatedAppointment.resource_id,
+                userId: updatedAppointment.user_id
             }, {
                 type: 'status_change',
                 appointmentId,
                 status,
-                queue_number: updatedAppointment.queue_number
+                cancelled_by: status === 'cancelled' ? 'admin' : null,
+                queue_number: updatedAppointment.queue_number,
+                payment_status: updatedAppointment.payment_status
             });
         } catch (socketErr) {
             console.error('[Admin-StatusUpdate-Socket] Failed silently:', socketErr.message);
         }
 
-        // Trigger waitlist filling and notifications
+        // Waitlist filling
         if (['completed', 'cancelled', 'no_show'].includes(status)) {
-            // USER REQUEST: Disable automatic "Start Serving" for the next appointment when an admin completes/cancels one.
-            // This allows admins to have manual control over the queue flow.
-            // const { advanceQueueAutomatically } = require('./appointment.service');
-            // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
-            
             const reassignmentService = require('./reassignment.service');
             if (status === 'cancelled') {
-                try {
-                    await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
-                } catch (e) {
-                    console.error('[Admin-WaitlistFill] Failed silently:', e.message);
-                }
+                reassignmentService.fillSlotFromWaitlist(appointment.slot_id).catch(e => console.error('[Admin-WaitlistFill] Failed silently:', e.message));
             }
         }
 
-        // --- NOTIFICATIONS (Fire and Forget) ---
+        // Notifications
         (async () => {
             try {
-                console.log(`[Email-Async] [StatusUpdate] Starting for Appointment: ${appointmentId}, New Status: ${status}`);
                 const apptCols = await getColumnNames('appointments');
-                const hasCustomerName = apptCols.includes('customer_name');
-                const hasCustomerPhone = apptCols.includes('customer_phone');
                 const hasTokenNumber = apptCols.includes('token_number');
+                const hasCustomerName = apptCols.includes('customer_name');
 
-                const appointmentDetails = await pool.query(`
-                    SELECT a.id, a.status, a.user_id, a.org_id, a.service_id, a.slot_id, a.created_at,
+                const details = await pool.query(`
+                    SELECT a.id, a.status, a.user_id, a.org_id, a.service_id, a.slot_id,
                            ${hasTokenNumber ? 'a.token_number,' : 'NULL as token_number,'}
                            COALESCE(u.name, ${hasCustomerName ? 'a.customer_name' : 'NULL'}, 'Guest') as user_name, 
-                           COALESCE(u.email, 'Walk-in') as user_email, 
-                           COALESCE(u.phone, ${hasCustomerPhone ? 'a.customer_phone' : 'NULL'}, 'Not Provided') as user_phone,
-                           u.email_notification_enabled,
-                           u.notification_enabled,
-                           o.name as org_name, s.name as service_name,
-                           o.email_notification as org_email_enabled, o.new_booking_notification as org_notify_enabled
+                           COALESCE(u.email, 'Walk-in') as user_email,
+                           u.email_notification_enabled, u.notification_enabled,
+                           o.name as org_name, s.name as service_name
                     FROM appointments a
                     LEFT JOIN users u ON a.user_id = u.id
                     LEFT JOIN organizations o ON a.org_id = o.id
                     LEFT JOIN services s ON a.service_id = s.id
                     WHERE a.id = $1
                 `, [appointmentId]);
-                const data = appointmentDetails.rows[0];
+                const data = details.rows[0];
 
-                if (!data) {
-                    console.error(`[Email-Async] No appointment details found for ID: ${appointmentId}`);
-                    return;
+                if (data && data.user_email && data.email_notification_enabled !== false) {
+                     emailService.sendStatusUpdateEmail(data.user_email, data).catch(e => console.error('[Email-Async] User email failed:', e.message));
                 }
 
-                console.log(`[Email-Async] Data fetched. User: ${data.user_email}, Status: ${status}`);
-
-                const userEmailEnabled = data.email_notification_enabled !== false;
-
-                if (data.user_email && userEmailEnabled) {
-                    console.log(`[Email-Async] Sending user email to ${data.user_email}`);
-                    await emailService.sendStatusUpdateEmail(data.user_email, data);
-                } else {
-                    console.log(`[Email-Async] User email skipped (User Preference: ${userEmailEnabled})`);
+                if (data && data.notification_enabled !== false) {
+                     notificationService.sendNotification(
+                        data.user_id,
+                        'Appointment Status Updated',
+                        `Your appointment for ${data.service_name} status: ${status.toUpperCase()}.`,
+                        'appointment',
+                        `/appointments`
+                    ).catch(e => console.error('[Notify-Async] User notification failed:', e.message));
                 }
-
-                // Notify Admins of status change
-                const orgRes = await pool.query('SELECT id, contact_email, email_notification, name, new_booking_notification FROM organizations WHERE id = $1', [orgId]);
-                const org = orgRes.rows[0];
-
-                if (org && org.new_booking_notification) {
-                    console.log(`[Email-Async] Organization found: ${org.name}. Notifications enabled.`);
-                    const admins = await userModel.getAdminsByOrg(orgId);
-                    const tokenStr = data.token_number ? ` (Token #${data.token_number})` : '';
-                    const adminMessage = `Appointment for ${data?.user_name || 'Customer'}${tokenStr} [${data?.service_name || 'Service'}] updated to ${status.toUpperCase()}.`;
-
-                    // In-App Notifications to ALL admins
-                    for (const admin of admins) {
-                        await notificationService.sendNotification(
-                            admin.id,
-                            'Appointment Status Updated',
-                            adminMessage,
-                            'appointment',
-                            `/admin/appointments?search=${appointmentId}`
-                        );
-                    }
-
-                    // Email Notifications
-                    if (org.email_notification) {
-                        if (org.contact_email) {
-                            console.log(`[Email-Async] Sending admin email to org contact: ${org.contact_email}`);
-                            await emailService.sendStatusUpdateEmail(org.contact_email, data);
-                        }
-
-                        if (admins.length > 0) {
-                            for (const admin of admins) {
-                                if (admin.email && admin.email !== org.contact_email) {
-                                    console.log(`[Email-Async] Sending admin email to secondary admin: ${admin.email}`);
-                                    await emailService.sendStatusUpdateEmail(admin.email, data);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                const userNotifyEnabled = data.notification_enabled !== false;
-
-                if (userNotifyEnabled) {
-                    if (appointment.user_id || updatedAppointment.user_id) {
-                         await notificationService.sendNotification(
-                            appointment.user_id || updatedAppointment.user_id,
-                            'Appointment Status Updated',
-                            `Your appointment status for ${data?.service_name || 'Service'} is now ${status.toUpperCase()}. Token: #${data.token_number || 'N/A'}`,
-                            'appointment',
-                            `/appointments`
-                        );
-                    }
-                }
-            } catch (e) { console.error('[Email-Async] CRITICAL FAILURE:', e); }
+            } catch (e) { console.error('[Async-Notify] Error:', e.message); }
         })();
 
-        await client.query('COMMIT');
         return updatedAppointment;
     } catch (error) {
         await client.query('ROLLBACK');
@@ -1050,121 +978,64 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
     try {
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, token_number FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
+        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
+        let finalizedAppt;
 
-        // --- STEP 1: If status is NOT cancelled, perform SOFT DELETE (mark as cancelled) ---
         if (appointment.status !== 'cancelled') {
-            // If deleting a confirmed appointment, decrement slot count
+            // SOFT DELETE
             if (appointment.status === 'confirmed' || appointment.status === 'pending') {
                 await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
             }
 
             const res = await client.query(
                 `UPDATE appointments 
-                 SET status = 'cancelled', 
-                     cancelled_by = 'admin',
-                     cancellation_reason = $3,
-                     deleted_at = NOW() 
+                 SET status = 'cancelled', cancelled_by = 'admin', cancellation_reason = $3, deleted_at = NOW() 
                  WHERE id = $1 AND org_id = $2 
                  RETURNING *`,
                 [appointmentId, orgId, reason]
             );
-            const cancelledAppt = res.rows[0];
+            finalizedAppt = res.rows[0];
 
-            // --- 100% REFUND FOR ADMIN DELETION/CANCELLATION ---
+            // Refund logic
             const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
             const price = parseFloat(priceRes.rows[0]?.price || 0);
 
             if (appointment.payment_status === 'paid' && price > 0) {
-                console.log(`[Admin-Delete-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
-                await walletService.refundFunds(orgId, appointmentId, price, true);
-            }
-
-            // USER REQUEST: Disable automatic "Start Serving" for the next appointment.
-            // const { advanceQueueAutomatically } = require('./appointment.service');
-            // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
-            
-            const reassignmentService = require('./reassignment.service');
-            try {
-                await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
-            } catch (e) {
-                console.error('[Admin-Delete-WaitlistFill] Failed silently:', e.message);
-            }
-
-            // --- NOTIFICATIONS (Fire and Forget) ---
-            (async () => {
                 try {
-                    console.log(`[Email-Async] [Deletion] Starting for Appointment: ${appointmentId}`);
-                    const userRes = await pool.query('SELECT name, email, email_notification_enabled, notification_enabled FROM users WHERE id = $1', [appointment.user_id]);
-                    const userData = userRes.rows[0];
-                    const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [orgId]);
-                    const org = orgRes.rows[0];
-
-                    const userEmailEnabled = userData && userData.email_notification_enabled !== false;
-
-                    if (userData && userData.email && userEmailEnabled) {
-                        await emailService.sendCancellationEmail(userData.email, {
-                            ...cancelledAppt,
-                            org_name: org.name,
-                            service_name: 'Your appointment'
-                        });
-                    }
-
-                    if (org && org.email_notification) {
-                        const admins = await userModel.getAdminsByOrg(orgId);
-                        const apptDetails = {
-                            ...cancelledAppt,
-                            org_name: org.name,
-                            service_name: 'An appointment'
-                        };
-
-                        if (org.contact_email) {
-                            await emailService.sendCancellationEmail(org.contact_email, apptDetails);
-                        }
-                        for (const admin of admins) {
-                            if (admin.email !== org.contact_email) {
-                                await emailService.sendCancellationEmail(admin.email, apptDetails);
-                            }
-                        }
-                    }
-
-                    const userNotifyEnabled = userData && userData.notification_enabled !== false;
-
-                    if (userNotifyEnabled) {
-                        const notificationService = require('./notification.service');
-                        await notificationService.sendNotification(
-                            appointment.user_id,
-                            'Appointment Cancelled',
-                            `Your appointment${appointment.token_number ? ` (#${appointment.token_number})` : ''} has been cancelled by the administrator.`,
-                            'appointment',
-                            `/appointments`
-                        );
-                    }
-                } catch (e) {
-                    console.error('Admin cancellation notification failed:', e);
+                    await walletService.refundFunds(orgId, appointmentId, price, true);
+                } catch (refundErr) {
+                    console.error('[Admin-Delete-Refund] FAILED:', refundErr.message);
                 }
-            })();
-
-            await client.query('COMMIT');
-            return cancelledAppt;
+            }
+        } else {
+            // PERMANENT HIDE
+            const res = await client.query(
+                `UPDATE appointments SET is_deleted_permanent = TRUE, updated_at = NOW() WHERE id = $1 AND org_id = $2 RETURNING *`,
+                [appointmentId, orgId]
+            );
+            finalizedAppt = res.rows[0];
         }
 
-        // --- STEP 2: If status is ALREADY cancelled, perform PERMANENT DELETE (hide from dashboard) ---
-        const res = await client.query(
-            `UPDATE appointments 
-             SET is_deleted_permanent = TRUE,
-                 updated_at = NOW()
-             WHERE id = $1 AND org_id = $2 
-             RETURNING *`,
-            [appointmentId, orgId]
-        );
-        const hiddenAppt = res.rows[0];
-
         await client.query('COMMIT');
-        return hiddenAppt;
+
+        // Post-commit socket
+        try {
+            socket.emitQueueUpdate({
+                orgId,
+                appointmentId,
+                userId: appointment.user_id
+            }, {
+                type: finalizedAppt.is_deleted_permanent ? 'permanent_delete' : 'deletion',
+                appointmentId,
+                status: 'cancelled',
+                cancelled_by: 'admin'
+            });
+        } catch (e) { console.error('Socket emit failed:', e.message); }
+
+        return finalizedAppt;
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
