@@ -5,6 +5,7 @@ const emailService = require('./email.service');
 const notificationService = require('./notification.service');
 const userModel = require('../models/user.model');
 const walletService = require('./wallet.service');
+const autoRefundService = require('./autoRefund.service');
 const socket = require('../socket/index');
 
 // Helper to query DB
@@ -888,11 +889,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             
             if (appointment.payment_status === 'paid' && price > 0) {
                 console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
-                try {
-                    await walletService.refundFunds(orgId, appointmentId, price, true);
-                } catch (refundErr) {
-                    console.error('[Admin-Cancel-Refund] FAILED, but allowing cancellation:', refundErr.message);
-                }
+                // Use autoRefundService to handle both Razorpay and Wallet
+                autoRefundService.processRefund(appointmentId, 'admin')
+                    .then(result => console.log(`[Admin-Cancel-Refund] Success:`, result))
+                    .catch(err => console.error(`[Admin-Cancel-Refund] FAILED:`, err.message));
             }
         }
 
@@ -1004,11 +1004,10 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
             const price = parseFloat(priceRes.rows[0]?.price || 0);
 
             if (appointment.payment_status === 'paid' && price > 0) {
-                try {
-                    await walletService.refundFunds(orgId, appointmentId, price, true);
-                } catch (refundErr) {
-                    console.error('[Admin-Delete-Refund] FAILED:', refundErr.message);
-                }
+                // Use autoRefundService to handle both Razorpay and Wallet
+                autoRefundService.processRefund(appointmentId, 'admin')
+                    .then(result => console.log(`[Admin-Delete-Refund] Success:`, result))
+                    .catch(err => console.error(`[Admin-Delete-Refund] FAILED:`, err.message));
             }
         } else {
             // PERMANENT HIDE
