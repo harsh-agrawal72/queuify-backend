@@ -416,10 +416,19 @@ const cancelAppointment = async (id, userId, reason = null) => {
         const appt = apptRes.rows[0];
         if (appt.status === 'cancelled') throw new Error('Already cancelled');
 
-        await client.query(
-            "UPDATE appointments SET status = 'cancelled', cancelled_by = 'user', cancellation_reason = $1 WHERE id = $2",
+        console.log(`[Model-Cancel] Attempting to cancel appt=${id} for user=${userId}`);
+        const updateRes = await client.query(
+            "UPDATE appointments SET status = 'cancelled', cancelled_by = 'user', cancellation_reason = $1 WHERE id = $2 RETURNING *",
             [reason, id]
         );
+
+        if (updateRes.rowCount === 0) {
+            console.error(`[Model-Cancel] Row NOT updated for appt=${id}. Target row might have changed or ID is wrong?`);
+            throw new Error('Update failed');
+        }
+
+        const updatedAppt = updateRes.rows[0];
+        console.log(`[Model-Cancel] Success: appt=${id} status is now ${updatedAppt.status}`);
 
         // Decrement booked count
         if (appt.slot_id) {
@@ -430,7 +439,7 @@ const cancelAppointment = async (id, userId, reason = null) => {
         }
 
         await client.query('COMMIT');
-        return { ...appt, status: 'cancelled' };
+        return updatedAppt;
     } catch (e) {
         await client.query('ROLLBACK');
         throw e;

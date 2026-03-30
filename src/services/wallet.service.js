@@ -302,7 +302,19 @@ const resolveDispute = async (orgId, appointmentId, decision) => {
 const getTransactionHistory = async (orgId, limit = 50, offset = 0) => {
     const wallet = await getWalletByOrgId(orgId);
     const res = await pool.query(
-        'SELECT * FROM wallet_transactions WHERE wallet_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+        `SELECT 
+            tx.*,
+            u.name as customer_name,
+            u.email as customer_email,
+            svc.name as service_name,
+            a.payment_id as razorpay_payment_id
+         FROM wallet_transactions tx
+         LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
+         LEFT JOIN users u ON a.user_id = u.id
+         LEFT JOIN services svc ON a.service_id = svc.id
+         WHERE tx.wallet_id = $1 
+         ORDER BY tx.created_at DESC 
+         LIMIT $2 OFFSET $3`,
         [wallet.id, limit, offset]
     );
     

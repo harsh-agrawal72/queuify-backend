@@ -247,16 +247,8 @@ const cancelAppointment = async (appointmentId, userId, reason = null) => {
 
         return appointment;
     } catch (error) {
-        if (error.message === 'Appointment not found') {
-            throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
-        }
-        if (error.message === 'Forbidden') {
-            throw new ApiError(httpStatus.FORBIDDEN, 'You can only cancel your own appointments');
-        }
-        if (error.message === 'Appointment already cancelled') {
-            throw new ApiError(httpStatus.BAD_REQUEST, 'Appointment already cancelled');
-        }
-        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Cancellation failed');
+        console.error('[Cancel-Appointment] FAILURE:', error);
+        throw error;
     }
 };
 
@@ -451,7 +443,18 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
                     `/appointments`
                 );
 
-                // 2. Notify Admins
+                // 3. Trigger Refund if Admin Cancelled
+                if (status === 'cancelled' && appointment.payment_status === 'paid' && parseFloat(appointment.price) > 0) {
+                    try {
+                        const autoRefundService = require('./autoRefund.service');
+                        console.log(`[UserUpdate-Async] Admin cancelled paid appointment. Triggering refund for appt=${appointmentId}`);
+                        await autoRefundService.processRefund(appointmentId, 'admin');
+                    } catch (refundErr) {
+                        console.error(`[UserUpdate-Async] Admin refund trigger failed:`, refundErr.message);
+                    }
+                }
+
+                // 4. Notify Admins
                 if (org && org.new_booking_notification) {
                     const admins = await userModel.getAdminsByOrg(orgId);
                     const adminMessage = `Status of ${user?.name || 'User'}'s appointment for ${appointmentWithDetails.service_name || 'Service'} updated to ${status}.`;
@@ -833,7 +836,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
 
         return result;
     } catch (error) {
-        if (error.message === 'Appointment not found') throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+                if (error.message === 'Appointment not found') throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
         if (error.message === 'New slot not found or inactive') throw new ApiError(httpStatus.NOT_FOUND, 'New slot not found or inactive');
         if (error.message === 'New slot is fully booked') throw new ApiError(httpStatus.BAD_REQUEST, 'New slot is fully booked');
         if (error.message.includes('Cannot reschedule')) throw new ApiError(httpStatus.BAD_REQUEST, error.message);
@@ -1097,7 +1100,13 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
         }
 
         // 3. Verify OTP
-        if (String(appointment.otp_code) !== String(otp)) {
+        // Detailed logging to solve the "Invalid OTP" mystery
+        console.log(`[OTP-Verify] ID: ${appointmentId}, DB-OTP: "${appointment.otp_code}", Provided: "${otp}"`);
+        
+        const storedOtp = String(appointment.otp_code || '').trim();
+        const providedOtp = String(otp || '').trim();
+
+        if (storedOtp !== providedOtp) {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid 4-digit OTP provided');
         }
 
@@ -1109,18 +1118,15 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
 
         // 5. Update Status to Completed
         await client.query(
-            "UPDATE appointments SET status = 'completed', updated_at = NOW() WHERE id = $1",
+            "UPDATE appointments SET status = 'completed', completed_at = NOW() WHERE id = $1",
             [appointmentId]
         );
 
         await client.query('COMMIT');
 
-        // Logic for auto-advancement after completion (copied from updateStatus logic)
+        // Logic for auto-advancement after completion (Fire and Forget)
         (async () => {
             try {
-                // Trigger auto-advance logic if needed
-                // For simplicity in this mock, we assume updateStatus logic handles this if called normally.
-                // But since we are doing it manually here, we might need to trigger the advancement.
                 console.log(`[OTP] Appointment ${appointmentId} verified and completed.`);
             } catch (e) {
                 console.error('[OTP-Async] Advancement failed:', e);
@@ -1130,6 +1136,7 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
         return { success: true };
     } catch (error) {
         await client.query('ROLLBACK');
+        console.error('[verifyOtp] Error:', error);
         throw error;
     } finally {
         client.release();

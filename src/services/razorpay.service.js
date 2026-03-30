@@ -64,8 +64,41 @@ const verifySignature = (orderId, paymentId, signature) => {
     return generated_signature === signature;
 };
 
+/**
+ * Refund a Razorpay payment
+ * @param {string} paymentId 
+ * @param {number} amount - Amount in Rupees
+ * @param {Object} notes - Optional notes
+ * @returns {Promise<Object>}
+ */
+const refundPayment = async (paymentId, amount, notes = {}) => {
+    try {
+        const rzp = getRazorpayInstance();
+        // Convert to paise and ensure it's an integer
+        const amountInPaise = Math.round(amount * 100);
+        
+        console.log(`[RazorpayService] Initiating refund: paymentId=${paymentId}, amount=${amount} (₹)`);
+        
+        const refund = await rzp.payments.refund(paymentId, {
+            amount: amountInPaise,
+            speed: 'normal',
+            notes: {
+                ...notes,
+                platform: 'queuify'
+            }
+        });
+        
+        console.log(`[RazorpayService] Refund successful: refundId=${refund.id}`);
+        return refund;
+    } catch (error) {
+        console.error('[RazorpayService] Refund API Error:', error.message || error);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Razorpay Refund Error: ${error.message || 'Unknown error'}`);
+    }
+};
+
 module.exports = {
     createOrder,
     verifySignature,
-    getRazorpayInstance
+    getRazorpayInstance,
+    refundPayment
 };

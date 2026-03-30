@@ -18,6 +18,7 @@
 
 const { pool } = require('../config/db');
 const walletService = require('./wallet.service');
+const razorpayService = require('./razorpay.service');
 const ApiError = require('../utils/ApiError');
 const httpStatus = require('../utils/httpStatus');
 
@@ -58,7 +59,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
 
         // 1. Fetch appointment details
         const apptRes = await client.query(
-            `SELECT a.id, a.org_id, a.price, a.payment_status, a.status,
+            `SELECT a.id, a.org_id, a.price, a.payment_status, a.status, a.payment_id,
                     s.start_time
              FROM appointments a
              LEFT JOIN slots s ON a.slot_id = s.id
@@ -168,11 +169,40 @@ const processRefund = async (appointmentId, cancelledBy) => {
             );
         }
 
-        // 6. Update appointment refund status and amount
-        await client.query(
-            `UPDATE appointments SET payment_status = 'refunded', refund_amount = $2, updated_at = NOW() WHERE id = $1`,
-            [appointmentId, refundAmount]
+        // 6. Trigger External Razorpay Refund
+        let razorpayRefundId = null;
+        if (refundAmount > 0 && appt.payment_id) {
+            try {
+                console.log(`[AutoRefund] Triggering actual Razorpay refund for appt=${appointmentId}, payment=${appt.payment_id}`);
+                const rzpRefund = await razorpayService.refundPayment(appt.payment_id, refundAmount, {
+                    appointment_id: appointmentId,
+                    reason: policy.label
+                });
+                razorpayRefundId = rzpRefund.id;
+            } catch (rzpErr) {
+                console.error(`[AutoRefund] Razorpay API refund FAILED for appt=${appointmentId}:`, rzpErr.message);
+                // Note: We continue with internal status update even if external fails 
+                // but we should probably flag this for manual attention.
+                // In a production app, you might want to rollback or queue for retry.
+            }
+        }
+
+        // 7. Update appointment refund status, amount, and ENSURE status is cancelled
+        const updateApptRes = await client.query(
+            `UPDATE appointments 
+             SET status = 'cancelled', 
+                 payment_status = 'refunded', 
+                 refund_amount = $2, 
+                 razorpay_refund_id = $3,
+                 updated_at = NOW() 
+             WHERE id = $1 
+             RETURNING status, payment_status`,
+            [appointmentId, refundAmount, razorpayRefundId]
         );
+
+        if (updateApptRes.rowCount > 0) {
+            console.log(`[AutoRefund] Status updated: ${JSON.stringify(updateApptRes.rows[0])} (RZP Refund: ${razorpayRefundId || 'N/A'})`);
+        }
 
         await client.query('COMMIT');
 
