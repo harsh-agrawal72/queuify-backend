@@ -685,7 +685,7 @@ const getAppointments = async (orgId, queryParams) => {
     let queryText = `
         SELECT 
             a.id, a.org_id, a.user_id, a.service_id, a.resource_id, a.slot_id,
-            a.status, 
+            a.status, a.payment_status, a.price, a.razorpay_refund_id,
             ${hasCancelledBy ? 'a.cancelled_by,' : "NULL as cancelled_by,"}
             a.created_at, 
             ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
@@ -1586,29 +1586,24 @@ const getUserLoyalty = async (orgId, userId) => {
 };
 
 /**
- * Get Detailed User Appointment History
+ * Retry a failed refund
  */
-const getUserHistory = async (orgId, userId) => {
-    if (!userId) return [];
+const retryRefund = async (orgId, appointmentId) => {
+    const autoRefundService = require('./autoRefund.service');
+    const res = await query(
+        'SELECT id, status, payment_status, org_id FROM appointments WHERE id = $1 AND org_id = $2',
+        [appointmentId, orgId]
+    );
+    
+    if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+    const apt = res.rows[0];
 
-    const res = await query(`
-        SELECT 
-            a.id, a.status, a.created_at, a.completed_at, a.preferred_date,
-            s.name as service_name,
-            r.name as resource_name,
-            sl.start_time, sl.end_time,
-            rv.rating as review_rating,
-            rv.comment as review_comment
-        FROM appointments a
-        LEFT JOIN services s ON a.service_id = s.id
-        LEFT JOIN resources r ON a.resource_id = r.id
-        LEFT JOIN slots sl ON a.slot_id = sl.id
-        LEFT JOIN reviews rv ON a.id = rv.appointment_id
-        WHERE a.org_id = $1 AND a.user_id = $2
-        ORDER BY a.created_at DESC
-    `, [orgId, userId]);
+    if (apt.payment_status !== 'refund_failed') {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'This appointment is not in a failed refund state');
+    }
 
-    return res.rows;
+    console.log(`[Admin-RetryRefund] Retrying refund for appt: ${appointmentId}`);
+    return await autoRefundService.processRefund(appointmentId, 'admin');
 };
 
 module.exports = {
@@ -1635,6 +1630,7 @@ module.exports = {
     getPredictiveInsights,
     createManualAppointment,
     getUserLoyalty,
-    getUserHistory
+    getUserHistory,
+    retryRefund
 };
 

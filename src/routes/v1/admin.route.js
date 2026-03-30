@@ -41,6 +41,8 @@ router.route('/appointments/:appointmentId')
     .patch(validate(adminValidation.updateAppointmentStatus), adminController.updateAppointmentStatus)
     .delete(validate(adminValidation.deleteAppointment), adminController.deleteAppointment);
 
+router.post('/appointments/:appointmentId/retry-refund', adminController.retryRefund);
+
 router.get('/admins', adminController.getAdmins);
 router.post('/admins/invite', validate(adminValidation.inviteAdmin), adminController.inviteAdmin);
 router.delete('/admins/:adminId', validate(adminValidation.deleteAdmin), adminController.deleteAdmin);

@@ -130,47 +130,10 @@ const processRefund = async (appointmentId, cancelledBy) => {
             };
         }
 
-        // 5. Perform refund: reduce locked funds and log refund transaction
-        const walletRes = await client.query(
-            'SELECT id FROM wallets WHERE org_id = $1',
-            [appt.org_id]
-        );
-
-        if (walletRes.rows.length > 0) {
-            const walletId = walletRes.rows[0].id;
-
-            // Deduct from locked funds (the refunded portion)
-            await client.query(
-                'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
-                [refundAmount, walletId]
-            );
-
-            // If partial refund, the remainder becomes available
-            const remainder = originalAmount - refundAmount;
-            if (remainder > 0) {
-                await client.query(
-                    'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
-                    [remainder, walletId]
-                );
-            }
-
-            // Update the original locked transaction
-            await client.query(
-                `UPDATE wallet_transactions SET status = 'cancelled', description = description || $1
-                 WHERE reference_id::text = $2 AND type = 'credit' AND status = 'locked'`,
-                [` — ${policy.label}`, appointmentId]
-            );
-
-            // Log the refund transaction
-            await client.query(
-                `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                 VALUES ($1, $2, 'refund', 'completed', $3, $4)`,
-                [walletId, -refundAmount, appointmentId, `Refund: ${policy.label} for appointment ${appointmentId}`]
-            );
-        }
-
         // 6. Trigger External Razorpay Refund
         let razorpayRefundId = null;
+        let refundSuccessful = true;
+        
         if (refundAmount > 0 && appt.payment_id) {
             try {
                 console.log(`[AutoRefund] Triggering actual Razorpay refund for appt=${appointmentId}, payment=${appt.payment_id}`);
@@ -179,37 +142,94 @@ const processRefund = async (appointmentId, cancelledBy) => {
                     reason: policy.label
                 });
                 razorpayRefundId = rzpRefund.id;
+                console.log(`[AutoRefund] Razorpay API success: ${razorpayRefundId}`);
             } catch (rzpErr) {
                 console.error(`[AutoRefund] Razorpay API refund FAILED for appt=${appointmentId}:`, rzpErr.message);
-                // Note: We continue with internal status update even if external fails 
-                // but we should probably flag this for manual attention.
-                // In a production app, you might want to rollback or queue for retry.
+                refundSuccessful = false;
             }
         }
 
-        // 7. Update appointment refund status, amount, and ENSURE status is cancelled
+        // 7. Finalize status based on refund success
+        const finalPaymentStatus = refundSuccessful ? 'refunded' : 'refund_failed';
+        
         const updateApptRes = await client.query(
             `UPDATE appointments 
              SET status = 'cancelled', 
-                 payment_status = 'refunded', 
+                 payment_status = $1, 
                  refund_amount = $2, 
                  razorpay_refund_id = $3,
                  updated_at = NOW() 
-             WHERE id = $1 
+             WHERE id = $4 
              RETURNING status, payment_status`,
-            [appointmentId, refundAmount, razorpayRefundId]
+            [finalPaymentStatus, refundAmount, razorpayRefundId, appointmentId]
         );
 
         if (updateApptRes.rowCount > 0) {
-            console.log(`[AutoRefund] Status updated: ${JSON.stringify(updateApptRes.rows[0])} (RZP Refund: ${razorpayRefundId || 'N/A'})`);
+            console.log(`[AutoRefund] Appointment updated to: ${finalPaymentStatus}`);
+        }
+
+        // 8. Wallet finalize
+        if (refundSuccessful) {
+            const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
+            if (walletRes.rows.length > 0) {
+                const walletId = walletRes.rows[0].id;
+                // Deduct from locked funds (the refunded portion)
+                await client.query(
+                    'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                    [refundAmount, walletId]
+                );
+                // If partial refund, the remainder becomes available
+                const remainder = originalAmount - refundAmount;
+                if (remainder > 0) {
+                    await client.query(
+                        'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
+                        [remainder, walletId]
+                    );
+                }
+                // Update the original locked transaction
+                await client.query(
+                    `UPDATE wallet_transactions SET status = 'cancelled', description = description || $1
+                     WHERE reference_id::text = $2 AND type = 'credit' AND status = 'locked'`,
+                    [` — ${policy.label}`, appointmentId]
+                );
+                // Log the refund transaction
+                await client.query(
+                    `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
+                     VALUES ($1, $2, 'refund', 'completed', $3, $4)`,
+                    [walletId, -refundAmount, appointmentId, `Refund: ${policy.label} for appointment ${appointmentId}`]
+                );
+            }
+        } else {
+            // Handle failed external refund internal state (Keep funds locked or mark as problem)
+            await client.query(
+                `UPDATE wallet_transactions 
+                 SET description = description || ' (Auto-refund failed: Manual action required)'
+                 WHERE reference_id::text = $1 AND type = 'credit' AND status = 'locked'`,
+                [appointmentId]
+            );
         }
 
         await client.query('COMMIT');
 
+        // 9. Real-time update via Socket
+        try {
+            const socket = require('../socket/index');
+            socket.emitQueueUpdate({
+                orgId: appt.org_id
+            }, {
+                type: 'status_update',
+                appointmentId,
+                status: 'cancelled',
+                payment_status: finalPaymentStatus
+            });
+        } catch (socketErr) {
+            console.error('[AutoRefund] Socket update failed:', socketErr.message);
+        }
+
         console.log(`[AutoRefund] Processed: appt=${appointmentId}, amount=₹${refundAmount}, policy="${policy.label}"`);
 
         return {
-            refunded: true,
+            refunded: refundSuccessful,
             amount: refundAmount,
             percentage: policy.percentage,
             policy: policy.label,
