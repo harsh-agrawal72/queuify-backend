@@ -1080,7 +1080,7 @@ const triggerEmergencyMode = async (orgId, resourceId, date) => {
     return reassignmentService.triggerEmergencyMode(orgId, resourceId, date);
 };
 
-const verifyOtp = async (appointmentId, otp, orgId) => {
+const verifyOtp = async (appointmentId, otp, orgId, adminRemarks = null) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -1122,10 +1122,10 @@ const verifyOtp = async (appointmentId, otp, orgId) => {
             await walletService.releaseFunds(appointment.org_id, appointment.id, client);
         }
 
-        // 5. Update Status to Completed
+        // 5. Update Status to Completed & Save Remarks
         await client.query(
-            "UPDATE appointments SET status = 'completed', completed_at = NOW() WHERE id = $1",
-            [appointmentId]
+            "UPDATE appointments SET status = 'completed', completed_at = NOW(), admin_remarks = $2 WHERE id = $1",
+            [appointmentId, adminRemarks]
         );
 
         await client.query('COMMIT');

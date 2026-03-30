@@ -62,6 +62,16 @@ const triggerEmergencyMode = {
     })
 };
 
+const verifyOtp = {
+    params: Joi.object().keys({
+        appointmentId: Joi.string().uuid().required()
+    }),
+    body: Joi.object().keys({
+        otp: Joi.string().length(4).required(),
+        remarks: Joi.string().allow('', null).max(1000).optional()
+    })
+};
+
 module.exports = {
     bookAppointment,
     cancelAppointment,
@@ -69,6 +79,7 @@ module.exports = {
     rescheduleAppointment,
     proposeReschedule,
     respondToReschedule,
-    triggerEmergencyMode
+    triggerEmergencyMode,
+    verifyOtp
 };
 

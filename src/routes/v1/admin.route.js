@@ -14,7 +14,7 @@ router.use(checkOrgStatus);
 
 router.get('/overview', adminController.getOverview);
 router.get('/org', adminController.getOrgDetails);
-router.patch('/org', adminController.updateOrgDetails);
+router.patch('/org', validate(adminValidation.updateOrgDetails), adminController.updateOrgDetails);
 router.delete('/org', adminController.deleteOrganization);
 router.get('/today-queue', adminController.getTodayQueue);
 router.get('/analytics', adminController.getAnalytics);

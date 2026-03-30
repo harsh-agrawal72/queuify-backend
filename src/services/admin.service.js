@@ -854,8 +854,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
         const price = parseFloat(priceRes.rows[0]?.price || 0);
         
-        if (status === 'completed' && price > 0) {
-            throw new ApiError(httpStatus.BAD_REQUEST, 'Paid appointments must be verified via OTP to release escrow funds.');
+        // Only require OTP verification if the appointment was actually paid online and funds are in escrow.
+        // Walk-in or offline paid appointments can be directly marked as completed by the admin.
+        if (status === 'completed' && appointment.payment_status === 'paid' && price > 0) {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Online paid appointments must be verified via OTP to release escrow funds.');
         }
 
         const apptCols = await getColumnNames('appointments');

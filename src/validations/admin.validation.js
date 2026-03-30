@@ -64,13 +64,32 @@ const deleteAdmin = {
 const createManualAppointment = {
     body: Joi.object().keys({
         customer_name: Joi.string().required(),
-        customer_phone: Joi.string().required(),
+        customer_phone: Joi.string().optional().allow('', null),
         serviceId: Joi.string().uuid().required(),
         resourceId: Joi.string().uuid().required(),
         slotId: Joi.string().uuid().allow('', null).optional(),
         status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').optional(),
         preferredDate: Joi.date().iso().optional(),
     }),
+};
+
+const updateOrgDetails = {
+    body: Joi.object().keys({
+        name: Joi.string().optional(),
+        contactEmail: Joi.string().email().optional(),
+        phone: Joi.string().optional(),
+        address: Joi.string().optional(),
+        openTime: Joi.string().optional(),
+        closeTime: Joi.string().optional(),
+        queue_mode_default: Joi.string().valid('CENTRAL', 'PER_RESOURCE').optional(),
+        email_notification: Joi.boolean().optional(),
+        new_booking_notification: Joi.boolean().optional(),
+        payout_bank_name: Joi.string().allow('', null).optional(),
+        payout_account_holder: Joi.string().allow('', null).optional(),
+        payout_account_number: Joi.string().allow('', null).optional(),
+        payout_ifsc: Joi.string().allow('', null).optional(),
+        payout_upi_id: Joi.string().allow('', null).optional(),
+    }).min(1),
 };
 
 module.exports = {
@@ -82,4 +101,5 @@ module.exports = {
     inviteAdmin,
     deleteAdmin,
     createManualAppointment,
+    updateOrgDetails,
 };

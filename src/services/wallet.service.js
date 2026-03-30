@@ -176,16 +176,21 @@ const requestPayout = async (orgId, amount, bankDetails) => {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Insufficient available balance for payout');
         }
 
+        // Enforce ₹500 minimum as per user request
+        if (amount < 500) {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Minimum withdrawal amount is ₹500');
+        }
+
         // 1. Deduct from wallet balance
         await client.query(
             'UPDATE wallets SET available_balance = available_balance - $1 WHERE id = $2',
             [amount, wallet.id]
         );
 
-        // 2. Create payout request
+        // 2. Create payout request - Direct transfer simulation: Set status to 'completed'
         const payoutRes = await client.query(
             'INSERT INTO payout_requests (wallet_id, amount, status, bank_details) VALUES ($1, $2, $3, $4) RETURNING id',
-            [wallet.id, amount, 'pending', JSON.stringify(bankDetails)]
+            [wallet.id, amount, 'completed', JSON.stringify(bankDetails)]
         );
 
         // 3. Create debit entry in ledger

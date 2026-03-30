@@ -18,7 +18,9 @@ const payoutValidation = {
         bankDetails: Joi.object().required().keys({
             accountHolder: Joi.string().required(),
             accountNumber: Joi.string().required(),
-            ifsc: Joi.string().required()
+            ifsc: Joi.string().required(),
+            bankName: Joi.string().allow('', null),
+            upiId: Joi.string().allow('', null)
         })
     })
 };
