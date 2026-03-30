@@ -155,10 +155,16 @@ const cancelAppointment = async (appointmentId, userId, reason = null) => {
         }
 
         try {
-            const io = socket.getIO();
-            io.to(`org_${appointment.org_id}`).emit('queue_update', {
-                type: 'cancellation',
+            const socketService = require('../socket/index');
+            socketService.emitQueueUpdate({
+                orgId: appointment.org_id,
+                userId: appointment.user_id,
                 slotId: appointment.slot_id
+            }, {
+                type: 'cancellation',
+                appointmentId: appointment.id,
+                slotId: appointment.slot_id,
+                status: 'cancelled'
             });
         } catch (e) { console.error('Socket emit failed:', e); }
 

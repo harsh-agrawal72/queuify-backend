@@ -59,7 +59,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
 
         // 1. Fetch appointment details
         const apptRes = await client.query(
-            `SELECT a.id, a.org_id, a.price, a.payment_status, a.status, a.payment_id,
+            `SELECT a.id, a.org_id, a.user_id, a.price, a.payment_status, a.status, a.payment_id,
                     s.start_time
              FROM appointments a
              LEFT JOIN slots s ON a.slot_id = s.id
@@ -215,7 +215,8 @@ const processRefund = async (appointmentId, cancelledBy) => {
         try {
             const socket = require('../socket/index');
             socket.emitQueueUpdate({
-                orgId: appt.org_id
+                orgId: appt.org_id,
+                userId: appt.user_id
             }, {
                 type: 'status_update',
                 appointmentId,

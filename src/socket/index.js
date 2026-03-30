@@ -42,10 +42,13 @@ const getIO = () => {
 
 const emitQueueUpdate = (partitionKey, data) => {
     if (!io) return;
-    // Emit to organization, service, or resource room
+    // Emit to organization room (Admin Dashboard/Live Queue)
     io.to(`org_${partitionKey.orgId}`).emit('queue_update', data);
+    
+    // Targeted emits
     if (partitionKey.serviceId) io.to(`service_${partitionKey.serviceId}`).emit('queue_update', data);
     if (partitionKey.resourceId) io.to(`resource_${partitionKey.resourceId}`).emit('queue_update', data);
+    if (partitionKey.userId) io.to(`user_${partitionKey.userId}`).emit('queue_update', data);
 };
 
 module.exports = {
