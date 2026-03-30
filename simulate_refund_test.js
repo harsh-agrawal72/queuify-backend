@@ -1,37 +1,40 @@
 /**
  * backend/simulate_refund_test.js
- * 
- * Run with: node backend/simulate_refund_test.js
- * This script finds a paid appointment and runs the autoRefundService.processRefund logic 
- * without actually cancelling (or it can simulate cancellation).
  */
 const { pool } = require('./src/config/db');
 const autoRefundService = require('./src/services/autoRefund.service');
 
 async function runTest() {
-    console.log('--- STARTING REFUND SIMULATION TEST ---');
+    console.log('--- STARTING 6-HOUR RULE REFUND SIMULATION ---');
     try {
-        // 1. Find a paid appointment to test on (confirmed/pending ones are best)
-        const apptRes = await pool.query(
-            "SELECT id, payment_id, price FROM appointments WHERE payment_status = 'paid' LIMIT 1"
-        );
-        
-        if (apptRes.rows.length === 0) {
-            console.log('No paid appointments found to test with.');
-            process.exit(0);
+        // 1. Find appointments created by force_test_appointment.js
+        const apptResFar = await pool.query("SELECT id FROM appointments WHERE payment_id = 'pay_test_far_future' LIMIT 1");
+        const apptResNear = await pool.query("SELECT id FROM appointments WHERE payment_id = 'pay_test_near_future' LIMIT 1");
+
+        if (apptResFar.rows.length === 0 || apptResNear.rows.length === 0) {
+            console.log('No test appointments found. Please run force_test_appointment.js first.');
+            return;
         }
 
-        const apptId = apptRes.rows[0].id;
-        console.log(`Testing with Appointment ID: ${apptId}, Payment ID: ${apptRes.rows[0].payment_id}`);
+        const farId = apptResFar.rows[0].id;
+        const nearId = apptResNear.rows[0].id;
 
-        // 2. Perform Admin-style refund simulation
-        console.log('\nSimulating ADMIN Cancellation Refund...');
-        const adminResult = await autoRefundService.processRefund(apptId, 'admin');
-        console.log('Admin Simulation Result:', JSON.stringify(adminResult, null, 2));
+        // Test Scenario 1: User cancel > 6 hours away
+        console.log('\n--- Scenario 1: User Cancel > 6 Hours notice ---');
+        const res1 = await autoRefundService.processRefund(farId, 'user');
+        console.log('Result 1:', JSON.stringify(res1, null, 2));
 
-        // 3. Since we just "cancelled" it in step 2 (internally in DB), we might need another one for user test
-        // but for now, let's just see if this even worked once.
-        
+        // Test Scenario 2: User cancel < 6 hours away
+        console.log('\n--- Scenario 2: User Cancel < 6 Hours notice ---');
+        const res2 = await autoRefundService.processRefund(nearId, 'user');
+        console.log('Result 2:', JSON.stringify(res2, null, 2));
+
+        // Test Scenario 3: Admin cancel (always 100%)
+        console.log('\n--- Scenario 3: Admin Cancel (Anytime) ---');
+        const res3 = await autoRefundService.processRefund(nearId, 'admin'); 
+        // Note: nearId is already cancelled now, but processRefund will try anyway.
+        console.log('Result 3:', JSON.stringify(res3, null, 2));
+
     } catch (error) {
         console.error('TEST FAILED:', error);
     } finally {
@@ -39,5 +42,4 @@ async function runTest() {
         console.log('\n--- TEST COMPLETE ---');
     }
 }
-
 runTest();

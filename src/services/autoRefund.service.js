@@ -34,14 +34,19 @@ const getRefundPolicy = (slotStartTime, cancelledBy) => {
     }
 
     const now = new Date();
-    const hoursUntilSlot = (new Date(slotStartTime) - now) / (1000 * 60 * 60);
+    const slotStart = new Date(slotStartTime);
+    
+    // Ensure both are compared in the same numeric space (total milliseconds from epoch)
+    const diffMs = slotStart.getTime() - now.getTime();
+    const hoursUntilSlot = diffMs / (1000 * 60 * 60);
 
-    if (hoursUntilSlot >= 24) {
-        return { percentage: 100, label: 'Full refund (>24h notice)' };
-    } else if (hoursUntilSlot >= 4) {
-        return { percentage: 70, label: '70% refund (4–24h notice)' };
+    console.log(`[RefundPolicy] Calculation: SlotStartTime=${slotStart.toISOString()}, Now=${now.toISOString()}, hoursUntilSlot=${hoursUntilSlot.toFixed(2)}`);
+
+    if (hoursUntilSlot >= 6) {
+        return { percentage: 100, label: 'Full refund (>6h notice)' };
     } else {
-        return { percentage: 0, label: 'No refund (<4h notice)' };
+        // As per user request: >6hr = 100%, otherwise 50%
+        return { percentage: 50, label: 'Partial refund (<6h notice)' };
     }
 };
 
