@@ -142,6 +142,11 @@ const getUserLoyalty = catchAsync(async (req, res) => {
     res.send(loyalty);
 });
 
+const getUserHistory = catchAsync(async (req, res) => {
+    const history = await adminService.getUserHistory(req.user.org_id, req.params.userId);
+    res.send(history);
+});
+
 const retryRefund = catchAsync(async (req, res) => {
     const appointment = await adminService.retryRefund(req.user.org_id, req.params.appointmentId);
     res.json({ success: true, message: 'Refund retried successfully', data: appointment });
