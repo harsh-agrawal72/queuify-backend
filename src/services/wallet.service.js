@@ -201,10 +201,17 @@ const requestPayout = async (orgId, amount, bankDetails) => {
         const razorpayService = require('./razorpay.service');
         let razorpayPayoutId = null;
         try {
+            console.log(`[WalletService] Triggering payout process for ₹${amount}...`);
             const rzpPayout = await razorpayService.processPayout(amount, bankDetails, referenceId, org);
             razorpayPayoutId = rzpPayout.id;
+            if (razorpayPayoutId && razorpayPayoutId.startsWith('pout_mock_')) {
+                 console.log(`[WalletService] (MOCK) Mock payout generated: ${razorpayPayoutId}`);
+            } else {
+                 console.log(`[WalletService] (REAL) RazorpayX Payout ID: ${razorpayPayoutId}`);
+            }
         } catch (apiErr) {
             // Rethrow and the outer catch will rollback the wallet DB
+            console.error(`[WalletService] RazorpayX API Error during payout:`, apiErr.message);
             throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `RazorpayX Payout Failed: ${apiErr.message}`);
         }
 

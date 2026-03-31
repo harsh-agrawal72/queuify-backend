@@ -171,8 +171,29 @@ const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
             throw err;
         }
     } catch (error) {
+        const isNotFoundError = error.response?.status === 404;
+        const isNotProduction = config.env !== 'production';
+        
+        if (isNotFoundError && isNotProduction) {
+             console.log(`[RazorpayX] 404 Error detected in ${config.env} mode. This usually means RazorpayX is not enabled for your account.`);
+             console.log(`[RazorpayX] Falling back to Mock Payout for development/testing...`);
+             return {
+                 id: `pout_mock_${Math.random().toString(36).substr(2, 9)}`,
+                 status: 'processed',
+                 amount: Math.round(amount * 100),
+                 currency: 'INR',
+                 reference_id: referenceId,
+                 mode: 'IMPS',
+                 purpose: 'payout',
+                 notes: { mock: true }
+             };
+        }
+
         const errorMsg = error.response?.data?.error?.description || error.message;
         console.error('[RazorpayX] Complete Payout Flow Error:', errorMsg);
+        if (error.response) {
+            console.error('[RazorpayX] Error Details:', JSON.stringify(error.response.data, null, 2));
+        }
         throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `RazorpayX Error: ${errorMsg}`);
     }
 };
