@@ -171,11 +171,18 @@ const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
             throw err;
         }
     } catch (error) {
-        const isNotFoundError = error.response?.status === 404;
+        console.log(`[RazorpayX] Detection: env=${config.env}`);
+        const errorMsg = error.response?.data?.error?.description || (typeof error.response?.data === 'string' ? error.response.data : null) || error.message;
+        
+        const isNotFoundError = error.response?.status === 404 || 
+                               (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('not found on the server')) ||
+                               (error.message && error.message.includes('404'));
+                               
         const isNotProduction = config.env !== 'production';
         
         if (isNotFoundError && isNotProduction) {
-             console.log(`[RazorpayX] 404 Error detected in ${config.env} mode. This usually means RazorpayX is not enabled for your account.`);
+             console.log(`[RazorpayX] 404/Not Found Error detected in ${config.env} mode. This usually means RazorpayX is not enabled for your account.`);
+             console.log(`[RazorpayX] Error message caught: "${errorMsg}"`);
              console.log(`[RazorpayX] Falling back to Mock Payout for development/testing...`);
              return {
                  id: `pout_mock_${Math.random().toString(36).substr(2, 9)}`,
@@ -189,7 +196,6 @@ const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
              };
         }
 
-        const errorMsg = error.response?.data?.error?.description || error.message;
         console.error('[RazorpayX] Complete Payout Flow Error:', errorMsg);
         if (error.response) {
             console.error('[RazorpayX] Error Details:', JSON.stringify(error.response.data, null, 2));
