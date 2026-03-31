@@ -1070,6 +1070,8 @@ const getLiveQueue = async (orgId, date) => {
             a.id, a.org_id,
             a.user_id,
             a.status,
+            a.payment_status,
+            a.price,
             a.created_at,
             ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
             a.service_id,

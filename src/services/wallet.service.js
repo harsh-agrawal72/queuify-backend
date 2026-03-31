@@ -187,16 +187,20 @@ const requestPayout = async (orgId, amount, bankDetails) => {
             [amount, wallet.id]
         );
 
-        // 2. Create payout request - Direct transfer simulation: Set status to 'completed'
+        // 2. Mock Razorpay Payout (Simulation)
+        const razorpayPayoutId = `pout_${Math.random().toString(36).substring(2, 12)}`;
+
+        // 3. Create payout request - Direct transfer simulation
         const payoutRes = await client.query(
-            'INSERT INTO payout_requests (wallet_id, amount, status, bank_details) VALUES ($1, $2, $3, $4) RETURNING id',
-            [wallet.id, amount, 'completed', JSON.stringify(bankDetails)]
+            `INSERT INTO payout_requests (wallet_id, amount, status, bank_details, razorpay_payout_id, payout_status) 
+             VALUES ($1, $2, $3, $4, $5, 'processed') RETURNING id`,
+            [wallet.id, amount, 'completed', JSON.stringify(bankDetails), razorpayPayoutId]
         );
 
-        // 3. Create debit entry in ledger
+        // 4. Create debit entry in ledger
         await client.query(
             'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
-            [wallet.id, -amount, 'payout', 'completed', payoutRes.rows[0].id, 'Manual Withdrawal Request']
+            [wallet.id, -amount, 'payout', 'completed', payoutRes.rows[0].id, `Bank Withdrawal - ${razorpayPayoutId}`]
         );
 
         await client.query('COMMIT');
@@ -312,11 +316,12 @@ const getTransactionHistory = async (orgId, limit = 50, offset = 0) => {
             u.name as customer_name,
             u.email as customer_email,
             svc.name as service_name,
-            a.payment_id as razorpay_payment_id
+            COALESCE(a.payment_id, pr.razorpay_payout_id) as razorpay_payment_id
          FROM wallet_transactions tx
          LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
          LEFT JOIN users u ON a.user_id = u.id
          LEFT JOIN services svc ON a.service_id = svc.id
+         LEFT JOIN payout_requests pr ON tx.reference_id = pr.id AND tx.type = 'payout'
          WHERE tx.wallet_id = $1 
          ORDER BY tx.created_at DESC 
          LIMIT $2 OFFSET $3`,
