@@ -283,14 +283,21 @@ const getAnalytics = async (orgId, filters = {}) => {
 
     const heatmapQuery = `
         SELECT
-            EXTRACT(DOW FROM sl.start_time AT TIME ZONE 'Asia/Kolkata')::int AS day,
-            EXTRACT(HOUR FROM sl.start_time AT TIME ZONE 'Asia/Kolkata')::int AS hour,
-            COUNT(a.id) AS count
-        FROM appointments a
-        JOIN slots sl ON a.slot_id = sl.id
-        WHERE a.org_id = $1 
-        AND a.created_at >= $2::timestamptz 
-        AND a.created_at <= $3::timestamptz${extraWhere}
+            EXTRACT(DOW FROM event_time AT TIME ZONE 'Asia/Kolkata')::int AS day,
+            EXTRACT(HOUR FROM event_time AT TIME ZONE 'Asia/Kolkata')::int AS hour,
+            COUNT(*) AS count
+        FROM (
+            SELECT 
+                COALESCE(sl.start_time, a.created_at) as event_time
+            FROM appointments a
+            LEFT JOIN slots sl ON a.slot_id = sl.id
+            WHERE a.org_id = $1
+            AND a.status NOT IN ('cancelled', 'no_show')
+            AND (
+                (a.slot_id IS NOT NULL AND sl.start_time >= $2::timestamptz AND sl.start_time <= $3::timestamptz)
+                OR (a.slot_id IS NULL AND a.created_at >= $2::timestamptz AND a.created_at <= $3::timestamptz)
+            )${extraWhere}
+        ) sub
         GROUP BY day, hour
         ORDER BY count DESC
     `;
