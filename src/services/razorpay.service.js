@@ -179,8 +179,9 @@ const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
                                (error.message && error.message.includes('404'));
                                
         const isNotProduction = config.env !== 'production';
+        const isTestKey = config.razorpay.keyId && config.razorpay.keyId.startsWith('rzp_test_');
         
-        if (isNotFoundError && isNotProduction) {
+        if (isNotFoundError && (isNotProduction || isTestKey)) {
              console.log(`[RazorpayX] 404/Not Found Error detected in ${config.env} mode. This usually means RazorpayX is not enabled for your account.`);
              console.log(`[RazorpayX] Error message caught: "${errorMsg}"`);
              console.log(`[RazorpayX] Falling back to Mock Payout for development/testing...`);
