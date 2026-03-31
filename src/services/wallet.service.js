@@ -164,7 +164,7 @@ const refundFunds = async (orgId, appointmentId, amount, isFullRefund = true) =>
 };
 
 /**
- * Handle Payout Request
+ * Handle Payout Request using RazorpayX API
  */
 const requestPayout = async (orgId, amount, bankDetails) => {
     const client = await pool.connect();
@@ -181,23 +181,41 @@ const requestPayout = async (orgId, amount, bankDetails) => {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Minimum withdrawal amount is ₹500');
         }
 
-        // 1. Deduct from wallet balance
+        // Fetch organization details for Contact
+        const orgRes = await client.query('SELECT * FROM organizations WHERE id = $1', [orgId]);
+        if (orgRes.rows.length === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found. Cannot create Razorpay Contact.');
+        }
+        const org = orgRes.rows[0];
+
+        // 1. Deduct from wallet balance early (will rollback if API fails)
         await client.query(
             'UPDATE wallets SET available_balance = available_balance - $1 WHERE id = $2',
             [amount, wallet.id]
         );
 
-        // 2. Mock Razorpay Payout (Simulation)
-        const razorpayPayoutId = `pout_${Math.random().toString(36).substring(2, 12)}`;
+        // 2. Mock or Real Reference ID
+        const referenceId = `pout_req_${wallet.id}_${Date.now()}`;
 
-        // 3. Create payout request - Direct transfer simulation
+        // 3. Call RazorpayX API
+        const razorpayService = require('./razorpay.service');
+        let razorpayPayoutId = null;
+        try {
+            const rzpPayout = await razorpayService.processPayout(amount, bankDetails, referenceId, org);
+            razorpayPayoutId = rzpPayout.id;
+        } catch (apiErr) {
+            // Rethrow and the outer catch will rollback the wallet DB
+            throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `RazorpayX Payout Failed: ${apiErr.message}`);
+        }
+
+        // 4. Create payout request recording the real razorpay_payout_id
         const payoutRes = await client.query(
             `INSERT INTO payout_requests (wallet_id, amount, status, bank_details, razorpay_payout_id, payout_status) 
              VALUES ($1, $2, $3, $4, $5, 'processed') RETURNING id`,
             [wallet.id, amount, 'completed', JSON.stringify(bankDetails), razorpayPayoutId]
         );
 
-        // 4. Create debit entry in ledger
+        // 5. Create debit entry in ledger
         await client.query(
             'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
             [wallet.id, -amount, 'payout', 'completed', payoutRes.rows[0].id, `Bank Withdrawal - ${razorpayPayoutId}`]
@@ -207,6 +225,7 @@ const requestPayout = async (orgId, amount, bankDetails) => {
         return payoutRes.rows[0].id;
     } catch (e) {
         await client.query('ROLLBACK');
+        console.error('[WalletService] Payout request failed:', e.message);
         throw e;
     } finally {
         client.release();

@@ -44,7 +44,8 @@ const updateStatus = catchAsync(async (req, res) => {
     // Or appointmentId implies org.
     // Service updateAppointmentStatus(id, status, orgId) checks orgId.
     // Admin user has org_id.
-    const appointment = await appointmentService.updateAppointmentStatus(req.params.appointmentId, req.body.status, req.user.org_id);
+    const { status, admin_remarks } = req.body;
+    const appointment = await appointmentService.updateAppointmentStatus(req.params.appointmentId, status, req.user.org_id, admin_remarks);
     res.send(appointment);
 });
 

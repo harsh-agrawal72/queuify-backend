@@ -374,7 +374,7 @@ const getQueueUpdateSnapshot = async (serviceId, resourceId = null, slotId = nul
 /**
  * Update appointment status (e.g. completed, serving, no_show)
  */
-const updateAppointmentStatus = async (appointmentId, status, orgId) => {
+const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remarks = null) => {
     const appointment = await appointmentModel.getAppointmentById(appointmentId);
     if (!appointment) {
         throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
@@ -382,6 +382,7 @@ const updateAppointmentStatus = async (appointmentId, status, orgId) => {
     if (appointment.org_id !== orgId) {
         throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
     }
+    const updatedAppointment = await appointmentModel.updateAppointmentStatus(appointmentId, status, admin_remarks);
 
     // If status changed to completed, cancelled, or no_show, trigger auto-advancement
     if (['completed', 'cancelled', 'no_show'].includes(status)) {

@@ -385,7 +385,7 @@ const getAppointmentsByOrgId = async (orgId) => {
     return result.rows;
 };
 
-const updateAppointmentStatus = async (id, status) => {
+const updateAppointmentStatus = async (id, status, admin_remarks = null) => {
     let query = 'UPDATE appointments SET status = $1';
     const params = [status, id];
 
@@ -393,6 +393,10 @@ const updateAppointmentStatus = async (id, status) => {
         query += ', serving_started_at = NOW()';
     } else if (status === 'completed') {
         query += ', completed_at = NOW()';
+        if (admin_remarks) {
+            params.push(admin_remarks);
+            query += `, admin_remarks = $${params.length}`;
+        }
     }
 
     query += ' WHERE id = $2 RETURNING *';

@@ -1,6 +1,7 @@
 // src/services/razorpay.service.js
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const axios = require('axios');
 const config = require('../config/config');
 const ApiError = require('../utils/ApiError');
 const httpStatus = require('../utils/httpStatus');
@@ -96,9 +97,90 @@ const refundPayment = async (paymentId, amount, notes = {}) => {
     }
 };
 
+/**
+ * Process a RazorpayX Test Payout
+ * Dynamically creates a Contact, Fund Account, and executes a Payout.
+ * Uses test keys to simulate a payout to bank_details.
+ */
+const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
+    try {
+        const keyId = config.razorpay.keyId;
+        const keySecret = config.razorpay.keySecret;
+        const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Basic ${auth}`
+        };
+
+        console.log(`[RazorpayX] Starting payout process for Reference ID: ${referenceId}`);
+
+        // 1. Create Contact
+        const contactPayload = {
+            name: orgDetails.name || 'Admin Vendor',
+            email: orgDetails.contact_email || 'admin@queuify.com',
+            contact: '9999999999', // Mock phone
+            type: 'vendor',
+            reference_id: `org_${orgDetails.id}`
+        };
+
+        const contactRes = await axios.post('https://api.razorpay.com/v1/contacts', contactPayload, { headers });
+        const contactId = contactRes.data.id;
+        console.log(`[RazorpayX] Created Contact: ${contactId}`);
+
+        // 2. Create Fund Account
+        const fundAccountPayload = {
+            contact_id: contactId,
+            account_type: 'bank_account',
+            bank_account: {
+                name: bankDetails.accountHolder || bankDetails.name || orgDetails.name,
+                ifsc: bankDetails.ifsc,
+                account_number: bankDetails.accountNumber
+            }
+        };
+
+        const fundAccountRes = await axios.post('https://api.razorpay.com/v1/fund_accounts', fundAccountPayload, { headers });
+        const fundAccountId = fundAccountRes.data.id;
+        console.log(`[RazorpayX] Created Fund Account: ${fundAccountId}`);
+
+        // 3. Create Payout
+        const payoutPayload = {
+            account_number: '2323230046581456', // Razorpay Test Mode Default Payout Account (or omit and rely on standard config)
+            fund_account_id: fundAccountId,
+            amount: Math.round(amount * 100), // In paise
+            currency: 'INR',
+            mode: 'IMPS',
+            purpose: 'payout',
+            queue_if_low_balance: true,
+            reference_id: referenceId,
+            narration: 'Queuify Wallet Withdrawal'
+        };
+
+        try {
+            const payoutRes = await axios.post('https://api.razorpay.com/v1/payouts', payoutPayload, { headers });
+            console.log(`[RazorpayX] Payout Successful: ${payoutRes.data.id}`);
+            return payoutRes.data;
+        } catch (err) {
+            // Razorpay test mode requires account_number. If explicit account_number fails, try omitting it.
+            if (err.response && err.response.data && err.response.data.error) {
+                 console.log(`[RazorpayX] First payout attempt failed: ${err.response.data.error.description}. Retrying without account_number...`);
+                 delete payoutPayload.account_number;
+                 const retryRes = await axios.post('https://api.razorpay.com/v1/payouts', payoutPayload, { headers });
+                 console.log(`[RazorpayX] Payout Successful on retry: ${retryRes.data.id}`);
+                 return retryRes.data;
+            }
+            throw err;
+        }
+    } catch (error) {
+        const errorMsg = error.response?.data?.error?.description || error.message;
+        console.error('[RazorpayX] Complete Payout Flow Error:', errorMsg);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `RazorpayX Error: ${errorMsg}`);
+    }
+};
+
 module.exports = {
     createOrder,
     verifySignature,
     getRazorpayInstance,
-    refundPayment
+    refundPayment,
+    processPayout
 };

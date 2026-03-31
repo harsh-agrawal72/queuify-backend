@@ -23,7 +23,8 @@ const updateStatus = {
         appointmentId: Joi.string().uuid().required()
     }),
     body: Joi.object().keys({
-        status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').required()
+        status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').required(),
+        admin_remarks: Joi.string().allow('', null).optional()
     })
 };
 

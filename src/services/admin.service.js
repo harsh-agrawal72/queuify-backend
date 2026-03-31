@@ -1472,7 +1472,7 @@ const getUserHistory = async (orgId, userId) => {
 
     const res = await query(`
         SELECT 
-            a.id, a.status, a.created_at, a.completed_at, a.preferred_date,
+            a.id, a.status, a.created_at, a.completed_at, a.preferred_date, a.admin_remarks,
             s.name as service_name,
             r.name as resource_name,
             sl.start_time, sl.end_time,
