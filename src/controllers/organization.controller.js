@@ -10,8 +10,10 @@ const createOrganization = catchAsync(async (req, res) => {
 
 const getOrganizations = catchAsync(async (req, res) => {
     const filter = {
+        userId: req.user.id,
         search: req.query.search,
         type: req.query.type,
+        onlyFavorites: req.query.onlyFavorites === 'true',
         status: req.user.role === 'user' ? 'active' : req.query.status,
         userCity: req.query.city,
         userState: req.query.state,
@@ -111,6 +113,32 @@ const requestEmailVerification = catchAsync(async (req, res) => {
     res.status(httpStatus.OK).send({ message: 'Verification email sent' });
 });
 
+const toggleFavorite = catchAsync(async (req, res) => {
+    const { orgId } = req.params;
+    const userId = req.user.id;
+    const { pool } = require('../config/db');
+
+    // Check if already favorited
+    const existing = await pool.query(
+        'SELECT * FROM user_favorites WHERE user_id = $1 AND org_id = $2',
+        [userId, orgId]
+    );
+
+    if (existing.rows.length > 0) {
+        await pool.query(
+            'DELETE FROM user_favorites WHERE user_id = $1 AND org_id = $2',
+            [userId, orgId]
+        );
+        res.json({ success: true, isFavorite: false });
+    } else {
+        await pool.query(
+            'INSERT INTO user_favorites (user_id, org_id) VALUES ($1, $2)',
+            [userId, orgId]
+        );
+        res.json({ success: true, isFavorite: true });
+    }
+});
+
 const verifyEmail = catchAsync(async (req, res) => {
     const { token } = req.query;
     if (!token) {
@@ -129,5 +157,6 @@ module.exports = {
     getOrganizationBySlug,
     getOrgImage,
     requestEmailVerification,
-    verifyEmail
+    verifyEmail,
+    toggleFavorite
 };

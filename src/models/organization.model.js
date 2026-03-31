@@ -40,7 +40,8 @@ const queryOrganizations = async (filter = {}) => {
         logo.image_url as logo_url, 
         logo.id as logo_image_id,
         COALESCE(AVG(r.rating), 0) as avg_rating, 
-        COUNT(r.id) as total_reviews
+        COUNT(r.id) as total_reviews,
+        CASE WHEN fav.user_id IS NOT NULL THEN TRUE ELSE FALSE END as is_favorite
     `;
     let fromClause = `
         FROM organizations o
@@ -51,9 +52,10 @@ const queryOrganizations = async (filter = {}) => {
             FROM organization_images 
             WHERE image_type = 'logo'
         ) logo ON o.id = logo.org_id
+        LEFT JOIN user_favorites fav ON o.id = fav.org_id AND fav.user_id = $1
     `;
     let whereClause = ` WHERE 1=1 `;
-    const params = [];
+    const params = [filter.userId || null]; // Current user ID always at $1
 
     if (filter.status) {
         params.push(filter.status);
@@ -63,6 +65,10 @@ const queryOrganizations = async (filter = {}) => {
     if (filter.type) {
         params.push(filter.type);
         whereClause += ` AND o.type = $${params.length}`;
+    }
+
+    if (filter.onlyFavorites) {
+        whereClause += ` AND fav.user_id IS NOT NULL `;
     }
 
     if (filter.search) {
@@ -114,7 +120,7 @@ const queryOrganizations = async (filter = {}) => {
         ${whereClause}
         GROUP BY 
             o.id, p.id, p.description, p.verified, p.address, p.images, p.city, p.state, p.pincode,
-            logo.image_url, logo.id
+            logo.image_url, logo.id, fav.user_id
         ORDER BY ${orderBy}
     `;
     const result = await pool.query(query, params);

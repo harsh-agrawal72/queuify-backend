@@ -89,7 +89,7 @@ const getOverview = async (orgId) => {
 
 const getOrgDetails = async (orgId) => {
     const res = await query(`
-        SELECT id, name, contact_email, org_code, industry_type, status, 
+        SELECT id, name, slug, contact_email, org_code, industry_type, status, 
                open_time, close_time, phone, address, 
                email_notification, new_booking_notification, queue_mode_default,
                payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id

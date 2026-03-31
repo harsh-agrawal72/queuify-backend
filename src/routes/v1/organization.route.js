@@ -49,6 +49,7 @@ router.route('/:orgId')
     .patch(auth('superadmin'), validate(organizationValidation.updateOrganizationStatus), organizationController.updateOrganizationStatus);
 
 router.get('/slug/:slug', auth('user', 'admin'), organizationController.getOrganizationBySlug);
+router.post('/:orgId/favorite', auth('user'), organizationController.toggleFavorite);
 
 // Public/User routes for booking flow
 router.get('/:orgId/services', auth('user', 'admin'), require('../../controllers/service.controller').getServicesByOrg);
