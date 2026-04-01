@@ -332,12 +332,14 @@ const resolveDispute = async (orgId, appointmentId, decision) => {
 };
 
 /**
- * Get Transaction History for an organization
+ * Get Transaction History for an organization with filtering and pagination
  */
-const getTransactionHistory = async (orgId, limit = 50, offset = 0) => {
+const getTransactionHistory = async (orgId, params = {}) => {
+    const { limit = 10, offset = 0, search = '', type = '', status = '' } = params;
     const wallet = await getWalletByOrgId(orgId);
-    const res = await pool.query(
-        `SELECT 
+    
+    let queryText = `
+        SELECT 
             tx.*,
             u.name as customer_name,
             u.email as customer_email,
@@ -348,13 +350,78 @@ const getTransactionHistory = async (orgId, limit = 50, offset = 0) => {
          LEFT JOIN users u ON a.user_id = u.id
          LEFT JOIN services svc ON a.service_id = svc.id
          LEFT JOIN payout_requests pr ON tx.reference_id = pr.id AND tx.type = 'payout'
-         WHERE tx.wallet_id = $1 
-         ORDER BY tx.created_at DESC 
-         LIMIT $2 OFFSET $3`,
-        [wallet.id, limit, offset]
-    );
+         WHERE tx.wallet_id = $1
+    `;
     
-    const countRes = await pool.query('SELECT COUNT(*) FROM wallet_transactions WHERE wallet_id = $1', [wallet.id]);
+    const queryParams = [wallet.id];
+    let paramCount = 1;
+
+    if (type) {
+        paramCount++;
+        queryText += ` AND tx.type = $${paramCount}`;
+        queryParams.push(type);
+    }
+
+    if (status) {
+        paramCount++;
+        queryText += ` AND tx.status = $${paramCount}`;
+        queryParams.push(status);
+    }
+
+    if (search) {
+        paramCount++;
+        queryText += ` AND (
+            tx.description ILIKE $${paramCount} OR 
+            tx.reference_id::text ILIKE $${paramCount} OR
+            u.name ILIKE $${paramCount} OR
+            u.email ILIKE $${paramCount} OR
+            svc.name ILIKE $${paramCount}
+        )`;
+        queryParams.push(`%${search}%`);
+    }
+
+    queryText += ` ORDER BY tx.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    queryParams.push(limit, offset);
+
+    const res = await pool.query(queryText, queryParams);
+    
+    // Get total count with same filters
+    let countQuery = `
+        SELECT COUNT(*) 
+        FROM wallet_transactions tx
+        LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
+        LEFT JOIN users u ON a.user_id = u.id
+        LEFT JOIN services svc ON a.service_id = svc.id
+        WHERE tx.wallet_id = $1
+    `;
+    const countParams = [wallet.id];
+    let cParamCount = 1;
+
+    if (type) {
+        cParamCount++;
+        countQuery += ` AND tx.type = $${cParamCount}`;
+        countParams.push(type);
+    }
+
+    if (status) {
+        cParamCount++;
+        countQuery += ` AND tx.status = $${cParamCount}`;
+        countParams.push(status);
+    }
+
+    if (search) {
+        cParamCount++;
+        countQuery += ` AND (
+            tx.description ILIKE $${cParamCount} OR 
+            tx.reference_id::text ILIKE $${cParamCount} OR
+            u.name ILIKE $${cParamCount} OR
+            u.email ILIKE $${cParamCount} OR
+            svc.name ILIKE $${cParamCount}
+        )`;
+        countParams.push(`%${search}%`);
+    }
+
+    const countRes = await pool.query(countQuery, countParams);
     
     return {
         transactions: res.rows,

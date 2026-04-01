@@ -24,8 +24,14 @@ const getTransactionHistory = catchAsync(async (req, res) => {
         throw new ApiError(httpStatus.FORBIDDEN, 'Only organization administrators can access transaction history');
     }
 
-    const { limit = 50, offset = 0 } = req.query;
-    const transactions = await walletService.getTransactionHistory(orgId, parseInt(limit), parseInt(offset));
+    const { limit = 10, offset = 0, search, type, status } = req.query;
+    const transactions = await walletService.getTransactionHistory(orgId, {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        search,
+        type,
+        status
+    });
     
     res.status(httpStatus.OK).send(transactions);
 });
