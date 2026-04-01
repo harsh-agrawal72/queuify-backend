@@ -71,6 +71,19 @@ const requestSlotNotification = catchAsync(async (req, res) => {
     res.status(httpStatus.CREATED).send(notification);
 });
 
+const getUserNotifications = catchAsync(async (req, res) => {
+    const userId = req.user.id;
+    const notifications = await slotService.getUserNotifications(userId);
+    res.send(notifications);
+});
+
+const deleteNotification = catchAsync(async (req, res) => {
+    const userId = req.user.id;
+    const { notificationId } = req.params;
+    await slotService.deleteNotification(notificationId, userId);
+    res.status(httpStatus.NO_CONTENT).send();
+});
+
 const bulkCopySlots = catchAsync(async (req, res) => {
     const orgId = req.user.org_id;
     const result = await slotService.bulkCopySlots(orgId, req.body);
@@ -83,5 +96,7 @@ module.exports = {
     deleteSlot,
     getAvailableSlots,
     requestSlotNotification,
+    getUserNotifications,
+    deleteNotification,
     bulkCopySlots
 };

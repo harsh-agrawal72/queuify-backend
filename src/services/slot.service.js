@@ -273,6 +273,40 @@ const requestSlotNotification = async (userId, slotId, desiredTime, serviceId, r
     });
 };
 
+const getUserNotifications = async (userId) => {
+    const slotNotificationModel = require('../models/slot_notification.model');
+    const notifications = await slotNotificationModel.getUserNotifications(userId);
+    const now = new Date();
+
+    // Re-calculate live estimated time for each notification
+    return Promise.all(notifications.map(async (sn) => {
+        let estimatedServiceTime = 30; // Default
+        try {
+            const res = await pool.query('SELECT estimated_service_time FROM services WHERE id = $1', [sn.service_id]);
+            if (res.rows.length > 0) {
+                estimatedServiceTime = res.rows[0].estimated_service_time || 30;
+            }
+        } catch (e) {
+            console.error('[getUserNotifications] Service fetch error:', e.message);
+        }
+
+        const slotStart = new Date(sn.slot_start);
+        const baseTime = slotStart > now ? slotStart : now;
+        const minutesToAdd = sn.booked_count * estimatedServiceTime;
+        const currentEstimatedTime = new Date(baseTime.getTime() + minutesToAdd * 60000);
+
+        return {
+            ...sn,
+            current_estimated_time: currentEstimatedTime.toISOString()
+        };
+    }));
+};
+
+const deleteNotification = async (notificationId, userId) => {
+    const slotNotificationModel = require('../models/slot_notification.model');
+    return slotNotificationModel.deleteNotification(notificationId, userId);
+};
+
 const bulkCopySlots = async (orgId, { sourceDate, targetDates, resourceId, overwrite }) => {
     // 1. Fetch source slots
     const filters = { orgId, date: sourceDate, isActive: true };

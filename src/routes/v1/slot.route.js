@@ -26,6 +26,14 @@ router
     .get(auth('user', 'admin'), checkOrgStatus, slotController.getAvailableSlots);
 
 router
+    .route('/notifications/my')
+    .get(auth('user'), slotController.getUserNotifications);
+
+router
+    .route('/notifications/:notificationId')
+    .delete(auth('user'), slotController.deleteNotification);
+
+router
     .route('/:slotId/notify')
     .post(auth('user'), validate(slotValidation.requestSlotNotification), slotController.requestSlotNotification);
 

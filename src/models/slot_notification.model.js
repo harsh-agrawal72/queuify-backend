@@ -33,6 +33,28 @@ const getPendingNotificationsForSlot = async (slotId, currentEstimatedTime) => {
 };
 
 /**
+ * Get all notification requests for a user
+ */
+const getUserNotifications = async (userId) => {
+    const result = await pool.query(
+        `SELECT sn.*, 
+                s.name as service_name, 
+                o.name as org_name,
+                sl.start_time as slot_start,
+                sl.booked_count,
+                sl.max_capacity
+         FROM slot_notifications sn
+         JOIN services s ON sn.service_id = s.id
+         JOIN organizations o ON s.org_id = o.id
+         JOIN slots sl ON sn.slot_id = sl.id
+         WHERE sn.user_id = $1
+         ORDER BY sn.created_at DESC`,
+        [userId]
+    );
+    return result.rows;
+};
+
+/**
  * Mark notifications as notified
  */
 const markAsNotified = async (notificationIds) => {
@@ -43,8 +65,21 @@ const markAsNotified = async (notificationIds) => {
     );
 };
 
+/**
+ * Delete a notification request
+ */
+const deleteNotification = async (notificationId, userId) => {
+    const result = await pool.query(
+        'DELETE FROM slot_notifications WHERE id = $1 AND user_id = $2 RETURNING *',
+        [notificationId, userId]
+    );
+    return result.rowCount > 0;
+};
+
 module.exports = {
     createNotificationRequest,
     getPendingNotificationsForSlot,
-    markAsNotified
+    getUserNotifications,
+    markAsNotified,
+    deleteNotification
 };
