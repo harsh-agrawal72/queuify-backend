@@ -35,8 +35,19 @@ const inviteAdmin = {
     }),
 };
 
+const sendBroadcast = {
+    body: Joi.object().keys({
+        target: Joi.string().required().valid('all', 'admins', 'users'),
+        title: Joi.string().required().max(100),
+        message: Joi.string().required().max(500),
+        type: Joi.string().required().valid('info', 'success', 'warning', 'emergency'),
+        link: Joi.string().optional().allow('', null),
+    }),
+};
+
 module.exports = {
     createOrganization,
     updateOrganization,
     inviteAdmin,
+    sendBroadcast,
 };

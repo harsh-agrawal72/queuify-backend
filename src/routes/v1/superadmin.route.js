@@ -49,4 +49,11 @@ router.get('/system', superadminController.getSystemHealth);
 router.get('/activity', superadminController.getRecentActivity);
 router.get('/activity/audit-trail', superadminController.getPlatformAuditTrail);
 
+router.route('/broadcast')
+    .get(superadminController.getBroadcastHistory)
+    .post(validate(superadminValidation.sendBroadcast), superadminController.sendBroadcast);
+
+router.get('/payouts', superadminController.getPayoutRequests);
+router.patch('/payouts/:payoutId/status', superadminController.updatePayoutStatus);
+
 module.exports = router;

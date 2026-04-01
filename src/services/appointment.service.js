@@ -896,50 +896,20 @@ const checkAndNotifySlotWaiters = async (slotId) => {
 
             for (const req of pending) {
                 try {
-                    let autoBooked = false;
-                    let autoBookError = null;
-
-                    // A. Auto-Booking Logic
-                    if (req.auto_book && req.service_id) {
-                        try {
-                            console.log(`[Auto-Book] Attempting auto-booking for user ${req.user_id} on slot ${slotId}`);
-                            await bookAppointment({
-                                userId: req.user_id,
-                                slotId: req.slot_id,
-                                serviceId: req.service_id,
-                                resourceId: req.resource_id,
-                                orgId: slot.org_id,
-                                customer_name: req.user_name,
-                                customer_phone: req.customer_phone || (await userModel.getUserById(req.user_id))?.phone,
-                                bypassDuplicate: false
-                            });
-                            autoBooked = true;
-                        } catch (bookErr) {
-                            console.error(`[Auto-Book] Failed for user ${req.user_id}:`, bookErr.message);
-                            autoBookError = bookErr.message === 'DUPLICATE_BOOKING_WARNING' 
-                                ? 'You already have an active booking for this slot'
-                                : (bookErr.message || 'Slot became full or service unavailable');
-                        }
-                    }
-
                     // B. Internal Notification
                     const userNotifyEnabled = req.notification_enabled !== false;
                     const orgNotifyEnabled = req.org_notify_enabled !== false;
 
                     if (userNotifyEnabled && orgNotifyEnabled) {
-                        const notifyTitle = autoBooked ? 'Appointment Auto-Booked!' : (autoBookError ? 'Auto-Booking Failed' : 'Slot Time Reached!');
-                        const notifyMessage = autoBooked 
-                            ? `Good news! Your appointment for ${req.service_name || serviceData?.service_name} was automatically booked for you as the time reached ${timeStr}.`
-                            : (autoBookError 
-                                ? `We tried to auto-book your appointment for ${req.service_name || serviceData?.service_name}, but it failed: ${autoBookError}. Please book manually now!`
-                                : `The estimated time for ${req.service_name || serviceData?.service_name || 'your slot'} has reached ${timeStr}. Book now!`);
+                        const notifyTitle = 'Slot Time Reached!';
+                        const notifyMessage = `The estimated time for ${req.service_name || serviceData?.service_name || 'your slot'} has reached ${timeStr}. Book now!`;
 
                         await notificationService.sendNotification(
                             req.user_id,
                             notifyTitle,
                             notifyMessage,
                             'slot_update',
-                            autoBooked ? '/appointments' : '/dashboard'
+                            '/dashboard'
                         );
                     }
                     
@@ -950,13 +920,11 @@ const checkAndNotifySlotWaiters = async (slotId) => {
 
                     if (req.user_email && userEmailEnabled) {
                         try {
-                            const emailSubject = autoBooked ? 'Appointment Auto-Booked Successfully' : 'Your Slot Time Reached';
-                            const emailText = autoBooked
-                                ? `Your appointment for ${req.service_name || serviceData?.service_name} at ${req.org_name || serviceData?.org_name} has been automatically booked for you.\n\nEstimated Time: ${timeStr}\n\nYou can view your booking in your dashboard.`
-                                : `The estimated time for your desired slot has reached ${timeStr}.\n\n` + (autoBookError ? `Auto-booking failed: ${autoBookError}. ` : '') + (req.service_name ? `Service: ${req.service_name}. ` : '') + `Please visit the dashboard to secure your spot if you haven't already.`;
+                            const emailSubject = 'Your Slot Time Reached';
+                            const emailText = `The estimated time for your desired slot has reached ${timeStr}.\n\n` + (req.service_name ? `Service: ${req.service_name}. ` : '') + `Please visit the dashboard to secure your spot if you haven't already.`;
 
                             await emailService.sendGenericEmail(req.user_email, emailSubject, emailText);
-                        } catch (e) { console.error('[Auto-Book-Email] Error:', e.message); }
+                        } catch (e) { console.error('[Slot-Notification-Email] Error:', e.message); }
                     }
                 } catch (err) {
                     console.error(`[checkAndNotifySlotWaiters] Error processing req ${req.id}:`, err.message);

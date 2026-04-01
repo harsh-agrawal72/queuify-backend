@@ -18,6 +18,10 @@ router
     .delete(auth('admin'), checkOrgStatus, slotController.deleteSlot);
 
 router
+    .route('/bulk-copy')
+    .post(auth('admin'), checkOrgStatus, validate(slotValidation.bulkCopySlots), slotController.bulkCopySlots);
+
+router
     .route('/available/:orgId')
     .get(auth('user', 'admin'), checkOrgStatus, slotController.getAvailableSlots);
 

@@ -4,13 +4,13 @@ const { pool } = require('../config/db');
  * Create a slot notification request
  */
 const createNotificationRequest = async (data) => {
-    const { userId, slotId, desiredTime, serviceId, resourceId, autoBook = false, customerPhone = null } = data;
+    const { userId, slotId, desiredTime, serviceId, resourceId, customerPhone = null } = data;
     const result = await pool.query(
         `INSERT INTO slot_notifications 
-         (user_id, slot_id, desired_time, service_id, resource_id, auto_book, customer_phone) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) 
+         (user_id, slot_id, desired_time, service_id, resource_id, customer_phone) 
+         VALUES ($1, $2, $3, $4, $5, $6) 
          RETURNING *`,
-        [userId, slotId, desiredTime, serviceId, resourceId, autoBook, customerPhone]
+        [userId, slotId, desiredTime, serviceId, resourceId, customerPhone]
     );
     return result.rows[0];
 };

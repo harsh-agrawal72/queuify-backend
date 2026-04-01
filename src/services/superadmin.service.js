@@ -123,14 +123,18 @@ const getOrganizations = async () => {
     return res.rows;
 };
 
-const verifyOrganization = async (orgId) => {
+const verifyOrganization = async (orgId, superadminId) => {
     // Ensure profile exists
     await pool.query('INSERT INTO organization_profiles (org_id, verified) VALUES ($1, true) ON CONFLICT (org_id) DO UPDATE SET verified = true, updated_at = NOW()', [orgId]);
+    const org = await pool.query('SELECT name FROM organizations WHERE id = $1', [orgId]);
+    activityService.logActivity(superadminId, 'ORG_VERIFIED', { orgId, name: org.rows[0]?.name }, '::1');
     return { message: 'Organization verified successfully' };
 };
 
-const unverifyOrganization = async (orgId) => {
+const unverifyOrganization = async (orgId, superadminId) => {
     await pool.query('UPDATE organization_profiles SET verified = false, updated_at = NOW() WHERE org_id = $1', [orgId]);
+    const org = await pool.query('SELECT name FROM organizations WHERE id = $1', [orgId]);
+    activityService.logActivity(superadminId, 'ORG_UNVERIFIED', { orgId, name: org.rows[0]?.name }, '::1');
     return { message: 'Organization verification removed' };
 };
 
@@ -257,18 +261,30 @@ const impersonateOrgAdmin = async (orgId, superadminId) => {
     // Update last login for the impersonated user so they show active in lists
     await userModel.updateUserLastLogin(user.id);
 
+    // 3. Log the impersonation event in official audit trail
+    // We do this before token generation
+    await activityService.logActivity(superadminId, 'SUPERADMIN_IMPERSONATE', { 
+        targetUserId: user.id, 
+        targetOrgId: orgId,
+        targetEmail: user.email
+    }, '::1');
+
     // Generate token with impersonation flag
     const tokens = await tokenService.generateAuthTokens(user, { impersonated: true, original_superadmin_id: superadminId });
 
     return { user, tokens };
 };
 
-const suspendOrganization = async (orgId) => {
-    return updateOrganization(orgId, { status: 'disabled' });
+const suspendOrganization = async (orgId, superadminId) => {
+    const org = await updateOrganization(orgId, { status: 'disabled' });
+    activityService.logActivity(superadminId, 'ORG_SUSPENDED', { orgId, name: org.name }, '::1');
+    return org;
 };
 
-const activateOrganization = async (orgId) => {
-    return updateOrganization(orgId, { status: 'active' });
+const activateOrganization = async (orgId, superadminId) => {
+    const org = await updateOrganization(orgId, { status: 'active' });
+    activityService.logActivity(superadminId, 'ORG_ACTIVATED', { orgId, name: org.name }, '::1');
+    return org;
 };
 
 const permanentDeleteOrganization = async (orgId) => {
@@ -876,37 +892,57 @@ const getPlatformAuditTrail = async (filters, options) => {
     const offset = (page - 1) * limit;
 
     let query = `
-        SELECT al.*, u.name as user_name, u.email as user_email
-        FROM activity_logs al
-        LEFT JOIN users u ON al.user_id = u.id
+        WITH unified_logs AS (
+            SELECT 
+                al.id, al.user_id as actor_id, al.action, al.details, al.ip_address, al.created_at,
+                (al.details->>'orgId')::text as affected_org_id
+            FROM activity_logs al
+            
+            UNION ALL
+            
+            SELECT 
+                aal.id, aal.performed_by as actor_id, aal.action, aal.details, 'Internal' as ip_address, aal.created_at,
+                (SELECT u.org_id::text FROM users u WHERE u.id = aal.admin_id) as affected_org_id
+            FROM admin_activity_logs aal
+        )
+        SELECT 
+            ul.*, 
+            u.name as user_name, u.email as user_email
+        FROM unified_logs ul
+        LEFT JOIN users u ON ul.actor_id = u.id
         WHERE 1=1
     `;
     const params = [];
     let paramIndex = 1;
 
     if (action) {
-        query += ` AND al.action = $${paramIndex}`;
-        params.push(action);
+        query += ` AND ul.action ILIKE $${paramIndex}`;
+        params.push(`%${action}%`);
         paramIndex++;
     }
 
-    // Since details is JSONB, we can filter by orgId if stored there
     if (orgId) {
-        query += ` AND al.details->>'orgId' = $${paramIndex}`;
+        query += ` AND ul.affected_org_id = $${paramIndex}`;
         params.push(orgId);
         paramIndex++;
     }
 
-    query += ` ORDER BY al.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex+1}`;
+    query += ` ORDER BY ul.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex+1}`;
     params.push(limit, offset);
 
     const logs = await pool.query(query, params);
     
-    const countRes = await pool.query('SELECT COUNT(*) FROM activity_logs');
+    // Total count for combined tables
+    const countRes = await pool.query(`
+        SELECT (
+            (SELECT COUNT(*) FROM activity_logs) + 
+            (SELECT COUNT(*) FROM admin_activity_logs)
+        ) as total
+    `);
 
     return {
         logs: logs.rows,
-        total: parseInt(countRes.rows[0].count)
+        total: parseInt(countRes.rows[0].total)
     };
 };
 
@@ -992,6 +1028,74 @@ const resolvePlatformDispute = async (appointmentId, decision, superadminId) => 
     return { success: true, message: `Dispute resolved with decision: ${decision}` };
 };
 
+const getPayoutRequests = async (filters = {}) => {
+    const { status } = filters;
+    let query = `
+        SELECT 
+            pr.*, 
+            o.name as org_name, 
+            o.slug as org_slug,
+            w.balance as current_wallet_balance
+        FROM payout_requests pr
+        JOIN wallets w ON pr.wallet_id = w.id
+        JOIN organizations o ON w.org_id = o.id
+    `;
+    const params = [];
+    if (status) {
+        query += ' WHERE pr.status = $1';
+        params.push(status);
+    }
+    query += ' ORDER BY pr.created_at DESC';
+    
+    const res = await pool.query(query, params);
+    return res.rows;
+};
+
+const sendBroadcast = async (broadcastBody, superadminId) => {
+    const { target, title, message, type, link } = broadcastBody;
+    
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // 1. Log the broadcast record (History)
+        const logRes = await client.query(
+            'INSERT INTO broadcast_logs (sender_id, target, title, message, type, link) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [superadminId, target, title, message, type, link]
+        );
+        
+        // 2. Batch insert into notifications for all matching users
+        let roleFilter = "role IN ('admin', 'user')"; // Default for 'all'
+        if (target === 'admins') roleFilter = "role = 'admin'";
+        else if (target === 'users') roleFilter = "role = 'user'";
+        
+        const insertQuery = `
+            INSERT INTO notifications (user_id, title, message, type, link)
+            SELECT id, $1, $2, $3, $4 FROM users
+            WHERE ${roleFilter} AND notification_enabled = true
+        `;
+        
+        await client.query(insertQuery, [title, message, type, link]);
+        
+        await client.query('COMMIT');
+        
+        // 3. Log Activity
+        await activityService.logActivity(superadminId, 'GLOBAL_BROADCAST', { target, title }, '::1');
+        
+        return logRes.rows[0];
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
+const getBroadcastHistory = async () => {
+    const res = await pool.query('SELECT b.*, u.name as sender_name FROM broadcast_logs b LEFT JOIN users u ON b.sender_id = u.id ORDER BY b.created_at DESC LIMIT 50');
+    return res.rows;
+};
+
 module.exports = {
     getRevenueAnalytics,
     getOrgHealthScores,
@@ -1022,5 +1126,8 @@ module.exports = {
     getPlatformFinances,
     getActiveDisputes,
     resolvePlatformDispute,
+    sendBroadcast,
+    getBroadcastHistory,
+    getPayoutRequests,
     getRecentActivity: activityService.getRecentActivity
 };

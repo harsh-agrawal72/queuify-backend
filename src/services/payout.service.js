@@ -77,42 +77,24 @@ const withdrawToBank = async (orgId, amount) => {
         // 2. Create local payout request entry
         const payoutReqRes = await client.query(
             'INSERT INTO payout_requests (wallet_id, amount, status, bank_details) VALUES ($1, $2, $3, $4) RETURNING id',
-            [wallet.id, amount, 'processing', wallet.bank_details]
+            [wallet.id, amount, 'pending', wallet.bank_details]
         );
         const payoutRequestId = payoutReqRes.rows[0].id;
 
-        // 3. Deduct from available balance immediately to prevent double-spend
+        // 3. Deduct from available balance immediately to reserve the funds
         await client.query(
             'UPDATE wallets SET balance = balance - $1 WHERE id = $2',
             [amount, wallet.id]
         );
 
-        // 4. Trigger External Payout (API Call)
-        // Note: In real scenarios, this might be async via webhooks, but here we simulate success.
-        const rzpPayout = await razorpayMock.payouts.create({
-            account_number: '7878780080316316', // Platform merchant account
-            fund_account_id: wallet.fund_account_id,
-            amount: Math.round(amount * 100), // convert to paise
-            currency: 'INR',
-            mode: 'IMPS',
-            purpose: 'payout',
-            reference_id: `REQ_${payoutRequestId}`
-        });
-
-        // 5. Update local record with Razorpay ID
-        await client.query(
-            "UPDATE payout_requests SET razorpay_payout_id = $1, payout_status = 'processed', status = 'completed' WHERE id = $2",
-            [rzpPayout.id, payoutRequestId]
-        );
-
-        // 6. Finalize Ledger Entry
+        // 4. Finalize Ledger Entry (as pending)
         await client.query(
             'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
-            [wallet.id, -amount, 'payout', 'completed', payoutRequestId, `Bank Withdrawal: ${rzpPayout.id}`]
+            [wallet.id, -amount, 'payout', 'pending', payoutRequestId, `Payout Request Initiated: ${payoutRequestId.slice(0, 8)}`]
         );
 
         await client.query('COMMIT');
-        return { success: true, payoutId: rzpPayout.id, amount };
+        return { success: true, payoutId: payoutRequestId, amount, status: 'pending' };
 
     } catch (e) {
         await client.query('ROLLBACK');
@@ -123,7 +105,93 @@ const withdrawToBank = async (orgId, amount) => {
     }
 };
 
+/**
+ * Complete a manual payout (Superadmin Only)
+ */
+const completeManualPayout = async (payoutId, superadminId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Get payout request
+        const res = await client.query('SELECT * FROM payout_requests WHERE id = $1 FOR UPDATE', [payoutId]);
+        if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Payout request not found');
+        const request = res.rows[0];
+
+        if (request.status !== 'pending') {
+            throw new ApiError(httpStatus.BAD_REQUEST, `Cannot complete payout in ${request.status} status`);
+        }
+
+        // 2. Update payout request status
+        await client.query(
+            "UPDATE payout_requests SET status = 'completed', processed_at = NOW() WHERE id = $1",
+            [payoutId]
+        );
+
+        // 3. Update wallet transaction status
+        await client.query(
+            "UPDATE wallet_transactions SET status = 'completed', description = description || ' (Completed by Superadmin)' WHERE reference_id = $1 AND type = 'payout'",
+            [payoutId]
+        );
+
+        await client.query('COMMIT');
+        return { success: true, message: 'Payout marked as completed' };
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
+/**
+ * Reject a manual payout and refund balance (Superadmin Only)
+ */
+const rejectManualPayout = async (payoutId, reason, superadminId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Get payout request
+        const res = await client.query('SELECT * FROM payout_requests WHERE id = $1 FOR UPDATE', [payoutId]);
+        if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Payout request not found');
+        const request = res.rows[0];
+
+        if (request.status !== 'pending') {
+            throw new ApiError(httpStatus.BAD_REQUEST, `Cannot reject payout in ${request.status} status`);
+        }
+
+        // 2. Refund balance back to wallet
+        await client.query(
+            'UPDATE wallets SET balance = balance + $1 WHERE id = $2',
+            [request.amount, request.wallet_id]
+        );
+
+        // 3. Update payout request status
+        await client.query(
+            "UPDATE payout_requests SET status = 'rejected', processed_at = NOW() WHERE id = $1",
+            [payoutId]
+        );
+
+        // 4. Update wallet transaction status
+        await client.query(
+            "UPDATE wallet_transactions SET status = 'failed', description = 'Payout Rejected: ' || $1 WHERE reference_id = $2 AND type = 'payout'",
+            [reason || 'Rejected by superadmin', payoutId]
+        );
+
+        await client.query('COMMIT');
+        return { success: true, message: 'Payout rejected and funds returned' };
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     linkBankAccount,
-    withdrawToBank
+    withdrawToBank,
+    completeManualPayout,
+    rejectManualPayout
 };

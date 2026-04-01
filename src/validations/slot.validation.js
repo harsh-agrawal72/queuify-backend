@@ -34,13 +34,22 @@ const requestSlotNotification = {
         desiredTime: Joi.date().iso().required(),
         serviceId: Joi.string().uuid().required(),
         resourceId: Joi.string().uuid().required(),
-        autoBook: Joi.boolean().default(false),
         customerPhone: Joi.string().allow(null, '')
+    })
+};
+
+const bulkCopySlots = {
+    body: Joi.object().keys({
+        sourceDate: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+        targetDates: Joi.array().items(Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/)).min(1).required(),
+        resourceId: Joi.string().uuid().allow(null, ''),
+        overwrite: Joi.boolean().default(false)
     })
 };
 
 module.exports = {
     createSlot,
     getSlots,
-    requestSlotNotification
+    requestSlotNotification,
+    bulkCopySlots
 };

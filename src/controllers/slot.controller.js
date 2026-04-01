@@ -58,7 +58,7 @@ const deleteSlot = catchAsync(async (req, res) => {
 
 const requestSlotNotification = catchAsync(async (req, res) => {
     const { slotId } = req.params;
-    const { desiredTime, serviceId, resourceId, autoBook, customerPhone } = req.body;
+    const { desiredTime, serviceId, resourceId, customerPhone } = req.body;
     const userId = req.user.id;
     const notification = await slotService.requestSlotNotification(
         userId, 
@@ -66,10 +66,15 @@ const requestSlotNotification = catchAsync(async (req, res) => {
         desiredTime, 
         serviceId, 
         resourceId, 
-        autoBook, 
         customerPhone
     );
     res.status(httpStatus.CREATED).send(notification);
+});
+
+const bulkCopySlots = catchAsync(async (req, res) => {
+    const orgId = req.user.org_id;
+    const result = await slotService.bulkCopySlots(orgId, req.body);
+    res.status(httpStatus.OK).send(result);
 });
 
 module.exports = {
@@ -77,5 +82,6 @@ module.exports = {
     getSlots,
     deleteSlot,
     getAvailableSlots,
-    requestSlotNotification
+    requestSlotNotification,
+    bulkCopySlots
 };

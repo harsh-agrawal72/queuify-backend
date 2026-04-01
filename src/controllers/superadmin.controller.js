@@ -111,23 +111,23 @@ const impersonateAdmin = catchAsync(async (req, res) => {
 
 const suspendOrganization = catchAsync(async (req, res) => {
     console.log('[Superadmin Suspend] Request received', { orgId: req.params.orgId });
-    const org = await superadminService.suspendOrganization(req.params.orgId);
+    const org = await superadminService.suspendOrganization(req.params.orgId, req.user.id);
     res.send(org);
 });
 
 const activateOrganization = catchAsync(async (req, res) => {
     console.log('[Superadmin Activate] Request received', { orgId: req.params.orgId });
-    const org = await superadminService.activateOrganization(req.params.orgId);
+    const org = await superadminService.activateOrganization(req.params.orgId, req.user.id);
     res.send(org);
 });
 
 const verifyOrganization = catchAsync(async (req, res) => {
-    const result = await superadminService.verifyOrganization(req.params.orgId);
+    const result = await superadminService.verifyOrganization(req.params.orgId, req.user.id);
     res.send(result);
 });
 
 const unverifyOrganization = catchAsync(async (req, res) => {
-    const result = await superadminService.unverifyOrganization(req.params.orgId);
+    const result = await superadminService.unverifyOrganization(req.params.orgId, req.user.id);
     res.send(result);
 });
 
@@ -164,6 +164,40 @@ const getPlatformAuditTrail = catchAsync(async (req, res) => {
     res.send(data);
 });
 
+const sendBroadcast = catchAsync(async (req, res) => {
+    const result = await superadminService.sendBroadcast(req.body, req.user.id);
+    res.status(httpStatus.CREATED).send(result);
+});
+
+const getBroadcastHistory = catchAsync(async (req, res) => {
+    const history = await superadminService.getBroadcastHistory();
+    res.send(history);
+});
+
+const getPayoutRequests = catchAsync(async (req, res) => {
+    const filters = { status: req.query.status };
+    const requests = await superadminService.getPayoutRequests(filters);
+    res.send(requests);
+});
+
+const updatePayoutStatus = catchAsync(async (req, res) => {
+    const { status, reason } = req.body;
+    const { payoutId } = req.params;
+    
+    let result;
+    const payoutService = require('../services/payout.service');
+    
+    if (status === 'completed') {
+        result = await payoutService.completeManualPayout(payoutId, req.user.id);
+    } else if (status === 'rejected') {
+        result = await payoutService.rejectManualPayout(payoutId, reason, req.user.id);
+    } else {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid status update');
+    }
+    
+    res.send(result);
+});
+
 module.exports = {
     getOverview,
     getGlobalMonitor,
@@ -188,5 +222,9 @@ module.exports = {
     unverifyOrganization,
     getRevenueAnalytics,
     getOrgHealthScores,
-    getPlatformAuditTrail
+    getPlatformAuditTrail,
+    sendBroadcast,
+    getBroadcastHistory,
+    getPayoutRequests,
+    updatePayoutStatus
 };

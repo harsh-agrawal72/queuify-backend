@@ -261,7 +261,7 @@ const updateSlot = async (slotId, orgId, updateBody) => {
     }
 };
 
-const requestSlotNotification = async (userId, slotId, desiredTime, serviceId, resourceId, autoBook, customerPhone) => {
+const requestSlotNotification = async (userId, slotId, desiredTime, serviceId, resourceId, customerPhone) => {
     const slotNotificationModel = require('../models/slot_notification.model');
     return slotNotificationModel.createNotificationRequest({
         userId,
@@ -269,9 +269,91 @@ const requestSlotNotification = async (userId, slotId, desiredTime, serviceId, r
         desiredTime,
         serviceId,
         resourceId,
-        autoBook,
         customerPhone
     });
+};
+
+const bulkCopySlots = async (orgId, { sourceDate, targetDates, resourceId, overwrite }) => {
+    // 1. Fetch source slots
+    const filters = { orgId, date: sourceDate, isActive: true };
+    if (resourceId) filters.resourceId = resourceId;
+    
+    // We need to fetch slots with details to get resource_id if we didn't filter by it
+    const sourceSlots = await slotModel.getSlotsWithDetails(filters);
+    
+    if (!sourceSlots || sourceSlots.length === 0) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'No active slots found on the source date to copy.');
+    }
+
+    const client = await pool.connect();
+    let createdCount = 0;
+    let skippedCount = 0;
+
+    try {
+        await client.query('BEGIN');
+
+        for (const targetDateStr of targetDates) {
+            // A. Handle Overwrite (Soft Delete)
+            if (overwrite) {
+                let deleteQuery = 'UPDATE slots SET is_active = FALSE WHERE org_id = $1 AND DATE(start_time) = $2';
+                let deleteParams = [orgId, targetDateStr];
+                
+                if (resourceId) {
+                    deleteQuery += ' AND resource_id = $3';
+                    deleteParams.push(resourceId);
+                }
+                
+                await client.query(deleteQuery, deleteParams);
+            }
+
+            // B. Create Slots
+            for (const slot of sourceSlots) {
+                // Calculate new start/end times based on target date
+                const sStart = new Date(slot.start_time);
+                const sEnd = new Date(slot.end_time);
+                
+                // Helper to create date relative to targetDateStr
+                const createTargetTime = (originalTime) => {
+                    const target = new Date(targetDateStr);
+                    target.setHours(originalTime.getHours(), originalTime.getMinutes(), originalTime.getSeconds(), 0);
+                    return target;
+                };
+
+                const newStart = createTargetTime(sStart);
+                const newEnd = createTargetTime(sEnd);
+
+                // Check for overlap on the target date
+                const isOverlap = await slotModel.hasOverlap(orgId, newStart.toISOString(), newEnd.toISOString(), slot.resource_id);
+                
+                if (isOverlap) {
+                    skippedCount++;
+                    continue;
+                }
+
+                await client.query(
+                    `INSERT INTO slots (org_id, start_time, end_time, max_capacity, resource_id) 
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [orgId, newStart.toISOString(), newEnd.toISOString(), slot.max_capacity, slot.resource_id]
+                );
+                
+                createdCount++;
+            }
+        }
+
+        await client.query('COMMIT');
+
+        return { 
+            success: true, 
+            message: `Successfully created ${createdCount} slots. ${skippedCount > 0 ? `Skipped ${skippedCount} due to overlaps.` : ''}` 
+        };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[bulkCopySlots] Error:', error.message);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Bulk copy failed: ' + error.message);
+    } finally {
+        client.release();
+    }
 };
 
 module.exports = {
@@ -282,5 +364,6 @@ module.exports = {
     deleteSlot,
     updateSlot,
     getAvailableSlots,
-    requestSlotNotification
+    requestSlotNotification,
+    bulkCopySlots
 };
