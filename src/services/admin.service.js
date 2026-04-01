@@ -992,56 +992,62 @@ const deleteAppointment = async (orgId, appointmentId, reason = null) => {
     try {
         await client.query('BEGIN');
 
+        // 1. Get current appointment state
         const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
-        let finalizedAppt;
 
+        // 2. If NOT already cancelled, perform cancellation logic (slot release + refund)
         if (appointment.status !== 'cancelled') {
-            // SOFT DELETE
+            // Decrease slot's booked_count if confirmed/pending
             if (appointment.status === 'confirmed' || appointment.status === 'pending') {
-                await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+                if (appointment.slot_id) {
+                    await client.query('UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1', [appointment.slot_id]);
+                }
             }
 
-            const res = await client.query(
-                `UPDATE appointments 
-                 SET status = 'cancelled', cancelled_by = 'admin', cancellation_reason = $3, deleted_at = NOW() 
-                 WHERE id = $1 AND org_id = $2 
-                 RETURNING *`,
-                [appointmentId, orgId, reason]
-            );
-            finalizedAppt = res.rows[0];
-
-            // Refund logic
+            // Trigger refund logic for online paid appointments
             const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
             const price = parseFloat(priceRes.rows[0]?.price || 0);
 
             if (appointment.payment_status === 'paid' && price > 0) {
-                // Use autoRefundService to handle both Razorpay and Wallet
-                autoRefundService.processRefund(appointmentId, 'admin')
-                    .then(result => console.log(`[Admin-Delete-Refund] Success:`, result))
-                    .catch(err => console.error(`[Admin-Delete-Refund] FAILED:`, err.message));
+                console.log(`[Admin-DirectDelete-Refund] Triggering auto-refund for Appointment ${appointmentId}`);
+                autoRefundService.processRefund(appointmentId, 'admin').catch(err => console.error(`[Admin-DirectDelete-Refund] Refund FAILED:`, err.message));
             }
-        } else {
-            // PERMANENT HIDE
-            const res = await client.query(
-                `UPDATE appointments SET is_deleted_permanent = TRUE, updated_at = NOW() WHERE id = $1 AND org_id = $2 RETURNING *`,
-                [appointmentId, orgId]
-            );
-            finalizedAppt = res.rows[0];
         }
+
+        // 3. Mark as BOTH cancelled and PERMANENTLY DELETED in one step
+        const res = await client.query(
+            `UPDATE appointments 
+             SET status = 'cancelled', 
+                 cancelled_by = 'admin', 
+                 cancellation_reason = COALESCE($3, cancellation_reason), 
+                 deleted_at = COALESCE(deleted_at, NOW()),
+                 is_deleted_permanent = TRUE,
+                 updated_at = NOW()
+             WHERE id = $1 AND org_id = $2 
+             RETURNING *`,
+            [appointmentId, orgId, reason]
+        );
+        const finalizedAppt = res.rows[0];
 
         await client.query('COMMIT');
 
-        // Post-commit socket
+        // 4. Post-commit: Fill slot from waitlist if needed
+        if (appointment.status !== 'cancelled' && appointment.slot_id) {
+            const reassignmentService = require('./reassignment.service');
+            reassignmentService.fillSlotFromWaitlist(appointment.slot_id).catch(e => console.error('[Admin-DirectDelete-WaitlistFill] Failed silently:', e.message));
+        }
+
+        // 5. Post-commit socket emit
         try {
             socket.emitQueueUpdate({
                 orgId,
                 appointmentId,
                 userId: appointment.user_id
             }, {
-                type: finalizedAppt.is_deleted_permanent ? 'permanent_delete' : 'deletion',
+                type: 'permanent_delete',
                 appointmentId,
                 status: 'cancelled',
                 cancelled_by: 'admin'
