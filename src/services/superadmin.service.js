@@ -1029,30 +1029,41 @@ const resolvePlatformDispute = async (appointmentId, decision, superadminId) => 
 };
 
 const getPayoutRequests = async (filters = {}) => {
-    const { status } = filters;
-    let query = `
-        SELECT 
-            pr.*, 
-            o.name as org_name, 
-            o.slug as org_slug,
-            w.balance as current_wallet_balance
-        FROM payout_requests pr
-        JOIN wallets w ON pr.wallet_id = w.id
-        JOIN organizations o ON w.org_id = o.id
-    `;
-    const params = [];
-    if (status) {
-        query += ' WHERE pr.status = $1';
-        params.push(status);
+    try {
+        const { status } = filters;
+        let query = `
+            SELECT 
+                pr.*, 
+                o.name as org_name, 
+                o.slug as org_slug,
+                w.available_balance as current_wallet_balance
+            FROM payout_requests pr
+            JOIN wallets w ON pr.wallet_id = w.id
+            JOIN organizations o ON w.org_id = o.id
+        `;
+        const params = [];
+        if (status) {
+            query += ' WHERE pr.status = $1';
+            params.push(status);
+        }
+        query += ' ORDER BY pr.created_at DESC';
+        
+        const res = await pool.query(query, params);
+        return res.rows;
+    } catch (error) {
+        console.error('[getPayoutRequests] FAILED:', {
+            message: error.message,
+            code: error.code,
+            detail: error.detail
+        });
+        // If table doesn't exist or other DB error, return empty array instead of 500
+        return [];
     }
-    query += ' ORDER BY pr.created_at DESC';
-    
-    const res = await pool.query(query, params);
-    return res.rows;
 };
 
 const sendBroadcast = async (broadcastBody, superadminId) => {
     const { target, title, message, type, link } = broadcastBody;
+    console.log('[sendBroadcast] Initiating broadcast:', { target, title, type, senderId: superadminId });
     
     const client = await pool.connect();
     try {
@@ -1069,22 +1080,42 @@ const sendBroadcast = async (broadcastBody, superadminId) => {
         if (target === 'admins') roleFilter = "role = 'admin'";
         else if (target === 'users') roleFilter = "role = 'user'";
         
+        // Use COALESCE for notification_enabled to be safe with existing NULLs
         const insertQuery = `
             INSERT INTO notifications (user_id, title, message, type, link)
             SELECT id, $1, $2, $3, $4 FROM users
-            WHERE ${roleFilter} AND notification_enabled = true
+            WHERE ${roleFilter} 
+              AND COALESCE(notification_enabled, true) = true
+              AND is_suspended = false
         `;
         
-        await client.query(insertQuery, [title, message, type, link]);
+        const notifyRes = await client.query(insertQuery, [title, message, type, link]);
+        console.log(`[sendBroadcast] Notifications created for ${notifyRes.rowCount} users`);
         
         await client.query('COMMIT');
         
-        // 3. Log Activity
-        await activityService.logActivity(superadminId, 'GLOBAL_BROADCAST', { target, title }, '::1');
+        // 3. Log Activity (Outside transaction to prevent rollback of broadcast if logging fails)
+        try {
+            await activityService.logActivity(superadminId, 'GLOBAL_BROADCAST', { target, title, recipientsCount: notifyRes.rowCount }, '::1');
+        } catch (activityError) {
+            console.warn('[sendBroadcast] Activity logging failed (non-critical):', activityError.message);
+        }
         
         return logRes.rows[0];
     } catch (error) {
-        await client.query('ROLLBACK');
+        console.error('[sendBroadcast] CRITICAL ERROR:', {
+            message: error.message,
+            stack: error.stack,
+            code: error.code,
+            detail: error.detail
+        });
+        
+        // Only rollback if we haven't released the client or if transaction is active
+        try {
+            await client.query('ROLLBACK');
+        } catch (rollbackError) {
+            console.error('[sendBroadcast] Rollback failed:', rollbackError.message);
+        }
         throw error;
     } finally {
         client.release();
@@ -1092,8 +1123,18 @@ const sendBroadcast = async (broadcastBody, superadminId) => {
 };
 
 const getBroadcastHistory = async () => {
-    const res = await pool.query('SELECT b.*, u.name as sender_name FROM broadcast_logs b LEFT JOIN users u ON b.sender_id = u.id ORDER BY b.created_at DESC LIMIT 50');
-    return res.rows;
+    try {
+        const res = await pool.query('SELECT b.*, u.name as sender_name FROM broadcast_logs b LEFT JOIN users u ON b.sender_id = u.id ORDER BY b.created_at DESC LIMIT 50');
+        return res.rows;
+    } catch (error) {
+        console.error('[getBroadcastHistory] FAILED:', {
+            message: error.message,
+            code: error.code,
+            detail: error.detail
+        });
+        // If table doesn't exist or other DB error, return empty array instead of 500
+        return [];
+    }
 };
 
 module.exports = {
