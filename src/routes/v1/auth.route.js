@@ -19,6 +19,7 @@ router.post('/create-org-admin', auth('superadmin'), validate(authValidation.cre
 router.post('/forgot-password', validate(authValidation.forgotPassword), authController.forgotPassword);
 router.post('/reset-password', validate(authValidation.resetPassword), authController.resetPassword);
 router.post('/set-password', validate(authValidation.setPassword), authController.setPassword);
+router.post('/change-password', auth(), validate(authValidation.changePassword), authController.changePassword);
 
 // 405 for GET on auth endpoints
 router.get('/register', (req, res) => {

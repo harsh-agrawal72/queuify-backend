@@ -53,6 +53,7 @@ const uploadImages = catchAsync(async (req, res) => {
         }
     }
 
+    await organizationProfileService.syncSetupStatus(orgId);
     res.send(results);
 });
 
@@ -66,6 +67,7 @@ const deleteImage = catchAsync(async (req, res) => {
     if (!img) {
         throw new ApiError(httpStatus.NOT_FOUND, 'Image not found or not owned by your organization');
     }
+    await organizationProfileService.syncSetupStatus(orgId);
     res.send(img);
 });
 

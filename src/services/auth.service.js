@@ -359,6 +359,22 @@ const setPassword = async (token, newPassword) => {
     }
 };
 
+/**
+ * Change password
+ * @param {string} userId
+ * @param {string} currentPassword
+ * @param {string} newPassword
+ * @returns {Promise<void>}
+ */
+const changePassword = async (userId, currentPassword, newPassword) => {
+    const user = await userModel.getUserById(userId);
+    if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
+        throw new ApiError(httpStatus.UNAUTHORIZED, 'Incorrect current password');
+    }
+    const hashedPassword = await bcrypt.hash(newPassword, 8);
+    await userModel.updateUserPasswordAndStatus(userId, hashedPassword, true);
+};
+
 module.exports = {
     register,
     loginUserWithEmailAndPassword,
@@ -368,4 +384,5 @@ module.exports = {
     setPassword,
     forgotPassword,
     resetPassword,
+    changePassword,
 };

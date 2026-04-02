@@ -147,10 +147,13 @@ const getOrganizationByEmail = async (email) => {
 };
 
 /**
- * Get organization by phone
+ * Update organization setup status
  */
-const getOrganizationByPhone = async (phone) => {
-    const result = await pool.query('SELECT * FROM organizations WHERE phone = $1', [phone]);
+const updateSetupStatus = async (id, status) => {
+    const result = await pool.query(
+        'UPDATE organizations SET is_setup_completed = $1 WHERE id = $2 RETURNING *',
+        [status, id]
+    );
     return result.rows[0];
 };
 
@@ -161,5 +164,6 @@ module.exports = {
     queryOrganizations,
     updateOrganizationStatus,
     getOrganizationByEmail,
-    getOrganizationByPhone
+    getOrganizationByPhone,
+    updateSetupStatus
 };

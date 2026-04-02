@@ -57,5 +57,11 @@ module.exports = {
         const { user, org } = await authService.registerOrganization(orgBody, adminBody);
         const tokens = await tokenService.generateAuthTokens(user);
         res.status(httpStatus.CREATED).send({ user, org, tokens });
+    }),
+
+    changePassword: catchAsync(async (req, res) => {
+        const { currentPassword, newPassword } = req.body;
+        await authService.changePassword(req.user.id, currentPassword, newPassword);
+        res.status(httpStatus.OK).json({ success: true, message: 'Password changed successfully' });
     })
 };

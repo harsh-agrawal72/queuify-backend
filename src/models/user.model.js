@@ -55,7 +55,7 @@ const updateUserByType = async (userId, updateBody) => {
  */
 const getUserByEmail = async (email) => {
     const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name 
+        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed 
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
          WHERE u.email = $1`,
@@ -69,7 +69,7 @@ const getUserByEmail = async (email) => {
  */
 const getUserById = async (id) => {
     const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name 
+        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed 
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
          WHERE u.id = $1`,

@@ -83,11 +83,38 @@ const getFullProfile = async (orgId) => {
  * Update organization profile
  */
 const updateProfile = async (orgId, profileData) => {
-    return organizationProfileModel.upsertProfile(orgId, profileData);
+    const profile = await organizationProfileModel.upsertProfile(orgId, profileData);
+    await syncSetupStatus(orgId);
+    return profile;
+};
+
+/**
+ * Sync setup status in organizations table based on mandatory fields
+ */
+const syncSetupStatus = async (orgId) => {
+    const profile = await organizationProfileModel.getProfileByOrgId(orgId) || {};
+    const images = await organizationImageModel.getImagesByOrgId(orgId);
+    
+    const isComplete = !!(
+        profile.description && 
+        profile.keywords && 
+        profile.contact_phone && 
+        profile.address && 
+        profile.city && 
+        profile.state && 
+        profile.pincode &&
+        images.some(img => img.image_type === 'logo') &&
+        images.some(img => img.image_type === 'pan_card') &&
+        images.some(img => img.image_type === 'aadhar_card')
+    );
+
+    await organizationModel.updateSetupStatus(orgId, isComplete);
+    return isComplete;
 };
 
 module.exports = {
     getFullProfile,
     updateProfile,
-    calculateTrustScore
+    calculateTrustScore,
+    syncSetupStatus
 };
