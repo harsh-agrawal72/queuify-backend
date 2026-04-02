@@ -394,5 +394,7 @@ module.exports = {
     updateSlot,
     getAvailableSlots,
     requestSlotNotification,
+    getUserNotifications,
+    deleteNotification,
     bulkCopySlots
 };

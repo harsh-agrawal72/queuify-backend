@@ -13,10 +13,7 @@ router
     .post(auth('admin'), checkOrgStatus, validate(slotValidation.createSlot), slotController.createSlot)
     .get(auth('admin', 'user', 'superadmin'), validate(slotValidation.getSlots), slotController.getSlots);
 
-router
-    .route('/:slotId')
-    .delete(auth('admin'), checkOrgStatus, slotController.deleteSlot);
-
+// ⚠️ Specific named routes MUST come before wildcard /:slotId routes
 router
     .route('/bulk-copy')
     .post(auth('admin'), checkOrgStatus, validate(slotValidation.bulkCopySlots), slotController.bulkCopySlots);
@@ -36,6 +33,11 @@ router
 router
     .route('/:slotId/notify')
     .post(auth('user'), validate(slotValidation.requestSlotNotification), slotController.requestSlotNotification);
+
+// Wildcard /:slotId route — must be LAST to avoid swallowing named paths above
+router
+    .route('/:slotId')
+    .delete(auth('admin'), checkOrgStatus, slotController.deleteSlot);
 
 module.exports = {
     router

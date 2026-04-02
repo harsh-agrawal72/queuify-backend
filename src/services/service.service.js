@@ -1,4 +1,4 @@
-const { query } = require('../config/db');
+const { query, pool } = require('../config/db');
 const httpStatus = require('../utils/httpStatus');
 const ApiError = require('../utils/ApiError');
 
