@@ -89,7 +89,14 @@ const connectDB = async () => {
             '20260329_fix_wallet_schema.sql',
             '20260329_deep_automated_escrow.sql',
             '20260329_add_org_payout_details.sql',
-            '20260330_fix_appointment_enum.sql'
+            '20260330_fix_appointment_enum.sql',
+            '20260330_add_otp_column.sql',
+            '20260330_add_refund_amount.sql',
+            '20260401_add_broadcast_logs.sql',
+            '20260401_add_manual_payouts.sql',
+            '20260401_add_user_favorites.sql',
+            '20260401_ensure_org_slugs.sql',
+            '20260401_fix_broadcast_schema.sql'
         ];
         
         for (const migration of migrations) {
