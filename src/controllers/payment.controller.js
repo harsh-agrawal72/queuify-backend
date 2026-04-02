@@ -27,9 +27,10 @@ const createOrder = catchAsync(async (req, res) => {
         throw new ApiError(httpStatus.BAD_REQUEST, `Invalid appointment price: ${appointment.price}`);
     }
 
-    // 2. Create Real Razorpay Order
-    const amountInPaise = Math.round(appointmentAmount * 100);
-    console.log(`[PaymentController] Creating order for ${amountInPaise} paise`);
+    // 2. Create Real Razorpay Order using TOTAL PAYABLE (including fees and GST)
+    const totalAmount = parseFloat(appointment.total_payable) || appointmentAmount;
+    const amountInPaise = Math.round(totalAmount * 100);
+    console.log(`[PaymentController] Creating order for Appointment ${appointmentId}: Base=${appointmentAmount}, Total=${totalAmount} (${amountInPaise} paise)`);
     
     try {
         const order = await razorpayService.createOrder(amountInPaise, 'INR', `a_${appointmentId}`);
@@ -40,7 +41,14 @@ const createOrder = catchAsync(async (req, res) => {
                 amount: order.amount,
                 currency: order.currency
             },
-            appointment_id: appointmentId
+            appointment_id: appointmentId,
+            breakdown: {
+                basePrice: appointment.price,
+                platformFee: appointment.platform_fee,
+                transactionFee: appointment.transaction_fee,
+                paymentGst: appointment.payment_gst,
+                totalPayable: appointment.total_payable
+            }
         });
     } catch (razorpayError) {
         console.error('[PaymentController] Razorpay order creation failed:', razorpayError.message);
@@ -78,11 +86,13 @@ const verifyPayment = catchAsync(async (req, res) => {
         [razorpay_payment_id, appointmentId]
     );
 
-    // 3. Credit Locked Funds to Org Wallet
+    // 3. Credit Locked Funds to Org Wallet (ONLY BASE PRICE)
     try {
+        const basePrice = parseFloat(appointment.price);
+        console.log(`[PaymentController] Crediting wallet for Appointment ${appointmentId}: Base Price = ${basePrice}`);
         await walletService.creditLockedFunds(
             appointment.org_id, 
-            parseFloat(appointment.price), 
+            basePrice, 
             appointmentId, 
             `Payment for ${appointment.service_name}`
         );

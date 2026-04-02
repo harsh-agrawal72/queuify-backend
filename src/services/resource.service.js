@@ -44,15 +44,14 @@ const createResource = async (orgId, resourceBody) => {
     }
 };
 
-const getResourcesByServiceId = async (serviceId, publicOnly = false) => {
+const getResourcesByServiceId = async (serviceId) => {
     let sql = `
         SELECT r.*, rs.price 
         FROM resources r
         JOIN resource_services rs ON r.id = rs.resource_id
-        WHERE rs.service_id = $1
+        WHERE rs.service_id = $1 AND r.is_active = TRUE
+        ORDER BY r.created_at DESC
     `;
-    if (publicOnly) sql += ' AND r.is_active = TRUE';
-    sql += ' ORDER BY r.created_at DESC';
     const res = await query(sql, [serviceId]);
     return res.rows;
 };
@@ -63,10 +62,10 @@ const getResources = async (orgId, publicOnly = false) => {
                COALESCE(array_agg(rs.service_id) FILTER (WHERE rs.service_id IS NOT NULL), '{}') as service_ids
         FROM resources r
         LEFT JOIN resource_services rs ON r.id = rs.resource_id
-        WHERE r.org_id = $1
+        WHERE r.org_id = $1 AND r.is_active = TRUE
+        GROUP BY r.id 
+        ORDER BY r.created_at DESC
     `;
-    if (publicOnly) sql += ' AND r.is_active = TRUE';
-    sql += ' GROUP BY r.id ORDER BY r.created_at DESC';
     const res = await query(sql, [orgId]);
     return res.rows;
 };
@@ -146,16 +145,34 @@ const updateResource = async (orgId, resourceId, updateBody) => {
 const deleteResource = async (orgId, resourceId) => {
     await getResourceById(orgId, resourceId); // Validates existence and org ownership
 
-    // Check if there are ANY appointments for this resource
-    const apptCheck = await query('SELECT COUNT(*) FROM appointments WHERE resource_id = $1', [resourceId]);
-    if (parseInt(apptCheck.rows[0].count) > 0) {
-        throw new ApiError(httpStatus.BAD_REQUEST, "you cant delete or modify the slot which have any appointment");
+    // Only block if there are ACTIVE (confirmed/pending/serving) appointments
+    const activeApptCheck = await query(
+        `SELECT COUNT(*) FROM appointments 
+         WHERE resource_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`, 
+        [resourceId]
+    );
+    
+    if (parseInt(activeApptCheck.rows[0].count) > 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, "You cannot delete a resource that has active (confirmed/pending) appointments. Please complete/cancel them first.");
     }
 
-    // Cascade delete slots associated with this resource
-    await query('DELETE FROM slots WHERE resource_id = $1', [resourceId]);
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
 
-    await query('DELETE FROM resources WHERE id = $1', [resourceId]);
+        // 1. Mark resource as inactive (Soft Delete)
+        await client.query('UPDATE resources SET is_active = FALSE WHERE id = $1 AND org_id = $2', [resourceId, orgId]);
+
+        // 2. Mark associated slots as inactive (Soft Delete)
+        await client.query('UPDATE slots SET is_active = FALSE WHERE resource_id = $1', [resourceId]);
+
+        await client.query('COMMIT');
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
 };
 
 /**

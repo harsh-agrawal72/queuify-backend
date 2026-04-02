@@ -31,9 +31,8 @@ const createService = async (orgId, serviceBody) => {
 };
 
 const getServices = async (orgId, publicOnly = false) => {
-    let sql = 'SELECT * FROM services WHERE org_id = $1';
-    if (publicOnly) sql += ' AND is_active = TRUE';
-    sql += ' ORDER BY created_at DESC';
+    // Admin also wants to "hide" deleted services by default as per user request
+    const sql = 'SELECT * FROM services WHERE org_id = $1 AND is_active = TRUE ORDER BY created_at DESC';
     const res = await query(sql, [orgId]);
     return res.rows;
 };
@@ -71,21 +70,36 @@ const updateService = async (orgId, serviceId, updateBody) => {
 const deleteService = async (orgId, serviceId) => {
     await getServiceById(orgId, serviceId); // Validates existence and org ownership
 
-    // Check if there are ANY appointments for this service
-    const apptCheck = await query('SELECT COUNT(*) FROM appointments WHERE service_id = $1', [serviceId]);
-    if (parseInt(apptCheck.rows[0].count) > 0) {
-        throw new ApiError(httpStatus.BAD_REQUEST, "you cant delete or modify the slot which have any appointment");
+    // Only block if there are ACTIVE (confirmed/pending) appointments
+    const activeApptCheck = await query(
+        `SELECT COUNT(*) FROM appointments 
+         WHERE service_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`, 
+        [serviceId]
+    );
+
+    if (parseInt(activeApptCheck.rows[0].count) > 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, "You cannot delete a service that has active (confirmed/pending) appointments. Please complete/cancel them first.");
     }
 
-    // Cascade delete slots associated with this service's resources
-    await query(`
-        DELETE FROM slots 
-        WHERE resource_id IN (
-            SELECT resource_id FROM resource_services WHERE service_id = $1
-        )
-    `, [serviceId]);
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
 
-    await query('DELETE FROM services WHERE id = $1', [serviceId]);
+        // 1. Mark service as inactive (Soft Delete)
+        await client.query('UPDATE services SET is_active = FALSE WHERE id = $1 AND org_id = $2', [serviceId, orgId]);
+
+        // 2. Mark associated resource-service links as inactive/deleted if needed? 
+        // Actually, just hiding the service is enough as the link becomes orphaned but harmless.
+        // We also hide associated slots for resources that ONLY provide this service? 
+        // No, cascade delete slots is for hard delete. For soft delete, we'll keep them but they won't be bookable anyway.
+        
+        await client.query('COMMIT');
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
 };
 
 module.exports = {

@@ -210,18 +210,13 @@ const updateSlot = async (slotId, orgId, updateBody) => {
     const client = await pool.connect();
     try {
         const apptRes = await client.query(
-            `SELECT COUNT(*) FROM appointments WHERE slot_id = $1`,
+            `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`,
             [slotId]
         );
-        const totalAppointments = parseInt(apptRes.rows[0].count);
+        const activeAppointments = parseInt(apptRes.rows[0].count);
 
-        // In the "Full Soft Delete Mechanism", we allow updates to slots 
-        // but we should still be careful. However, the user specifically 
-        // asked for the mechanism where deletion is unrestricted. 
-        // I will keep the update restriction for now as it's safer, 
-        // unless they explicitly ask to allow updates with appointments too.
-        if (totalAppointments > 0) {
-            throw new ApiError(httpStatus.BAD_REQUEST, "You can't modify a slot that already has appointments. Please delete (deactivate) this slot and create a new one if needed.");
+        if (activeAppointments > 0) {
+            throw new ApiError(httpStatus.BAD_REQUEST, "You can't modify a slot that has active (confirmed/pending) appointments. Please complete/cancel them first.");
         }
 
         // Proceed with update

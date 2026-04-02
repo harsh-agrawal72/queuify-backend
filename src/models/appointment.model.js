@@ -1,6 +1,7 @@
 const { pool } = require('../config/db');
 const httpStatus = require('../utils/httpStatus');
 const ApiError = require('../utils/ApiError');
+const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
 
 const createAppointment = async (appointmentBody) => {
     const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false, customer_name, customer_phone } = appointmentBody;
@@ -181,6 +182,31 @@ const createAppointment = async (appointmentBody) => {
             columns.push('price');
             values.push(price);
             valuePlaceholders.push(`$${values.length}`);
+
+            // Calculate and store payment fee breakdown
+            const breakdown = calculatePaymentBreakdown(price);
+            if (breakdown.totalPayable > 0) {
+                if (existingCols.includes('platform_fee')) {
+                    columns.push('platform_fee');
+                    values.push(breakdown.platformFee);
+                    valuePlaceholders.push(`$${values.length}`);
+                }
+                if (existingCols.includes('transaction_fee')) {
+                    columns.push('transaction_fee');
+                    values.push(breakdown.transactionFee);
+                    valuePlaceholders.push(`$${values.length}`);
+                }
+                if (existingCols.includes('payment_gst')) {
+                    columns.push('payment_gst');
+                    values.push(breakdown.paymentGst);
+                    valuePlaceholders.push(`$${values.length}`);
+                }
+                if (existingCols.includes('total_payable')) {
+                    columns.push('total_payable');
+                    values.push(breakdown.totalPayable);
+                    valuePlaceholders.push(`$${values.length}`);
+                }
+            }
         }
 
         // Add optional/new columns if they exist in the DB

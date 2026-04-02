@@ -575,7 +575,7 @@ const updateSlot = async (orgId, slotId, updateBody) => {
 
     // Only block if there are ACTIVE (confirmed/pending) appointments
     const activeApptCheck = await query(
-        `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending')`,
+        `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`,
         [slotId]
     );
     if (parseInt(activeApptCheck.rows[0].count) > 0) {
@@ -639,7 +639,7 @@ const hardDeleteSlot = async (orgId, slotId) => {
 
         // Check for ACTIVE (confirmed/pending) appointments
         const activeApptCheck = await client.query(
-            `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending')`,
+            `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`,
             [slotId]
         );
         const activeCount = parseInt(activeApptCheck.rows[0].count);

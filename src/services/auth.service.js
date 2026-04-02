@@ -52,7 +52,7 @@ const loginWithGoogle = async (token) => {
         }
 
         if (user.is_suspended) {
-            throw new ApiError(httpStatus.FORBIDDEN, 'Your account is suspended.');
+            throw new ApiError(httpStatus.FORBIDDEN, 'Your account has been suspended. Please contact support@queuify.in');
         }
 
         return user;
@@ -252,7 +252,7 @@ const loginUserWithEmailAndPassword = async (email, password) => {
 
     // Check for suspension
     if (user.is_suspended) {
-        throw new ApiError(httpStatus.FORBIDDEN, 'Your account is suspended. Please contact your organization administrator.');
+        throw new ApiError(httpStatus.FORBIDDEN, 'Your account has been suspended. Please contact support@queuify.in');
     }
 
     // Check organization status
@@ -265,7 +265,7 @@ const loginUserWithEmailAndPassword = async (email, password) => {
         }
 
         if (org.status === 'suspended' || org.status === 'disabled' || org.status === 'deactivated') {
-            throw new ApiError(httpStatus.FORBIDDEN, 'Your organization account is suspended or deactivated. Please contact support.');
+            throw new ApiError(httpStatus.FORBIDDEN, 'Your account has been suspended. Please contact support@queuify.in');
         }
     }
 
