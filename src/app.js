@@ -103,7 +103,7 @@ app.get('/v1/diag/all', (req, res) => {
             smtp_config: {
                 host: config.email.smtp.host,
                 port: config.email.smtp.port,
-                has_user: !!config.email.smtp.auth.user
+                has_user: !!config.email.smtp.user
             },
             dns_test: {
                 hostname: 'smtp.gmail.com',
