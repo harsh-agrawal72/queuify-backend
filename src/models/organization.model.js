@@ -157,6 +157,14 @@ const updateSetupStatus = async (id, status) => {
     return result.rows[0];
 };
 
+/**
+ * Get organization by phone
+ */
+const getOrganizationByPhone = async (phone) => {
+    const result = await pool.query('SELECT * FROM organizations WHERE phone = $1', [phone]);
+    return result.rows[0];
+};
+
 module.exports = {
     createOrganization,
     getOrganizationBySlug,
