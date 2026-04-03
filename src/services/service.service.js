@@ -70,7 +70,9 @@ const updateService = async (orgId, serviceId, updateBody) => {
 const deleteService = async (orgId, serviceId) => {
     await getServiceById(orgId, serviceId); // Validates existence and org ownership
 
-    // Only block if there are ACTIVE (confirmed/pending) appointments
+    /* 
+    // Blocked: We now allow deactivating a service even if it has active appointments. 
+    // The service remains in the DB for reference but won't be bookable for new ones.
     const activeApptCheck = await query(
         `SELECT COUNT(*) FROM appointments 
          WHERE service_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`, 
@@ -80,6 +82,7 @@ const deleteService = async (orgId, serviceId) => {
     if (parseInt(activeApptCheck.rows[0].count) > 0) {
         throw new ApiError(httpStatus.BAD_REQUEST, "You cannot delete a service that has active (confirmed/pending) appointments. Please complete/cancel them first.");
     }
+    */
 
     const client = await pool.connect();
     try {

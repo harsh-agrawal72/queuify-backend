@@ -145,7 +145,9 @@ const updateResource = async (orgId, resourceId, updateBody) => {
 const deleteResource = async (orgId, resourceId) => {
     await getResourceById(orgId, resourceId); // Validates existence and org ownership
 
-    // Only block if there are ACTIVE (confirmed/pending/serving) appointments
+    /* 
+    // Blocked: We now allow deactivating a resource even if it has active appointments. 
+    // The resource remains in the DB for reference but won't be bookable for new ones.
     const activeApptCheck = await query(
         `SELECT COUNT(*) FROM appointments 
          WHERE resource_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`, 
@@ -155,6 +157,7 @@ const deleteResource = async (orgId, resourceId) => {
     if (parseInt(activeApptCheck.rows[0].count) > 0) {
         throw new ApiError(httpStatus.BAD_REQUEST, "You cannot delete a resource that has active (confirmed/pending) appointments. Please complete/cancel them first.");
     }
+    */
 
     const client = await pool.connect();
     try {
