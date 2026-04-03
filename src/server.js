@@ -96,7 +96,8 @@ const connectDB = async () => {
             '20260401_add_manual_payouts.sql',
             '20260401_add_user_favorites.sql',
             '20260401_ensure_org_slugs.sql',
-            '20260401_fix_broadcast_schema.sql'
+            '20260401_fix_broadcast_schema.sql',
+            '20260403_add_payment_breakdown_columns.sql'
         ];
         
         for (const migration of migrations) {

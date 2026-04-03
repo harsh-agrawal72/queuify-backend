@@ -7,6 +7,8 @@ const appointmentModel = require('../models/appointment.model');
 const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
 
+const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
+
 /**
  * Step 1: Create Order
  * This happens before the checkout modal opens
@@ -27,8 +29,29 @@ const createOrder = catchAsync(async (req, res) => {
         throw new ApiError(httpStatus.BAD_REQUEST, `Invalid appointment price: ${appointment.price}`);
     }
 
-    // 2. Create Real Razorpay Order using TOTAL PAYABLE (including fees and GST)
-    const totalAmount = parseFloat(appointment.total_payable) || appointmentAmount;
+    // 2. Ensure we have a valid breakdown (Recalculate if missing or 0)
+    let finalBreakdown = {
+        basePrice: appointment.price,
+        platformFee: appointment.platform_fee,
+        transactionFee: appointment.transaction_fee,
+        paymentGst: appointment.payment_gst,
+        totalPayable: appointment.total_payable
+    };
+
+    if (!finalBreakdown.totalPayable || parseFloat(finalBreakdown.totalPayable) <= 0) {
+        console.log(`[PaymentController] Stored total_payable is missing/zero. Recalculating...`);
+        const calculated = calculatePaymentBreakdown(appointmentAmount);
+        finalBreakdown = {
+            basePrice: calculated.basePrice,
+            platformFee: calculated.platformFee,
+            transactionFee: calculated.transactionFee,
+            paymentGst: calculated.paymentGst,
+            totalPayable: calculated.totalPayable
+        };
+    }
+
+    // 3. Create Real Razorpay Order using TOTAL PAYABLE (including fees and GST)
+    const totalAmount = parseFloat(finalBreakdown.totalPayable);
     const amountInPaise = Math.round(totalAmount * 100);
     console.log(`[PaymentController] Creating order for Appointment ${appointmentId}: Base=${appointmentAmount}, Total=${totalAmount} (${amountInPaise} paise)`);
     
@@ -42,13 +65,7 @@ const createOrder = catchAsync(async (req, res) => {
                 currency: order.currency
             },
             appointment_id: appointmentId,
-            breakdown: {
-                basePrice: appointment.price,
-                platformFee: appointment.platform_fee,
-                transactionFee: appointment.transaction_fee,
-                paymentGst: appointment.payment_gst,
-                totalPayable: appointment.total_payable
-            }
+            breakdown: finalBreakdown
         });
     } catch (razorpayError) {
         console.error('[PaymentController] Razorpay order creation failed:', razorpayError.message);
