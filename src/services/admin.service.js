@@ -1196,6 +1196,13 @@ const getNotifications = async (userId) => {
     return res.rows;
 };
 
+const markNotificationAsRead = async (userId, notificationId) => {
+    await pool.query(
+        'UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2',
+        [notificationId, userId]
+    );
+};
+
 const markAllNotificationsAsRead = async (userId) => {
     await notificationService.markAllAsRead(userId);
 };
@@ -1547,6 +1554,7 @@ module.exports = {
     deleteAppointment,
     getLiveQueue,
     getNotifications,
+    markNotificationAsRead,
     markAllNotificationsAsRead,
     globalSearch,
     getAdmins,

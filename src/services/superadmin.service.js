@@ -1,6 +1,7 @@
 const httpStatus = require('../utils/httpStatus');
 const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
+const socket = require('../socket/index');
 const bcrypt = require('bcryptjs');
 const tokenService = require('./token.service');
 const activityService = require('./activity.service');
@@ -1094,7 +1095,21 @@ const sendBroadcast = async (broadcastBody, superadminId) => {
         
         await client.query('COMMIT');
         
-        // 3. Log Activity (Outside transaction to prevent rollback of broadcast if logging fails)
+        // 3. Emit Real-time Socket Event
+        try {
+            const io = socket.getIO();
+            if (target === 'all') {
+                io.emit('broadcast_received', { title, message, type, link });
+            } else if (target === 'admins') {
+                io.to('admins').emit('broadcast_received', { title, message, type, link });
+            } else if (target === 'users') {
+                io.to('users').emit('broadcast_received', { title, message, type, link });
+            }
+        } catch (socketError) {
+            console.warn('[sendBroadcast] Socket emission failed (non-critical):', socketError.message);
+        }
+
+        // 4. Log Activity (Outside transaction to prevent rollback of broadcast if logging fails)
         try {
             await activityService.logActivity(superadminId, 'GLOBAL_BROADCAST', { target, title, recipientsCount: notifyRes.rowCount }, '::1');
         } catch (activityError) {

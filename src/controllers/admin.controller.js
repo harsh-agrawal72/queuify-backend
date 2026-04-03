@@ -81,6 +81,11 @@ const getNotifications = catchAsync(async (req, res) => {
     res.send(notifications);
 });
 
+const markNotificationAsRead = catchAsync(async (req, res) => {
+    await adminService.markNotificationAsRead(req.user.id, req.params.notificationId);
+    res.status(httpStatus.NO_CONTENT).send();
+});
+
 const markAllNotificationsAsRead = catchAsync(async (req, res) => {
     await adminService.markAllNotificationsAsRead(req.user.id);
     res.status(httpStatus.NO_CONTENT).send();
@@ -167,6 +172,7 @@ module.exports = {
     deleteAppointment,
     getLiveQueue,
     getNotifications,
+    markNotificationAsRead,
     markAllNotificationsAsRead,
     globalSearch,
     getAdmins,
