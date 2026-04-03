@@ -349,19 +349,20 @@ const getTransactionHistory = async (orgId, options) => {
         queryParams.push(status);
     }
 
-    if (startDate) {
+    if (startDate && typeof startDate === 'string' && startDate.trim() !== '') {
         paramCount++;
         queryText += ` AND tx.created_at >= $${paramCount}`;
-        queryParams.push(startDate);
+        queryParams.push(startDate.trim());
     }
 
-    if (endDate) {
-        paramCount++;
-        // inclusive of the end date
+    if (endDate && typeof endDate === 'string' && endDate.trim() !== '') {
         const nextDay = new Date(endDate);
-        nextDay.setDate(nextDay.getDate() + 1);
-        queryText += ` AND tx.created_at < $${paramCount}`;
-        queryParams.push(nextDay.toISOString().split('T')[0]);
+        if (!isNaN(nextDay.getTime())) {
+            nextDay.setDate(nextDay.getDate() + 1);
+            paramCount++;
+            queryText += ` AND tx.created_at < $${paramCount}`;
+            queryParams.push(nextDay.toISOString().split('T')[0]);
+        }
     }
 
     if (search) {
@@ -405,18 +406,20 @@ const getTransactionHistory = async (orgId, options) => {
         countParams.push(status);
     }
 
-    if (startDate) {
+    if (startDate && typeof startDate === 'string' && startDate.trim() !== '') {
         cParamCount++;
         countQuery += ` AND tx.created_at >= $${cParamCount}`;
-        countParams.push(startDate);
+        countParams.push(startDate.trim());
     }
 
-    if (endDate) {
+    if (endDate && typeof endDate === 'string' && endDate.trim() !== '') {
         const nextDay = new Date(endDate);
-        nextDay.setDate(nextDay.getDate() + 1);
-        cParamCount++;
-        countQuery += ` AND tx.created_at < $${cParamCount}`;
-        countParams.push(nextDay.toISOString().split('T')[0]);
+        if (!isNaN(nextDay.getTime())) {
+            nextDay.setDate(nextDay.getDate() + 1);
+            cParamCount++;
+            countQuery += ` AND tx.created_at < $${cParamCount}`;
+            countParams.push(nextDay.toISOString().split('T')[0]);
+        }
     }
 
     if (search) {
@@ -455,13 +458,14 @@ const getTransactionHistoryForExport = async (orgId, options) => {
             tx.created_at as "Date", 
             tx.type as "Type", 
             tx.amount as "Amount", 
-            tx.currency as "Currency", 
+            w.currency as "Currency", 
             tx.status as "Status", 
             tx.description as "Description",
             u.name as "Customer",
             svc.name as "Service",
             COALESCE(a.payment_id, pr.razorpay_payout_id) as "Transaction ID"
         FROM wallet_transactions tx
+        JOIN wallets w ON tx.wallet_id = w.id
         LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN services svc ON a.service_id = svc.id
@@ -483,18 +487,20 @@ const getTransactionHistoryForExport = async (orgId, options) => {
         queryParams.push(status);
     }
 
-    if (startDate) {
+    if (startDate && typeof startDate === 'string' && startDate.trim() !== '') {
         paramCount++;
         queryText += ` AND tx.created_at >= $${paramCount}`;
-        queryParams.push(startDate);
+        queryParams.push(startDate.trim());
     }
 
-    if (endDate) {
+    if (endDate && typeof endDate === 'string' && endDate.trim() !== '') {
         const nextDay = new Date(endDate);
-        nextDay.setDate(nextDay.getDate() + 1);
-        paramCount++;
-        queryText += ` AND tx.created_at < $${paramCount}`;
-        queryParams.push(nextDay.toISOString().split('T')[0]);
+        if (!isNaN(nextDay.getTime())) {
+            nextDay.setDate(nextDay.getDate() + 1);
+            paramCount++;
+            queryText += ` AND tx.created_at < $${paramCount}`;
+            queryParams.push(nextDay.toISOString().split('T')[0]);
+        }
     }
 
     if (search) {

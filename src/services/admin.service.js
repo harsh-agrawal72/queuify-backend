@@ -234,17 +234,40 @@ const getAnalytics = async (orgId, filters = {}) => {
     `;
 
     // Utilization / Volume (Numerator)
-    // We count non-cancelled appointments that are either in a slot in this range
-    // OR are walk-ins created in this range.
+    // We count non-cancelled appointments that are strictly associated with a slot in this range.
     const volumeQuery = `
         SELECT COUNT(*) as volume
         FROM appointments a
+        JOIN slots s ON a.slot_id = s.id
         WHERE a.org_id = $1
         AND a.status NOT IN ('cancelled', 'no_show')
-        AND (
-            (a.slot_id IS NOT NULL AND EXISTS (SELECT 1 FROM slots s WHERE s.id = a.slot_id AND s.start_time::date >= $2::date AND s.start_time::date <= $3::date))
-            OR (a.slot_id IS NULL AND a.created_at::date >= $2::date AND a.created_at::date <= $3::date)
-        )${extraWhere}
+        AND s.start_time::date >= $2::date 
+        AND s.start_time::date <= $3::date${extraWhere}
+    `;
+
+    // 3.1 Daily Utilization Trend (New)
+    const dailyUtilQuery = `
+        SELECT 
+            s.start_time::date as date,
+            COALESCE(SUM(s.max_capacity), 0) as capacity
+        FROM slots s
+        WHERE s.org_id = $1 
+        AND s.start_time::date >= $2::date 
+        AND s.start_time::date <= $3::date${slotExtraWhere}
+        GROUP BY date
+    `;
+
+    const dailyBookedQuery = `
+        SELECT 
+            s.start_time::date as date,
+            COUNT(a.id) as booked
+        FROM appointments a
+        JOIN slots s ON a.slot_id = s.id
+        WHERE a.org_id = $1
+        AND a.status NOT IN ('cancelled', 'no_show')
+        AND s.start_time::date >= $2::date 
+        AND s.start_time::date <= $3::date${extraWhere}
+        GROUP BY date
     `;
 
     const trendQuery = `
@@ -312,7 +335,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         trendRes,         // 6
         byServiceRes,     // 7
         byResourceRes,    // 8
-        heatmapRes        // 9
+        heatmapRes,       // 9
+        dailyUtilRes,     // 10 (New)
+        dailyBookedRes    // 11 (New)
     ] = await Promise.all([
         query(kpiQuery, baseParams),
         query(kpiQuery, prevParams),
@@ -323,7 +348,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         query(trendQuery, baseParams),
         query(byServiceQuery, baseParams),
         query(byResourceQuery, baseParams),
-        query(heatmapQuery, baseParams)
+        query(heatmapQuery, baseParams),
+        query(dailyUtilQuery, baseParams),
+        query(dailyBookedQuery, baseParams)
     ]);
 
     // ── KPI Processing ──
@@ -344,18 +371,20 @@ const getAnalytics = async (orgId, filters = {}) => {
     
     // Utilization = (Bookings linked to slots in period / Capacity of slots in period) * 100. 
     // We cap at 100% and show 0% if no capacity is defined.
-    const utilization = capacityTotal > 0 
-        ? Math.min(Math.round((bookedVolume / capacityTotal) * 100), 100)
-        : 0;
+    let utilization = 0;
+    if (capacityTotal > 0) {
+        utilization = Math.min(Math.round((bookedVolume / capacityTotal) * 100), 100);
+    }
 
     const prevCapacity = parseInt(prevUtilRes.rows[0].capacity) || 0;
     const prevBookedVolume = parseInt(prevVolumeRes.rows[0].volume) || 0;
-    const prevUtilization = prevCapacity > 0 
-        ? Math.min(Math.round((prevBookedVolume / prevCapacity) * 100), 100)
-        : 0;
+    let prevUtilization = 0;
+    if (prevCapacity > 0) {
+        prevUtilization = Math.min(Math.round((prevBookedVolume / prevCapacity) * 100), 100);
+    }
 
-    // ── Daily Trend Processing ──
-    const dailyBookings = [];
+    // ── Daily Trends (Combined Bookings and Utilization) ──
+    const dailyStats = [];
     const cursor = new Date(startDate);
     while (cursor <= endDateEnd) {
         const year = cursor.getFullYear();
@@ -363,8 +392,24 @@ const getAnalytics = async (orgId, filters = {}) => {
         const day = String(cursor.getDate()).padStart(2, '0');
         const ds = `${year}-${month}-${day}`;
 
-        const found = trendRes.rows.find(r => r.date === ds);
-        dailyBookings.push({ date: ds, count: parseInt(found?.count || 0) });
+        // Bookings count
+        const foundTrend = trendRes.rows.find(r => r.date === ds);
+        
+        // Utilization calculation for this day
+        const dailyCapEntry = dailyUtilRes.rows.find(r => (r.date instanceof Date ? r.date : new Date(r.date)).toISOString().split('T')[0] === ds);
+        const dailyBookEntry = dailyBookedRes.rows.find(r => (r.date instanceof Date ? r.date : new Date(r.date)).toISOString().split('T')[0] === ds);
+        
+        const dayCap = parseInt(dailyCapEntry?.capacity || 0);
+        const dayBook = parseInt(dailyBookEntry?.booked || 0);
+        const dayUtil = dayCap > 0 ? Math.min(Math.round((dayBook / dayCap) * 100), 100) : 0;
+
+        dailyStats.push({ 
+            date: ds, 
+            count: parseInt(foundTrend?.count || 0),
+            utilization: dayUtil,
+            capacity: dayCap,
+            booked: dayBook
+        });
         cursor.setDate(cursor.getDate() + 1);
     }
 
@@ -470,10 +515,10 @@ const getAnalytics = async (orgId, filters = {}) => {
         growth: {
             bookings: safeNum(bookingChange),
             cancellation: (prevCancRate > 0 && isFinite(prevCancRate)) ? safeNum(cancellationRate - prevCancRate) : 0,
-            utilization: (prevUtilization > 0 && isFinite(prevUtilization)) ? safeNum(utilization - prevUtilization) : 0,
+            utilization: safeNum(utilization - prevUtilization),
         },
         // Charts
-        dailyBookings: dailyBookings || [],
+        dailyBookings: dailyStats || [], 
         bookingsByService: (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })),
         bookingsByResource: (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })),
         statusDistribution: statusDistribution || [],

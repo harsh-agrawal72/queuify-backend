@@ -368,7 +368,7 @@ const getAdmins = async (filters, options) => {
     let paramIndex = 1;
 
     if (search) {
-        query += ` AND (u.name ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex})`;
+        query += ` AND (u.name ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex} OR o.name ILIKE $${paramIndex})`;
         params.push(`%${search}%`);
         paramIndex++;
     }
@@ -396,7 +396,10 @@ const getAdmins = async (filters, options) => {
     let countParamIndex = 1;
 
     if (search) {
-        countQuery += ` AND (u.name ILIKE $${countParamIndex} OR u.email ILIKE $${countParamIndex})`;
+        countQuery += ` 
+            AND (u.name ILIKE $${countParamIndex} 
+            OR u.email ILIKE $${countParamIndex} 
+            OR EXISTS (SELECT 1 FROM organizations o WHERE o.id = u.org_id AND o.name ILIKE $${countParamIndex}))`;
         countParams.push(`%${search}%`);
         countParamIndex++;
     }
