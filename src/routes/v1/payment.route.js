@@ -7,10 +7,10 @@ const Joi = require('joi');
 
 const router = express.Router();
 
-// ─── Wallet (Admin) ───
-router.get('/status', auth('manageOrg'), walletController.getWalletStatus);
-router.get('/transactions', auth('manageOrg'), walletController.getTransactionHistory);
-router.get('/transactions/export', auth('manageOrg'), walletController.exportTransactionHistory);
+// ─── Wallet (Admin & Staff) ───
+router.get('/status', auth('admin', 'staff'), walletController.getWalletStatus);
+router.get('/transactions', auth('admin', 'staff'), walletController.getTransactionHistory);
+router.get('/transactions/export', auth('admin', 'staff'), walletController.exportTransactionHistory);
 router.post('/withdraw', auth('admin'), walletController.withdraw);
 
 const payoutValidation = {

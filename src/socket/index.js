@@ -17,7 +17,17 @@ const init = (httpServer) => {
         socket.on('join_org', (orgId) => socket.join(`org_${orgId}`));
         socket.on('join_service', (serviceId) => socket.join(`service_${serviceId}`));
         socket.on('join_resource', (resourceId) => socket.join(`resource_${resourceId}`));
-        socket.on('join_user', (userId) => socket.join(`user_${userId}`));
+        socket.on('join_user', ({ userId, role }) => {
+            socket.join(`user_${userId}`);
+            // Join role-specific broadcast rooms
+            if (role === 'admin') {
+                socket.join('admins');
+                console.log(`Admin ${userId} joined 'admins' room`);
+            } else if (role === 'user') {
+                socket.join('users');
+                console.log(`User ${userId} joined 'users' room`);
+            }
+        });
 
         // Chat Rooms
         socket.on('join_chat', (conversationId) => socket.join(`chat_${conversationId}`));
