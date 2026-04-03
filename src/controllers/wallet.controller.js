@@ -60,9 +60,52 @@ const withdraw = catchAsync(async (req, res) => {
     res.status(httpStatus.OK).send(result);
 });
 
+const exportTransactionHistory = catchAsync(async (req, res) => {
+    const orgId = req.user.org_id;
+    if (!orgId) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Only organization administrators can export transaction history');
+    }
+
+    const { search, type, status, startDate, endDate } = req.query;
+    const transactions = await walletService.getTransactionHistoryForExport(orgId, {
+        search,
+        type,
+        status,
+        startDate,
+        endDate
+    });
+
+    if (transactions.length === 0) {
+        return res.status(httpStatus.OK).send("No transactions found for the selected filters.");
+    }
+
+    // Generate CSV
+    const headers = Object.keys(transactions[0]);
+    const csvRows = [];
+    csvRows.push(headers.join(','));
+
+    for (const row of transactions) {
+        const values = headers.map(header => {
+            const val = row[header];
+            // Escape quotes and wrap in quotes if contains comma
+            const escaped = ('' + (val || '')).replace(/"/g, '""');
+            return `"${escaped}"`;
+        });
+        csvRows.push(values.join(','));
+    }
+
+    const csvString = csvRows.join('\n');
+    const fileName = `transactions_${orgId}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    res.header('Content-Type', 'text/csv');
+    res.attachment(fileName);
+    res.status(httpStatus.OK).send(csvString);
+});
+
 module.exports = {
     getWalletStatus,
     getTransactionHistory,
     requestPayout,
-    withdraw
+    withdraw,
+    exportTransactionHistory
 };

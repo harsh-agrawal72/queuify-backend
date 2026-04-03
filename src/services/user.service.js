@@ -60,6 +60,8 @@ const getUserStats = async (userId) => {
                 const status = await appointmentService.getQueueStatus(nextAppointment.id);
                 nextAppointment.people_ahead = status.people_ahead || 0;
                 nextAppointment.estimated_wait_time = status.estimated_wait_time || 0;
+                nextAppointment.estimated_service_time = status.estimated_service_time || 15;
+                nextAppointment.time_drift_minutes = status.time_drift_minutes || 0;
                 nextAppointment.current_serving_number = status.current_serving_number || 0;
                 nextAppointment.queue_number = status.queue_number || 0;
             } catch (e) {

@@ -8,8 +8,9 @@ const Joi = require('joi');
 const router = express.Router();
 
 // ─── Wallet (Admin) ───
-router.get('/status', auth('admin'), walletController.getWalletStatus);
-router.get('/transactions', auth('admin'), walletController.getTransactionHistory);
+router.get('/status', auth('manageOrg'), walletController.getWalletStatus);
+router.get('/transactions', auth('manageOrg'), walletController.getTransactionHistory);
+router.get('/transactions/export', auth('manageOrg'), walletController.exportTransactionHistory);
 router.post('/withdraw', auth('admin'), walletController.withdraw);
 
 const payoutValidation = {

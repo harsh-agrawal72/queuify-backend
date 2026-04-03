@@ -122,20 +122,47 @@ const completeManualPayout = async (payoutId, superadminId) => {
             throw new ApiError(httpStatus.BAD_REQUEST, `Cannot complete payout in ${request.status} status`);
         }
 
-        // 2. Update payout request status
+        // 2. Perform the actual deduction from wallet
+        const walletRes = await client.query('SELECT * FROM wallets WHERE id = $1 FOR UPDATE', [request.wallet_id]);
+        const wallet = walletRes.rows[0];
+        if (wallet.available_balance < request.amount) {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Insufficient balance in organization wallet to complete this payout.');
+        }
+
         await client.query(
-            "UPDATE payout_requests SET status = 'completed', processed_at = NOW() WHERE id = $1",
-            [payoutId]
+            'UPDATE wallets SET available_balance = available_balance - $1 WHERE id = $2',
+            [request.amount, request.wallet_id]
         );
 
-        // 3. Update wallet transaction status
+        // 3. Trigger Mock Razorpay Payout (Optional simulation)
+        const razorpayService = require('./razorpay.service');
+        const orgRes = await client.query('SELECT * FROM organizations WHERE id = $1', [wallet.org_id]);
+        const org = orgRes.rows[0];
+        const referenceId = `pout_final_${payoutId}_${Date.now()}`;
+        
+        let razorpayPayoutId = `pout_manual_${Math.random().toString(36).substr(2, 9)}`;
+        try {
+            const rzpPayout = await razorpayService.processPayout(request.amount, JSON.parse(request.bank_details), referenceId, org);
+            razorpayPayoutId = rzpPayout.id;
+        } catch (e) {
+            console.error(`[ManualPayout] Mock Razorpay update failed:`, e.message);
+            // We continue as it's a "Manual" transfer primarily
+        }
+
+        // 4. Update payout request status
         await client.query(
-            "UPDATE wallet_transactions SET status = 'completed', description = description || ' (Completed by Superadmin)' WHERE reference_id = $1 AND type = 'payout'",
+            "UPDATE payout_requests SET status = 'completed', processed_at = NOW(), razorpay_payout_id = $1, payout_status = 'processed' WHERE id = $2",
+            [razorpayPayoutId, payoutId]
+        );
+
+        // 5. Update wallet transaction status
+        await client.query(
+            "UPDATE wallet_transactions SET status = 'completed', description = description || ' (Approved & Transferred)' WHERE reference_id = $1 AND type = 'payout'",
             [payoutId]
         );
 
         await client.query('COMMIT');
-        return { success: true, message: 'Payout marked as completed' };
+        return { success: true, message: 'Payout approved and funds deducted successfully' };
     } catch (e) {
         await client.query('ROLLBACK');
         throw e;
@@ -145,7 +172,8 @@ const completeManualPayout = async (payoutId, superadminId) => {
 };
 
 /**
- * Reject a manual payout and refund balance (Superadmin Only)
+ * Reject a manual payout (Superadmin Only)
+ * No refund needed because deduction happens only on approval
  */
 const rejectManualPayout = async (payoutId, reason, superadminId) => {
     const client = await pool.connect();
@@ -161,26 +189,20 @@ const rejectManualPayout = async (payoutId, reason, superadminId) => {
             throw new ApiError(httpStatus.BAD_REQUEST, `Cannot reject payout in ${request.status} status`);
         }
 
-        // 2. Refund balance back to wallet
+        // 2. Update payout request status
         await client.query(
-            'UPDATE wallets SET balance = balance + $1 WHERE id = $2',
-            [request.amount, request.wallet_id]
-        );
-
-        // 3. Update payout request status
-        await client.query(
-            "UPDATE payout_requests SET status = 'rejected', processed_at = NOW() WHERE id = $1",
+            "UPDATE payout_requests SET status = 'rejected', processed_at = NOW(), payout_status = 'failed' WHERE id = $1",
             [payoutId]
         );
 
-        // 4. Update wallet transaction status
+        // 3. Update wallet transaction status
         await client.query(
             "UPDATE wallet_transactions SET status = 'failed', description = 'Payout Rejected: ' || $1 WHERE reference_id = $2 AND type = 'payout'",
             [reason || 'Rejected by superadmin', payoutId]
         );
 
         await client.query('COMMIT');
-        return { success: true, message: 'Payout rejected and funds returned' };
+        return { success: true, message: 'Payout request has been rejected' };
     } catch (e) {
         await client.query('ROLLBACK');
         throw e;

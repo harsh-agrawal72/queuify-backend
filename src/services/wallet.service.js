@@ -188,48 +188,28 @@ const requestPayout = async (orgId, amount, bankDetails) => {
         }
         const org = orgRes.rows[0];
 
-        // 1. Deduct from wallet balance early (will rollback if API fails)
-        await client.query(
-            'UPDATE wallets SET available_balance = available_balance - $1 WHERE id = $2',
-            [amount, wallet.id]
-        );
-
-        // 2. Mock or Real Reference ID
-        const referenceId = `pout_req_${wallet.id}_${Date.now()}`;
-
-        // 3. Call RazorpayX API
-        const razorpayService = require('./razorpay.service');
-        let razorpayPayoutId = null;
-        try {
-            console.log(`[WalletService] Triggering payout process for ₹${amount}...`);
-            const rzpPayout = await razorpayService.processPayout(amount, bankDetails, referenceId, org);
-            razorpayPayoutId = rzpPayout.id;
-            if (razorpayPayoutId && razorpayPayoutId.startsWith('pout_mock_')) {
-                 console.log(`[WalletService] (MOCK) Mock payout generated: ${razorpayPayoutId}`);
-            } else {
-                 console.log(`[WalletService] (REAL) RazorpayX Payout ID: ${razorpayPayoutId}`);
-            }
-        } catch (apiErr) {
-            // Rethrow and the outer catch will rollback the wallet DB
-            console.error(`[WalletService] RazorpayX API Error during payout:`, apiErr.message);
-            throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `RazorpayX Payout Failed: ${apiErr.message}`);
+        // 1. Validate Balance (Deduction will happen upon Superadmin Approval)
+        if (wallet.available_balance < amount) {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Insufficient available balance for payout');
         }
 
-        // 4. Create payout request recording the real razorpay_payout_id
+        // 2. Create payout request recording the bank details
         const payoutRes = await client.query(
-            `INSERT INTO payout_requests (wallet_id, amount, status, bank_details, razorpay_payout_id, payout_status) 
-             VALUES ($1, $2, $3, $4, $5, 'processed') RETURNING id`,
-            [wallet.id, amount, 'completed', JSON.stringify(bankDetails), razorpayPayoutId]
+            `INSERT INTO payout_requests (wallet_id, amount, status, bank_details, payout_status) 
+             VALUES ($1, $2, $3, $4, 'requested') RETURNING id`,
+            [wallet.id, amount, 'pending', JSON.stringify(bankDetails)]
         );
 
-        // 5. Create debit entry in ledger
+        const payoutId = payoutRes.rows[0].id;
+
+        // 3. Create pending entry in ledger
         await client.query(
             'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
-            [wallet.id, -amount, 'payout', 'completed', payoutRes.rows[0].id, `Bank Withdrawal - ${razorpayPayoutId}`]
+            [wallet.id, -amount, 'payout', 'pending', payoutId, `Bank Withdrawal - Requested`]
         );
 
         await client.query('COMMIT');
-        return payoutRes.rows[0].id;
+        return payoutId;
     } catch (e) {
         await client.query('ROLLBACK');
         console.error('[WalletService] Payout request failed:', e.message);
@@ -334,25 +314,26 @@ const resolveDispute = async (orgId, appointmentId, decision) => {
 /**
  * Get Transaction History for an organization with filtering and pagination
  */
-const getTransactionHistory = async (orgId, params = {}) => {
-    const { limit = 10, offset = 0, search = '', type = '', status = '' } = params;
+const getTransactionHistory = async (orgId, options) => {
     const wallet = await getWalletByOrgId(orgId);
+    const { limit = 10, offset = 0, search, type, status, startDate, endDate } = options || {};
     
+    // Get transactions with details
     let queryText = `
         SELECT 
             tx.*,
+            a.status as appointment_status,
             u.name as customer_name,
             u.email as customer_email,
             svc.name as service_name,
             COALESCE(a.payment_id, pr.razorpay_payout_id) as razorpay_payment_id
-         FROM wallet_transactions tx
-         LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
-         LEFT JOIN users u ON a.user_id = u.id
-         LEFT JOIN services svc ON a.service_id = svc.id
-         LEFT JOIN payout_requests pr ON tx.reference_id = pr.id AND tx.type = 'payout'
-         WHERE tx.wallet_id = $1
+        FROM wallet_transactions tx
+        LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
+        LEFT JOIN users u ON a.user_id = u.id
+        LEFT JOIN services svc ON a.service_id = svc.id
+        LEFT JOIN payout_requests pr ON tx.reference_id = pr.id AND tx.type = 'payout'
+        WHERE tx.wallet_id = $1
     `;
-    
     const queryParams = [wallet.id];
     let paramCount = 1;
 
@@ -366,6 +347,21 @@ const getTransactionHistory = async (orgId, params = {}) => {
         paramCount++;
         queryText += ` AND tx.status = $${paramCount}`;
         queryParams.push(status);
+    }
+
+    if (startDate) {
+        paramCount++;
+        queryText += ` AND tx.created_at >= $${paramCount}`;
+        queryParams.push(startDate);
+    }
+
+    if (endDate) {
+        paramCount++;
+        // inclusive of the end date
+        const nextDay = new Date(endDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        queryText += ` AND tx.created_at < $${paramCount}`;
+        queryParams.push(nextDay.toISOString().split('T')[0]);
     }
 
     if (search) {
@@ -409,6 +405,20 @@ const getTransactionHistory = async (orgId, params = {}) => {
         countParams.push(status);
     }
 
+    if (startDate) {
+        cParamCount++;
+        countQuery += ` AND tx.created_at >= $${cParamCount}`;
+        countParams.push(startDate);
+    }
+
+    if (endDate) {
+        const nextDay = new Date(endDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        cParamCount++;
+        countQuery += ` AND tx.created_at < $${cParamCount}`;
+        countParams.push(nextDay.toISOString().split('T')[0]);
+    }
+
     if (search) {
         cParamCount++;
         countQuery += ` AND (
@@ -431,6 +441,77 @@ const getTransactionHistory = async (orgId, params = {}) => {
     };
 };
 
+/**
+ * Get all transactions for export (no pagination)
+ */
+const getTransactionHistoryForExport = async (orgId, options) => {
+    const wallet = await getWalletByOrgId(orgId);
+    if (!wallet) throw new ApiError(httpStatus.NOT_FOUND, 'Wallet not found');
+
+    const { search, type, status, startDate, endDate } = options || {};
+    
+    let queryText = `
+        SELECT 
+            tx.created_at as "Date", 
+            tx.type as "Type", 
+            tx.amount as "Amount", 
+            tx.currency as "Currency", 
+            tx.status as "Status", 
+            tx.description as "Description",
+            u.name as "Customer",
+            svc.name as "Service",
+            COALESCE(a.payment_id, pr.razorpay_payout_id) as "Transaction ID"
+        FROM wallet_transactions tx
+        LEFT JOIN appointments a ON tx.reference_id = a.id AND tx.type IN ('credit', 'refund')
+        LEFT JOIN users u ON a.user_id = u.id
+        LEFT JOIN services svc ON a.service_id = svc.id
+        LEFT JOIN payout_requests pr ON tx.reference_id = pr.id AND tx.type = 'payout'
+        WHERE tx.wallet_id = $1
+    `;
+    const queryParams = [wallet.id];
+    let paramCount = 1;
+
+    if (type) {
+        paramCount++;
+        queryText += ` AND tx.type = $${paramCount}`;
+        queryParams.push(type);
+    }
+
+    if (status) {
+        paramCount++;
+        queryText += ` AND tx.status = $${paramCount}`;
+        queryParams.push(status);
+    }
+
+    if (startDate) {
+        paramCount++;
+        queryText += ` AND tx.created_at >= $${paramCount}`;
+        queryParams.push(startDate);
+    }
+
+    if (endDate) {
+        const nextDay = new Date(endDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        paramCount++;
+        queryText += ` AND tx.created_at < $${paramCount}`;
+        queryParams.push(nextDay.toISOString().split('T')[0]);
+    }
+
+    if (search) {
+        paramCount++;
+        queryText += ` AND (
+            tx.description ILIKE $${paramCount} OR 
+            u.name ILIKE $${paramCount} OR
+            svc.name ILIKE $${paramCount}
+        )`;
+        queryParams.push(`%${search}%`);
+    }
+
+    queryText += ` ORDER BY tx.created_at DESC`;
+    const res = await pool.query(queryText, queryParams);
+    return res.rows;
+};
+
 module.exports = {
     initWallet,
     getWalletByOrgId,
@@ -440,5 +521,6 @@ module.exports = {
     requestPayout,
     holdFundsForDispute,
     resolveDispute,
-    getTransactionHistory
+    getTransactionHistory,
+    getTransactionHistoryForExport
 };
