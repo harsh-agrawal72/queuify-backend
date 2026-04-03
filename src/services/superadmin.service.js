@@ -1086,7 +1086,7 @@ const sendBroadcast = async (broadcastBody, superadminId) => {
             SELECT id, $1, $2, $3, $4 FROM users
             WHERE ${roleFilter} 
               AND COALESCE(notification_enabled, true) = true
-              AND is_suspended = false
+              AND is_suspended IS NOT TRUE
         `;
         
         const notifyRes = await client.query(insertQuery, [title, message, type, link]);

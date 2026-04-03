@@ -86,16 +86,25 @@ const deleteService = async (orgId, serviceId) => {
         await client.query('BEGIN');
 
         // 1. Mark service as inactive (Soft Delete)
-        await client.query('UPDATE services SET is_active = FALSE WHERE id = $1 AND org_id = $2', [serviceId, orgId]);
+        const updateRes = await client.query(
+            'UPDATE services SET is_active = FALSE WHERE id = $1 AND org_id = $2', 
+            [serviceId, orgId]
+        );
+
+        if (updateRes.rowCount === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'Service not found or already deleted');
+        }
 
         // 2. Mark associated resource-service links as inactive/deleted if needed? 
-        // Actually, just hiding the service is enough as the link becomes orphaned but harmless.
-        // We also hide associated slots for resources that ONLY provide this service? 
-        // No, cascade delete slots is for hard delete. For soft delete, we'll keep them but they won't be bookable anyway.
+        // For soft delete, we'll keep them but they won't be bookable anyway.
         
         await client.query('COMMIT');
     } catch (e) {
         await client.query('ROLLBACK');
+        // Wrap error for production visibility if it's a database error
+        if (!(e instanceof ApiError)) {
+            throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Database error during service deletion: ${e.message}`, true, e.stack);
+        }
         throw e;
     } finally {
         client.release();

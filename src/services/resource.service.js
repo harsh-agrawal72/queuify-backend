@@ -161,7 +161,14 @@ const deleteResource = async (orgId, resourceId) => {
         await client.query('BEGIN');
 
         // 1. Mark resource as inactive (Soft Delete)
-        await client.query('UPDATE resources SET is_active = FALSE WHERE id = $1 AND org_id = $2', [resourceId, orgId]);
+        const updateRes = await client.query(
+            'UPDATE resources SET is_active = FALSE WHERE id = $1 AND org_id = $2', 
+            [resourceId, orgId]
+        );
+
+        if (updateRes.rowCount === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'Resource not found or already deleted');
+        }
 
         // 2. Mark associated slots as inactive (Soft Delete)
         await client.query('UPDATE slots SET is_active = FALSE WHERE resource_id = $1', [resourceId]);
@@ -169,6 +176,10 @@ const deleteResource = async (orgId, resourceId) => {
         await client.query('COMMIT');
     } catch (e) {
         await client.query('ROLLBACK');
+        // Wrap error for production visibility if it's a database error
+        if (!(e instanceof ApiError)) {
+            throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Database error during resource deletion: ${e.message}`, true, e.stack);
+        }
         throw e;
     } finally {
         client.release();
