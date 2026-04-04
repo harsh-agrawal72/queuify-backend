@@ -62,8 +62,10 @@ const createOrder = catchAsync(async (req, res) => {
     console.log(`[PaymentController] Creating order for Appointment ${appointmentId}: Base=${appointmentAmount}, Total=${totalAmount} (${amountInPaise} paise)`);
     
     try {
-        const order = await razorpayService.createOrder(amountInPaise, 'INR', `a_${appointmentId.substring(0, 30)}`);
-        console.log(`[PaymentController] Razorpay Order Created: ${order.id}`);
+        const receiptId = `a_${String(appointmentId).substring(0, 30)}`;
+        const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId);
+        
+        console.log(`[PaymentController] Razorpay Order Created: ${order.id} for appt ${appointmentId}`);
         res.status(httpStatus.OK).send({
             order: {
                 id: order.id,
@@ -74,9 +76,9 @@ const createOrder = catchAsync(async (req, res) => {
             breakdown: finalBreakdown
         });
     } catch (razorpayError) {
-        console.error('[PaymentController] Razorpay order creation failed:', razorpayError.message);
-        // Return full error message to help debug
-        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Razorpay Order Error: ${razorpayError.message}`);
+        console.error('[PaymentController] Razorpay order creation failed. Error:', razorpayError);
+        // Force isOperational = true to ensure message reaches frontend in production
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Razorpay Order Error: ${razorpayError.message}`, true);
     }
 });
 
