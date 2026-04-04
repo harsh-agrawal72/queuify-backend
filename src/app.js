@@ -92,62 +92,9 @@ app.get('/health', (req, res) => {
     res.json({ status: 'healthy', uptime: process.uptime() });
 });
 
-app.get('/v1/diag/all', (req, res) => {
-    const dns = require('dns');
-    dns.lookup('smtp.gmail.com', { family: 4 }, async (err, address) => {
-        try {
-            const orgCols = await pool.query('SELECT column_name FROM information_schema.columns WHERE table_name = \'organizations\'').then(r => r.rows.map(ro => ro.column_name));
-            
-            res.json({
-                timestamp: new Date().toISOString(),
-                deploy_version: "3.0-robust-dns-proxy-v2",
-                trust_proxy_setting: app.get('trust proxy'),
-                env: config.env,
-                smtp_config: {
-                    host: config.email.smtp.host,
-                    port: config.email.smtp.port,
-                    has_user: !!config.email.smtp.user
-                },
-                dns_test: {
-                    hostname: 'smtp.gmail.com',
-                    resolved_ipv4: address || null,
-                    error: err ? err.message : null
-                },
-                razorpay_status: {
-                    has_key_id: !!config.razorpay.keyId,
-                    key_id_prefix: config.razorpay.keyId ? config.razorpay.keyId.substring(0, 8) : null,
-                    has_secret: !!config.razorpay.keySecret,
-                    secret_length: config.razorpay.keySecret ? config.razorpay.keySecret.length : 0
-                },
-                db_schema: {
-                    organizations_cols: orgCols
-                },
-                base_url: config.baseUrl,
-                headers: req.headers
-            });
-        } catch (dbErr) {
-            res.status(500).json({ error: dbErr.message, stack: dbErr.stack });
-        }
-    });
-});
-
-app.get('/v1/diag/test-razorpay', async (req, res) => {
-    const razorpayService = require('./services/razorpay.service');
-    try {
-        const order = await razorpayService.createOrder(100, 'INR', `test_${Date.now().toString().slice(-10)}`);
-        res.json({ success: true, orderId: order.id });
-    } catch (err) {
-        res.status(500).json({ 
-            success: false, 
-            message: err.message,
-            full_error: err,
-            key_id_prefix: config.razorpay.keyId ? config.razorpay.keyId.substring(0, 8) : null,
-            env: config.env
-        });
-    }
-});
-
+// Monitoring
 const { monitoringMiddleware, errorLoggingMiddleware } = require('./middlewares/monitoring');
+app.use(monitoringMiddleware);
 app.use(monitoringMiddleware);
 
 // API routes
