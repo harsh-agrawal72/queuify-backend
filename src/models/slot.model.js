@@ -85,7 +85,12 @@ const getSlotsWithDetails = async (filters) => {
  * Get available slots for user booking (future, not full)
  */
 const getAvailableSlots = async (orgId, filters = {}) => {
-    let query = 'SELECT s.* FROM slots s WHERE s.org_id = $1 AND s.booked_count < s.max_capacity AND s.end_time > NOW() AND s.is_active = TRUE AND (s.status = \'active\' OR s.status = \'Available\')';
+    let query = `SELECT s.* FROM slots s 
+                 WHERE s.org_id = $1 
+                 AND s.booked_count < s.max_capacity 
+                 AND s.end_time > (NOW() AT TIME ZONE 'UTC' + INTERVAL '5 hours 30 minutes')
+                 AND s.is_active = TRUE 
+                 AND (s.status = 'active' OR s.status = 'Available')`;
     const params = [orgId];
     let idx = 2;
 

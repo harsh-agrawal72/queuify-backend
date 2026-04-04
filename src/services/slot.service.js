@@ -87,7 +87,8 @@ const getSlotsWithDetails = async (filters) => {
  */
 const getAvailableSlots = async (orgId, filters = {}) => {
     const slots = await slotModel.getAvailableSlots(orgId, filters);
-    const now = new Date();
+    // IST Offset Fix: Server is UTC (+0:00), but India is IST (+5:30)
+    const now = new Date(new Date().getTime() + 5.5 * 3600 * 1000); 
 
     let estimatedServiceTime = 30; // Default
     if (filters.serviceId) {

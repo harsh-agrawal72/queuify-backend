@@ -1194,7 +1194,8 @@ const getLiveQueue = async (orgId, date) => {
         queue.appointments.push({
             ...appt,
             queue_number: parseInt(appt.queue_number),
-            is_past: appt.slot_end ? new Date(appt.slot_end) < new Date() : false
+            // IST Offset Fix: Server is UTC (+0:00), but India is IST (+5:30)
+            is_past: appt.slot_end ? new Date(appt.slot_end) < new Date(new Date().getTime() + 5.5 * 3600 * 1000) : false
         });
     });
 

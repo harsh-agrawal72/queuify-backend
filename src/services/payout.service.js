@@ -134,20 +134,9 @@ const completeManualPayout = async (payoutId, superadminId) => {
             [request.amount, request.wallet_id]
         );
 
-        // 3. Trigger Mock Razorpay Payout (Optional simulation)
-        const razorpayService = require('./razorpay.service');
-        const orgRes = await client.query('SELECT * FROM organizations WHERE id = $1', [wallet.org_id]);
-        const org = orgRes.rows[0];
-        const referenceId = `pout_final_${payoutId}_${Date.now()}`;
-        
+        // 3. Mark as Manual Completion (Skip Razorpay API as per user request for manual transfers)
         let razorpayPayoutId = `pout_manual_${Math.random().toString(36).substr(2, 9)}`;
-        try {
-            const rzpPayout = await razorpayService.processPayout(request.amount, JSON.parse(request.bank_details), referenceId, org);
-            razorpayPayoutId = rzpPayout.id;
-        } catch (e) {
-            console.error(`[ManualPayout] Mock Razorpay update failed:`, e.message);
-            // We continue as it's a "Manual" transfer primarily
-        }
+        console.log(`[ManualPayout] Payout ${payoutId} completed manually by superadmin.`);
 
         // 4. Update payout request status
         await client.query(
