@@ -87,8 +87,8 @@ const getSlotsWithDetails = async (filters) => {
  */
 const getAvailableSlots = async (orgId, filters = {}) => {
     const slots = await slotModel.getAvailableSlots(orgId, filters);
-    // Get current time in IST (regardless of server timezone)
-    const now = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Kolkata"})); 
+    // Get current time in IST (regardless of server timezone) - Reliable across Node.js versions
+    const now = new Date(new Date().getTime() + (new Date().getTimezoneOffset() * 60000) + (3600000 * 5.5));
 
     let estimatedServiceTime = 30; // Default
     if (filters.serviceId) {
