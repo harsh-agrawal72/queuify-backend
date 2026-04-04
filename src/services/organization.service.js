@@ -122,50 +122,53 @@ const reviewService = require('./review.service');
 const serviceService = require('./service.service');
 
 const getPublicProfileBySlug = async (slug, userId = null) => {
+    // 1. First, get the core organization record to obtain the ID
     const org = await organizationModel.getOrganizationBySlug(slug);
     if (!org) {
         throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
     }
 
-    // Parallel fetch with fault tolerance
-    const [profile, services, reviewsData] = await Promise.all([
-        organizationProfileService.getFullProfile(org.id).catch(e => {
-            console.error('Profile fetch failed:', e.message);
-            return {};
-        }),
-        pool.query('SELECT * FROM services WHERE org_id = $1 AND status = \'active\'', [org.id])
-            .then(r => r.rows)
-            .catch(e => {
-                console.error('Services fetch failed:', e.message);
-                return [];
-            }),
-        reviewService.getOrgReviews(org.id).catch(e => {
-            console.error('Reviews fetch failed:', e.message);
-            return { reviews: [], stats: { totalReviews: 0, averageRating: 0 } };
-        })
+    const orgId = org.id;
+
+    // 2. Parallelized fetch for all related data to eliminate sequential wait times
+    // This is the fastest way to get the full profile in a single blast
+    const [profileResult, rawImages, services, reviewsData, favoriteStatus] = await Promise.all([
+        organizationProfileModel.getProfileByOrgId(orgId).catch(() => ({})),
+        organizationImageModel.getImagesByOrgId(orgId).catch(() => []),
+        pool.query('SELECT * FROM services WHERE org_id = $1 AND status = \'active\'', [orgId]).then(r => r.rows).catch(() => []),
+        reviewService.getOrgReviews(orgId).catch(() => ({ reviews: [], stats: { totalReviews: 0, averageRating: 0 } })),
+        userId ? pool.query('SELECT 1 FROM user_favorites WHERE user_id = $1 AND org_id = $2', [userId, orgId]).then(r => r.rows.length > 0).catch(() => false) : Promise.resolve(false)
     ]);
 
-    // Check if favorited by user
-    let isFavorite = false;
-    if (userId) {
-        try {
-            const favRes = await pool.query(
-                'SELECT 1 FROM user_favorites WHERE user_id = $1 AND org_id = $2',
-                [userId, org.id]
-            );
-            isFavorite = favRes.rows.length > 0;
-        } catch (e) {
-            console.error('Favorite check failed:', e.message);
+    // 3. Process data (Calculate Trust Score & Transform Images)
+    const profile = profileResult || {};
+    const trustScore = organizationProfileService.calculateTrustScore(profile, rawImages);
+
+    // Transform image URLs with base URL prefixing where needed
+    const config = require('../config/config');
+    const images = rawImages.map(img => {
+        let finalUrl = img.image_url;
+        if (!finalUrl && img.id) {
+            finalUrl = `/v1/organizations/image/${img.id}`;
         }
-    }
+        if (finalUrl && !finalUrl.startsWith('http')) {
+            finalUrl = `${config.baseUrl}${finalUrl}`;
+        }
+        return { ...img, image_url: finalUrl };
+    });
 
     return {
         ...org,
         ...profile,
+        images,
         services,
+        trustScore,
+        isVerified: trustScore >= 80 || profile.verified,
         reviews_stats: reviewsData.stats,
         recent_reviews: (reviewsData.reviews || []).slice(0, 5),
-        is_favorite: isFavorite
+        is_favorite: favoriteStatus,
+        email_verified: org.email_verified || false,
+        org_is_setup_completed: org.org_is_setup_completed || false
     };
 };
 
