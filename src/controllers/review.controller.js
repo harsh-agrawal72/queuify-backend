@@ -46,19 +46,14 @@ const getOrgReviews = catchAsync(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const offset = (page - 1) * limit;
 
-    // Parallel fetch for best performance
-    const [reviews, stats] = await Promise.all([
-        reviewModel.getReviewsByOrgId(orgId, limit, offset),
-        reviewModel.getReviewsStatsByOrgId(orgId)
-    ]);
+    const data = await require('../services/review.service').getOrgReviews(orgId, limit, offset);
 
     res.status(httpStatus.OK).send({
-        reviews,
-        stats,
+        ...data,
         pagination: {
             page,
             limit,
-            hasMore: reviews.length === limit
+            hasMore: data.reviews.length === limit
         }
     });
 });
