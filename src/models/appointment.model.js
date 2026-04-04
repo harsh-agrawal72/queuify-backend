@@ -330,47 +330,47 @@ const getAppointmentById = async (id) => {
 
 const getAppointmentsByUserId = async (userId) => {
     const result = await pool.query(
-        `WITH QueueRanks AS (
-            SELECT a.id, 
+        `WITH UserQueueRanks AS (
+            SELECT a_qr.id, 
                    ROW_NUMBER() OVER (
-                       PARTITION BY a.slot_id
-                       ORDER BY a.created_at ASC
+                       PARTITION BY a_qr.slot_id
+                       ORDER BY a_qr.created_at ASC, a_qr.id ASC
                    ) as calculated_queue
-            FROM appointments a
-            JOIN services s ON a.service_id = s.id
-            WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
+            FROM appointments a_qr
+            JOIN services s_qr ON a_qr.service_id = s_qr.id
+            WHERE a_qr.status IN ('pending', 'confirmed', 'serving', 'completed')
          ),
-         QueueMetadata AS (
-            SELECT a.slot_id,
-                   MIN(q.calculated_queue) FILTER (WHERE a.status = 'serving') as serving_token,
-                   COUNT(*) FILTER (WHERE a.status IN ('confirmed', 'pending', 'serving')) as total_active
-            FROM appointments a
-            JOIN QueueRanks q ON a.id = q.id
-            GROUP BY a.slot_id
+         UserQueueMetadata AS (
+            SELECT a_qm.slot_id,
+                   MIN(qr_qm.calculated_queue) FILTER (WHERE a_qm.status = 'serving') as serving_token,
+                   COUNT(*) FILTER (WHERE a_qm.status IN ('confirmed', 'pending', 'serving')) as total_active
+            FROM appointments a_qm
+            JOIN UserQueueRanks qr_qm ON a_qm.id = qr_qm.id
+            GROUP BY a_qm.slot_id
          )
          SELECT a.*, 
                 COALESCE(q.calculated_queue, 0) as live_queue_number,
                 COALESCE((
                     SELECT COUNT(*) 
                     FROM appointments a2
-                    JOIN QueueRanks q2 ON a2.id = q2.id
+                    JOIN UserQueueRanks q2 ON a2.id = q2.id
                     WHERE a2.slot_id IS NOT DISTINCT FROM a.slot_id 
                       AND a2.status IN ('confirmed', 'pending', 'serving')
-                      AND q2.calculated_queue < q.calculated_queue
+                      AND q2.calculated_queue < COALESCE(q.calculated_queue, 0)
                 ), 0) as people_ahead,
                 qm.serving_token,
                 qm.total_active as total_in_slot,
                 u.name as user_name, u.email as user_email,
                 s.name as service_name, s.estimated_service_time, r.name as resource_name,
-                o.name as org_name, o.contact_email as org_contact_email, o.contact_phone as org_contact_phone,
+                o.name as org_name, o.contact_email as org_contact_email, o.phone as org_contact_phone,
                 COALESCE(p.address, o.address) as org_address, p.city as org_city, p.state as org_state, p.pincode as org_pincode, logo.image_url as org_logo_url,
                 sl.start_time, sl.end_time, a.reschedule_count,
                 a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
                 psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
                 rv.id as review_id, rv.rating as review_rating
          FROM appointments a
-         LEFT JOIN QueueRanks q ON a.id = q.id
-         LEFT JOIN QueueMetadata qm ON a.slot_id = qm.slot_id
+         LEFT JOIN UserQueueRanks q ON a.id = q.id
+         LEFT JOIN UserQueueMetadata qm ON a.slot_id = qm.slot_id
          LEFT JOIN users u ON a.user_id = u.id
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN organizations o ON a.org_id = o.id
@@ -391,15 +391,15 @@ const getAppointmentsByUserId = async (userId) => {
 
 const getAppointmentsByOrgId = async (orgId) => {
     const result = await pool.query(
-        `WITH QueueRanks AS (
-            SELECT a.id, 
+        `WITH OrgQueueRanks AS (
+            SELECT a_qr.id, 
                    ROW_NUMBER() OVER (
-                       PARTITION BY a.slot_id
-                       ORDER BY a.created_at ASC
+                       PARTITION BY a_qr.slot_id
+                       ORDER BY a_qr.created_at ASC, a_qr.id ASC
                    ) as calculated_queue
-            FROM appointments a
-            JOIN services s ON a.service_id = s.id
-            WHERE a.status IN ('pending', 'confirmed', 'serving', 'completed')
+            FROM appointments a_qr
+            JOIN services s_qr ON a_qr.service_id = s_qr.id
+            WHERE a_qr.status IN ('pending', 'confirmed', 'serving', 'completed')
          )
          SELECT a.*, 
                 COALESCE(q.calculated_queue, 0) as live_queue_number,
@@ -411,7 +411,7 @@ const getAppointmentsByOrgId = async (orgId) => {
                 psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
                 rv.id as review_id, rv.rating as review_rating
          FROM appointments a
-         LEFT JOIN QueueRanks q ON a.id = q.id
+         LEFT JOIN OrgQueueRanks q ON a.id = q.id
          LEFT JOIN users u ON a.user_id = u.id
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN organizations o ON a.org_id = o.id
