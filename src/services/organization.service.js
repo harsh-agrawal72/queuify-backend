@@ -2,6 +2,9 @@ const httpStatus = require('../utils/httpStatus');
 const organizationModel = require('../models/organization.model');
 const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
+const organizationProfileModel = require('../models/organization_profile.model');
+const organizationImageModel = require('../models/organization_image.model');
+const organizationProfileService = require('./organization_profile.service');
 
 /**
  * Create an organization
