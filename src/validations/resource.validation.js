@@ -15,6 +15,7 @@ const createResource = {
                 })
             )
         ).optional(),
+        is_active: Joi.boolean().default(true),
         serviceId: Joi.string().uuid().optional(),
     }),
 };

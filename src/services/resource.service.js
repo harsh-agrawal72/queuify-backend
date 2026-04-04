@@ -3,16 +3,16 @@ const httpStatus = require('../utils/httpStatus');
 const ApiError = require('../utils/ApiError');
 
 const createResource = async (orgId, resourceBody) => {
-    const { name, type, description, concurrent_capacity, serviceIds } = resourceBody;
+    const { name, type, description, concurrent_capacity, is_active, serviceIds } = resourceBody;
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const res = await client.query(
-            `INSERT INTO resources (org_id, name, type, description, concurrent_capacity)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO resources (org_id, name, type, description, concurrent_capacity, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING *`,
-            [orgId, name, type || 'staff', description, concurrent_capacity || 1]
+            [orgId, name, type || 'staff', description, concurrent_capacity || 1, is_active !== false]
         );
         const resource = res.rows[0];
 
