@@ -1194,7 +1194,7 @@ const getLiveQueue = async (orgId, date) => {
         queue.appointments.push({
             ...appt,
             queue_number: parseInt(appt.queue_number),
-            is_past: appt.slot_end ? new Date(appt.slot_end) < new Date(new Date().getTime() + (new Date().getTimezoneOffset() * 60000) + (3600000 * 5.5)) : false
+            is_past: appt.slot_end ? new Date(appt.slot_end) < new Date() : false
         });
     });
 

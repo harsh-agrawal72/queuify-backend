@@ -88,7 +88,7 @@ const getAvailableSlots = async (orgId, filters = {}) => {
     let query = `SELECT s.* FROM slots s 
                  WHERE s.org_id = $1 
                  AND s.booked_count < s.max_capacity 
-                 AND (s.end_time AT TIME ZONE 'Asia/Kolkata') > (NOW() AT TIME ZONE 'Asia/Kolkata')
+                 AND s.end_time > NOW()
                  AND s.is_active = TRUE 
                  AND (s.status = 'active' OR s.status = 'Available')`;
     const params = [orgId];
