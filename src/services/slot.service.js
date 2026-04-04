@@ -103,12 +103,10 @@ const getAvailableSlots = async (orgId, filters = {}) => {
     }
 
     return slots
-        .filter(slot => new Date(slot.end_time) > now) // Allow booking only if slot has not ended yet
+        .filter(slot => new Date(slot.start_time) > now) // Only show future slots
         .map(slot => {
             const slotStart = new Date(slot.start_time);
-            // If the slot has already started, calculation starts from 'now', 
-            // otherwise it starts from the slot's start_time.
-            const baseTime = slotStart > now ? slotStart : now;
+            const baseTime = slotStart; // Since slotStart > now, baseTime is always slotStart
             const minutesToAdd = slot.booked_count * estimatedServiceTime;
             const estimatedNextTime = new Date(baseTime.getTime() + minutesToAdd * 60000);
 

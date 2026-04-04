@@ -242,23 +242,26 @@ const fillSlotFromWaitlist = async (slotId) => {
                  LEFT JOIN users u ON a.user_id = u.id
                  JOIN services s ON a.service_id = s.id
                  JOIN organizations o ON a.org_id = o.id
-                 WHERE a.status IN ('waitlisted_urgent', 'pending')
+                 WHERE a.status IN ('waitlisted_urgent', 'pending', 'waitlisted')
                    AND a.org_id = $1
                    AND (
-                        -- Use resource_services join which is the primary link
+                        -- Service must be supported by the resource
                         a.service_id IN (SELECT rs.service_id FROM resource_services rs WHERE rs.resource_id = $2)
                    )
                    AND (
+                        -- Resource preference matching
                         a.pref_resource = 'ANY' 
                         OR (a.pref_resource = 'SPECIFIC' AND (a.resource_id = $2 OR a.slot_id IS NULL))
-                        -- ^ RELAXED: If slot_id is NULL, it means their original resource is gone/unavailable,
-                        -- so we allow them to be picked up by ANY resource that fits the service.
                    )
                    AND (
+                        -- Date must be today or in the past (already overdue)
                         a.preferred_date::date <= $3::date
-                        OR (a.slot_id IS NULL AND a.status = 'pending')
+                        OR (a.slot_id IS NULL AND a.status = 'pending' AND a.preferred_date::date <= $3::date)
                    )
-                 ORDER BY (a.status = 'waitlisted_urgent') DESC, (a.preferred_date = $3::date) DESC, a.created_at ASC
+                 ORDER BY 
+                    (a.status = 'waitlisted_urgent') DESC, -- 1. Urgent status first
+                    (a.preferred_date <= $3::date) DESC,   -- 2. Today or past dates first
+                    a.created_at ASC                       -- 3. Oldest in those groups first
                  LIMIT 1 FOR UPDATE SKIP LOCKED`,
                 [slot.org_id, slot.resource_id, localDate]
             );

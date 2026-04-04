@@ -977,12 +977,13 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             console.error('[Admin-StatusUpdate-Socket] Failed silently:', socketErr.message);
         }
 
-        // Waitlist filling
+        // Waitlist filling - Trigger whenever a slot spot opens up
         if (['completed', 'cancelled', 'no_show'].includes(status)) {
             const reassignmentService = require('./reassignment.service');
-            if (status === 'cancelled') {
-                reassignmentService.fillSlotFromWaitlist(appointment.slot_id).catch(e => console.error('[Admin-WaitlistFill] Failed silently:', e.message));
-            }
+            // Call fillSlotFromWaitlist for all these statuses to ensure waitlisted/pending users get the spot
+            reassignmentService.fillSlotFromWaitlist(appointment.slot_id).catch(e => 
+                console.error(`[Admin-StatusUpdate-WaitlistFill] Failed for slot ${appointment.slot_id}:`, e.message)
+            );
         }
 
         // Notifications
