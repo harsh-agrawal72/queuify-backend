@@ -56,8 +56,6 @@ const updateOrganizationStatus = async (id, status) => {
     return updatedOrg;
 };
 
-const organizationProfileService = require('./organization_profile.service');
-
 const getOrganizationBySlug = async (slug) => {
     const org = await organizationModel.getOrganizationBySlug(slug);
     if (!org) {
