@@ -136,7 +136,7 @@ const getPublicProfileBySlug = async (slug, userId = null) => {
     const [profileResult, rawImages, services, reviewsData, favoriteStatus] = await Promise.all([
         organizationProfileModel.getProfileByOrgId(orgId).catch(() => ({})),
         organizationImageModel.getImagesByOrgId(orgId).catch(() => []),
-        pool.query('SELECT * FROM services WHERE org_id = $1 AND is_active = true', [orgId]).then(r => r.rows).catch(() => []),
+        pool.query('SELECT * FROM services WHERE org_id = $1 AND is_active = true ORDER BY created_at DESC', [orgId]).then(r => r.rows).catch(() => []),
         reviewService.getOrgReviews(orgId).catch(() => ({ reviews: [], stats: { totalReviews: 0, averageRating: 0 } })),
         userId ? pool.query('SELECT 1 FROM user_favorites WHERE user_id = $1 AND org_id = $2', [userId, orgId]).then(r => r.rows.length > 0).catch(() => false) : Promise.resolve(false)
     ]);
