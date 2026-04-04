@@ -159,8 +159,8 @@ const getPublicProfileBySlug = async (slug, userId = null) => {
     });
 
     return {
-        ...org,
         ...profile,
+        ...org, // Org ID and fields win
         images,
         services,
         trustScore,
@@ -169,7 +169,9 @@ const getPublicProfileBySlug = async (slug, userId = null) => {
         recent_reviews: (reviewsData.reviews || []).slice(0, 5),
         is_favorite: favoriteStatus,
         email_verified: org.email_verified || false,
-        org_is_setup_completed: org.org_is_setup_completed || false
+        org_is_setup_completed: org.org_is_setup_completed || false,
+        avg_rating: (reviewsData.stats && reviewsData.stats.averageRating) || 0,
+        total_reviews: (reviewsData.stats && reviewsData.stats.totalReviews) || 0
     };
 };
 
