@@ -379,7 +379,7 @@ const getAppointmentsByUserId = async (userId) => {
          LEFT JOIN slots sl ON a.slot_id = sl.id
          LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
          LEFT JOIN reviews rv ON a.id = rv.appointment_id
-         WHERE a.user_id = $1::uuid 
+         WHERE a.user_id = $1::uuid AND a.status != 'pending_payment'
          ORDER BY a.created_at DESC`,
         [userId]
     );
