@@ -59,7 +59,11 @@ const getResourcesByServiceId = async (serviceId) => {
 const getResources = async (orgId, publicOnly = false) => {
     let sql = `
         SELECT r.*, 
-               COALESCE(array_agg(rs.service_id) FILTER (WHERE rs.service_id IS NOT NULL), '{}') as service_ids
+               COALESCE(
+                 json_agg(
+                   json_build_object('id', rs.service_id, 'price', rs.price)
+                 ) FILTER (WHERE rs.service_id IS NOT NULL), '[]'
+               ) as service_mappings
         FROM resources r
         LEFT JOIN resource_services rs ON r.id = rs.resource_id
         WHERE r.org_id = $1 AND r.is_active = TRUE
@@ -73,7 +77,11 @@ const getResources = async (orgId, publicOnly = false) => {
 const getResourceById = async (orgId, resourceId) => {
     const res = await query(`
         SELECT r.*, 
-               COALESCE(array_agg(rs.service_id) FILTER (WHERE rs.service_id IS NOT NULL), '{}') as service_ids
+               COALESCE(
+                 json_agg(
+                   json_build_object('id', rs.service_id, 'price', rs.price)
+                 ) FILTER (WHERE rs.service_id IS NOT NULL), '[]'
+               ) as service_mappings
         FROM resources r
         LEFT JOIN resource_services rs ON r.id = rs.resource_id
         WHERE r.id = $1 AND r.org_id = $2
