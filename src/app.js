@@ -122,6 +122,22 @@ app.get('/v1/diag/all', (req, res) => {
     });
 });
 
+app.get('/v1/diag/test-razorpay', async (req, res) => {
+    const razorpayService = require('./services/razorpay.service');
+    try {
+        const order = await razorpayService.createOrder(100, 'INR', `test_${Date.now().toString().slice(-10)}`);
+        res.json({ success: true, orderId: order.id });
+    } catch (err) {
+        res.status(500).json({ 
+            success: false, 
+            message: err.message,
+            full_error: err,
+            key_id_prefix: config.razorpay.keyId ? config.razorpay.keyId.substring(0, 8) : null,
+            env: config.env
+        });
+    }
+});
+
 const { monitoringMiddleware, errorLoggingMiddleware } = require('./middlewares/monitoring');
 app.use(monitoringMiddleware);
 
