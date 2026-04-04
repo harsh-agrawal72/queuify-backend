@@ -118,6 +118,42 @@ const verifyEmail = async (token) => {
     }
 };
 
+const reviewService = require('./review.service');
+const serviceService = require('./service.service');
+
+const getPublicProfileBySlug = async (slug, userId = null) => {
+    const org = await organizationModel.getOrganizationBySlug(slug);
+    if (!org) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
+    }
+
+    // Parallel fetch for performance
+    const [profile, services, reviewsData] = await Promise.all([
+        organizationProfileService.getFullProfile(org.id),
+        pool.query('SELECT * FROM services WHERE org_id = $1 AND status = \'active\'', [org.id]).then(r => r.rows),
+        reviewService.getOrgReviews(org.id)
+    ]);
+
+    // Check if favorited by user
+    let isFavorite = false;
+    if (userId) {
+        const favRes = await pool.query(
+            'SELECT 1 FROM user_favorites WHERE user_id = $1 AND org_id = $2',
+            [userId, org.id]
+        );
+        isFavorite = favRes.rows.length > 0;
+    }
+
+    return {
+        ...org,
+        ...profile,
+        services,
+        reviews_stats: reviewsData.stats,
+        recent_reviews: reviewsData.reviews.slice(0, 5),
+        is_favorite: isFavorite
+    };
+};
+
 module.exports = {
     createOrganization,
     queryOrganizations,
@@ -125,5 +161,6 @@ module.exports = {
     getOrganizationBySlug,
     updateOrganizationStatus,
     requestEmailVerification,
-    verifyEmail
+    verifyEmail,
+    getPublicProfileBySlug
 };

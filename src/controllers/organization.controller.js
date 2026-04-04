@@ -89,6 +89,13 @@ const getOrganizationBySlug = catchAsync(async (req, res) => {
     res.send(organization);
 });
 
+const getPublicProfile = catchAsync(async (req, res) => {
+    const { slug } = req.params;
+    const userId = req.user ? req.user.id : null;
+    const profile = await organizationService.getPublicProfileBySlug(slug, userId);
+    res.send(profile);
+});
+
 const getOrgImage = catchAsync(async (req, res) => {
     const { imageId } = req.params;
     const { pool } = require('../config/db');
@@ -158,5 +165,6 @@ module.exports = {
     getOrgImage,
     requestEmailVerification,
     verifyEmail,
-    toggleFavorite
+    toggleFavorite,
+    getPublicProfile
 };

@@ -48,6 +48,13 @@ router.route('/:orgId')
     .get(auth('superadmin', 'admin', 'user'), validate(organizationValidation.getOrganization), organizationController.getOrganization)
     .patch(auth('superadmin'), validate(organizationValidation.updateOrganizationStatus), organizationController.updateOrganizationStatus);
 
+router.get('/public-profile/:slug', (req, res, next) => {
+    // Optional auth: if user is logged in, we get their ID for favorite check
+    auth('user', 'admin')(req, res, (err) => {
+        // Ignore auth errors for public profile, just proceed as guest
+        organizationController.getPublicProfile(req, res, next);
+    });
+});
 router.get('/slug/:slug', auth('user', 'admin'), organizationController.getOrganizationBySlug);
 router.post('/:orgId/favorite', auth('user'), organizationController.toggleFavorite);
 
