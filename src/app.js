@@ -110,6 +110,13 @@ app.get('/v1/diag/all', (req, res) => {
                 resolved_ipv4: address || null,
                 error: err ? err.message : null
             },
+            razorpay_status: {
+                has_key_id: !!config.razorpay.keyId,
+                key_id_prefix: config.razorpay.keyId ? config.razorpay.keyId.substring(0, 8) : null,
+                has_secret: !!config.razorpay.keySecret,
+                secret_length: config.razorpay.keySecret ? config.razorpay.keySecret.length : 0
+            },
+            base_url: config.baseUrl,
             headers: req.headers // To see what Render is sending
         });
     });
