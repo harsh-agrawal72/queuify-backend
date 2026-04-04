@@ -1193,7 +1193,8 @@ const getLiveQueue = async (orgId, date) => {
         }
         queue.appointments.push({
             ...appt,
-            queue_number: parseInt(appt.queue_number)
+            queue_number: parseInt(appt.queue_number),
+            is_past: appt.slot_end ? new Date(appt.slot_end) < new Date() : false
         });
     });
 

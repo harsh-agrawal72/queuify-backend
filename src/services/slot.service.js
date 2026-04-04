@@ -103,7 +103,7 @@ const getAvailableSlots = async (orgId, filters = {}) => {
     }
 
     return slots
-        // .filter(slot => new Date(slot.start_time) > now) // Removed to allow booking current on-going slots if capacity exists
+        .filter(slot => new Date(slot.end_time) > now) // Allow booking only if slot has not ended yet
         .map(slot => {
             const slotStart = new Date(slot.start_time);
             // If the slot has already started, calculation starts from 'now', 
