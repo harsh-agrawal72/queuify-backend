@@ -35,10 +35,10 @@ const createOrder = async (amount, currency = 'INR', receipt) => {
         const options = {
             amount: Math.round(amount), // must be an integer (paise)
             currency,
-            receipt,
-            payment_capture: 1 
+            receipt: receipt || `r_${Math.floor(Date.now()/1000)}`
         };
         
+        console.log(`[RazorpayService] Executing rzp.orders.create with options:`, JSON.stringify(options));
         const order = await rzp.orders.create(options);
         return order;
     } catch (error) {

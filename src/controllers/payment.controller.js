@@ -52,11 +52,17 @@ const createOrder = catchAsync(async (req, res) => {
 
     // 3. Create Real Razorpay Order using TOTAL PAYABLE (including fees and GST)
     const totalAmount = parseFloat(finalBreakdown.totalPayable);
+    
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+        console.error(`[PaymentController] Invalid total amount for appointment ${appointmentId}: ${finalBreakdown.totalPayable}`);
+        throw new ApiError(httpStatus.BAD_REQUEST, `Invalid total payable amount: ${finalBreakdown.totalPayable}`);
+    }
+
     const amountInPaise = Math.round(totalAmount * 100);
     console.log(`[PaymentController] Creating order for Appointment ${appointmentId}: Base=${appointmentAmount}, Total=${totalAmount} (${amountInPaise} paise)`);
     
     try {
-        const order = await razorpayService.createOrder(amountInPaise, 'INR', `a_${appointmentId}`);
+        const order = await razorpayService.createOrder(amountInPaise, 'INR', `a_${appointmentId.substring(0, 30)}`);
         console.log(`[PaymentController] Razorpay Order Created: ${order.id}`);
         res.status(httpStatus.OK).send({
             order: {
@@ -69,6 +75,7 @@ const createOrder = catchAsync(async (req, res) => {
         });
     } catch (razorpayError) {
         console.error('[PaymentController] Razorpay order creation failed:', razorpayError.message);
+        // Return full error message to help debug
         throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Razorpay Order Error: ${razorpayError.message}`);
     }
 });
