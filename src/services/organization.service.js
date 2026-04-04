@@ -127,21 +127,36 @@ const getPublicProfileBySlug = async (slug, userId = null) => {
         throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
     }
 
-    // Parallel fetch for performance
+    // Parallel fetch with fault tolerance
     const [profile, services, reviewsData] = await Promise.all([
-        organizationProfileService.getFullProfile(org.id),
-        pool.query('SELECT * FROM services WHERE org_id = $1 AND status = \'active\'', [org.id]).then(r => r.rows),
-        reviewService.getOrgReviews(org.id)
+        organizationProfileService.getFullProfile(org.id).catch(e => {
+            console.error('Profile fetch failed:', e.message);
+            return {};
+        }),
+        pool.query('SELECT * FROM services WHERE org_id = $1 AND status = \'active\'', [org.id])
+            .then(r => r.rows)
+            .catch(e => {
+                console.error('Services fetch failed:', e.message);
+                return [];
+            }),
+        reviewService.getOrgReviews(org.id).catch(e => {
+            console.error('Reviews fetch failed:', e.message);
+            return { reviews: [], stats: { totalReviews: 0, averageRating: 0 } };
+        })
     ]);
 
     // Check if favorited by user
     let isFavorite = false;
     if (userId) {
-        const favRes = await pool.query(
-            'SELECT 1 FROM user_favorites WHERE user_id = $1 AND org_id = $2',
-            [userId, org.id]
-        );
-        isFavorite = favRes.rows.length > 0;
+        try {
+            const favRes = await pool.query(
+                'SELECT 1 FROM user_favorites WHERE user_id = $1 AND org_id = $2',
+                [userId, org.id]
+            );
+            isFavorite = favRes.rows.length > 0;
+        } catch (e) {
+            console.error('Favorite check failed:', e.message);
+        }
     }
 
     return {
@@ -149,7 +164,7 @@ const getPublicProfileBySlug = async (slug, userId = null) => {
         ...profile,
         services,
         reviews_stats: reviewsData.stats,
-        recent_reviews: reviewsData.reviews.slice(0, 5),
+        recent_reviews: (reviewsData.reviews || []).slice(0, 5),
         is_favorite: isFavorite
     };
 };

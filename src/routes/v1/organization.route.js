@@ -48,27 +48,9 @@ router.route('/:orgId')
     .get(auth('superadmin', 'admin', 'user'), validate(organizationValidation.getOrganization), organizationController.getOrganization)
     .patch(auth('superadmin'), validate(organizationValidation.updateOrganizationStatus), organizationController.updateOrganizationStatus);
 
-router.get('/public-profile/:slug', async (req, res, next) => {
-    // Optional auth: if token is present, try to get user info for favorite check
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        try {
-            const token = authHeader.split(' ')[1];
-            const config = require('../../config/config');
-            const jwt = require('jsonwebtoken');
-            const { getUserById } = require('../../models/user.model');
-            const decoded = jwt.verify(token, config.jwt.secret);
-            const user = await getUserById(decoded.sub);
-            if (user) {
-                req.user = user;
-            }
-        } catch (e) {
-            // Log error but continue as guest
-            console.log('Optional auth failed:', e.message);
-        }
-    }
-    organizationController.getPublicProfile(req, res, next);
-});
+const { optionalAuth } = require('../../middlewares/auth');
+
+router.get('/public-profile/:slug', optionalAuth, organizationController.getPublicProfile);
 router.get('/slug/:slug', auth('user', 'admin'), organizationController.getOrganizationBySlug);
 router.post('/:orgId/favorite', auth('user'), organizationController.toggleFavorite);
 

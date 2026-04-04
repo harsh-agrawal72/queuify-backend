@@ -46,4 +46,27 @@ const auth = (...requiredRoles) => async (req, res, next) => {
     }
 };
 
+const optionalAuth = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return next(); // Continue as guest
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+        const decoded = jwt.verify(token, config.jwt.secret);
+        const user = await getUserById(decoded.sub);
+        if (user) {
+            req.user = user;
+        }
+    } catch (e) {
+        // Log skip but continue
+        console.log('Optional auth skipped:', e.message);
+    }
+    next();
+};
+
 module.exports = auth;
+module.exports.optionalAuth = optionalAuth;
