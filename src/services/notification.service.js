@@ -10,6 +10,7 @@ const sendNotification = async (userId, title, message, type, link) => {
         // Check if user has notifications enabled
         const userRes = await pool.query('SELECT notification_enabled FROM users WHERE id = $1', [userId]);
         if (userRes.rows.length > 0 && userRes.rows[0].notification_enabled === false) {
+            console.log(`[Notification-Service] Skipping notification for user ${userId} (preference: disabled)`);
             return null; // User has disabled notifications
         }
     } catch (err) {

@@ -1229,13 +1229,8 @@ const getNotifications = async (userId) => {
         `SELECT id, title, message, created_at as time, is_read, type, link
          FROM notifications 
          WHERE user_id = $1 
-           AND (
-               link LIKE '/admin/%' 
-               OR link IS NULL 
-               OR type IN ('info', 'success', 'warning', 'emergency', 'broadcast')
-           )
          ORDER BY created_at DESC 
-         LIMIT 20`,
+         LIMIT 50`,
         [userId]
     );
     return res.rows;
