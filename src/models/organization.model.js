@@ -16,7 +16,7 @@ const createOrganization = async (orgBody) => {
  * Get organization by slug
  */
 const getOrganizationBySlug = async (slug) => {
-    const result = await pool.query('SELECT * FROM organizations WHERE slug = $1', [slug]);
+    const result = await pool.query('SELECT * FROM organizations WHERE slug ILIKE $1', [slug]);
     return result.rows[0];
 };
 
