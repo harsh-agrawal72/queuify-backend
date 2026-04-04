@@ -54,4 +54,7 @@ router.post('/rebalance/:resourceId', adminController.rebalanceSlots);
 router.get('/users/:userId/loyalty', adminController.getUserLoyalty);
 router.get('/users/:userId/history', adminController.getUserHistory);
 
+router.get('/resources/:resourceId/performance', adminController.getResourcePerformance);
+router.get('/resources/:resourceId/services', adminController.getResourceServices);
+
 module.exports = router;

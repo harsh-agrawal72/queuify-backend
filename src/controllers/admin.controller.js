@@ -157,6 +157,16 @@ const retryRefund = catchAsync(async (req, res) => {
     res.json({ success: true, message: 'Refund retried successfully', data: appointment });
 });
 
+const getResourcePerformance = catchAsync(async (req, res) => {
+    const stats = await adminService.getResourcePerformance(req.user.org_id, req.params.resourceId);
+    res.send(stats);
+});
+
+const getResourceServices = catchAsync(async (req, res) => {
+    const services = await adminService.getResourceServices(req.user.org_id, req.params.resourceId);
+    res.send(services);
+});
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -184,5 +194,8 @@ module.exports = {
     createManualAppointment,
     getUserLoyalty,
     getUserHistory,
-    retryRefund
+    getUserHistory,
+    retryRefund,
+    getResourcePerformance,
+    getResourceServices
 };

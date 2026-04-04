@@ -255,14 +255,14 @@ const createAppointment = async (appointmentBody) => {
         let partitionBy, filterClause, filterParams;
 
         if (service.queue_scope === 'PER_RESOURCE') {
-            partitionBy = 'service_id, resource_id, preferred_date, slot_id';
-            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND (slot_id = $4 OR ($4::uuid IS NULL AND slot_id IS NULL))';
-            filterParams = [serviceId, resourceId, preferredDate, slotId || null];
+            partitionBy = 'resource_id, preferred_date, slot_id';
+            filterClause = 'resource_id = $1 AND preferred_date = $2 AND (slot_id = $3 OR ($3::uuid IS NULL AND slot_id IS NULL))';
+            filterParams = [resourceId, preferredDate, slotId || null];
         } else {
             // CENTRAL Queue: Shared across resources for the same intended date, but still partitioned by slot
-            partitionBy = 'service_id, preferred_date, slot_id';
-            filterClause = 'service_id = $1 AND preferred_date = $2 AND (slot_id = $3 OR ($3::uuid IS NULL AND slot_id IS NULL))';
-            filterParams = [serviceId, preferredDate, slotId || null];
+            partitionBy = 'preferred_date, slot_id';
+            filterClause = 'preferred_date = $1 AND (slot_id = $2 OR ($2::uuid IS NULL AND slot_id IS NULL))';
+            filterParams = [preferredDate, slotId || null];
         }
 
         const queueRes = await client.query(
@@ -588,13 +588,13 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
 
         let partitionBy, filterClause, filterParams;
         if (service.queue_scope === 'PER_RESOURCE') {
-            partitionBy = 'service_id, resource_id, preferred_date, slot_id';
-            filterClause = 'service_id = $1 AND resource_id = $2 AND preferred_date = $3 AND slot_id = $4';
-            filterParams = [updatedAppt.service_id, updatedAppt.resource_id, newPreferredDate, newSlotId];
+            partitionBy = 'resource_id, preferred_date, slot_id';
+            filterClause = 'resource_id = $1 AND preferred_date = $2 AND slot_id = $3';
+            filterParams = [updatedAppt.resource_id, newPreferredDate, newSlotId];
         } else {
-            partitionBy = 'service_id, preferred_date, slot_id';
-            filterClause = 'service_id = $1 AND preferred_date = $2 AND slot_id = $3';
-            filterParams = [updatedAppt.service_id, newPreferredDate, newSlotId];
+            partitionBy = 'preferred_date, slot_id';
+            filterClause = 'preferred_date = $1 AND slot_id = $2';
+            filterParams = [newPreferredDate, newSlotId];
         }
 
         const queueRes = await client.query(

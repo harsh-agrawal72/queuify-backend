@@ -1584,6 +1584,43 @@ const retryRefund = async (orgId, appointmentId) => {
     return await autoRefundService.processRefund(appointmentId, 'admin');
 };
 
+const getResourcePerformance = async (orgId, resourceId) => {
+    // Calculate average service time (in minutes) for this resource over last 30 days
+    // Duration is time between 'serving' status (serving_at) and 'completed' (completed_at)
+    const res = await query(`
+        SELECT 
+            AVG(EXTRACT(EPOCH FROM (completed_at - serving_at))/60) as avg_speed,
+            COUNT(*) as completed_count
+        FROM appointments
+        WHERE resource_id = $1 
+        AND org_id = $2 
+        AND status = 'completed'
+        AND serving_at IS NOT NULL 
+        AND completed_at IS NOT NULL
+        AND completed_at >= NOW() - INTERVAL '30 days'
+    `, [resourceId, orgId]);
+
+    const stats = res.rows[0];
+    const avgSpeed = parseFloat(stats.avg_speed);
+    
+    // If no history, we suggest a default based on the resource type or a fixed 15 mins
+    return {
+        resourceId,
+        avg_service_time: !isNaN(avgSpeed) ? Math.round(avgSpeed) : null,
+        completed_count: parseInt(stats.completed_count) || 0
+    };
+};
+
+const getResourceServices = async (orgId, resourceId) => {
+    const res = await query(`
+        SELECT s.id, s.name, s.price, s.estimated_service_time 
+        FROM services s
+        JOIN resource_services rs ON s.id = rs.service_id
+        WHERE rs.resource_id = $1 AND s.org_id = $2 AND s.is_active = TRUE
+    `, [resourceId, orgId]);
+    return res.rows;
+};
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -1610,6 +1647,9 @@ module.exports = {
     createManualAppointment,
     getUserLoyalty,
     getUserHistory,
-    retryRefund
+    getUserHistory,
+    retryRefund,
+    getResourcePerformance,
+    getResourceServices
 };
 
