@@ -618,13 +618,13 @@ const updateSlot = async (orgId, slotId, updateBody) => {
     const currentSlot = check.rows[0];
     const isPast = new Date(currentSlot.end_time) < new Date();
 
-    // Only block if there are ACTIVE (confirmed/pending) appointments
+    // Only block if there are appointments (excluding cancelled)
     const activeApptCheck = await query(
-        `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status IN ('confirmed', 'pending', 'booked', 'serving')`,
+        `SELECT COUNT(*) FROM appointments WHERE slot_id = $1 AND status != 'cancelled'`,
         [slotId]
     );
     if (parseInt(activeApptCheck.rows[0].count) > 0) {
-        throw new ApiError(httpStatus.BAD_REQUEST, "You can't modify a slot that has active (confirmed/pending) appointments");
+        throw new ApiError(httpStatus.BAD_REQUEST, "you can not update slots which have any appointment");
     }
 
     // Also block update if slot is in the past (no point changing time of past slot)
