@@ -147,18 +147,13 @@ const registerOrganization = async (orgBody, adminBody) => {
         terms_accepted: true
     });
     
-    // Send Welcome Email
-    try {
-        await emailService.sendWelcomeEmail(user.email, user.name);
-    } catch (e) { console.error('Welcome email failed:', e); }
+    // Send Welcome Email asynchronously
+    emailService.sendWelcomeEmail(user.email, user.name).catch(e => console.error('[AUTH-SERVICE] Welcome email failed:', e));
 
-    // Initialize Wallet for the organization
-    try {
-        await walletService.initWallet(org.id);
-    } catch (e) {
-        console.error('Wallet initialization failed for org:', org.id, e.message);
-        // We don't throw here to avoid failing registration if wallet fails
-    }
+    // Initialize Wallet for the organization asynchronously
+    walletService.initWallet(org.id).catch(e => {
+        console.error('[AUTH-SERVICE] Wallet initialization failed for org:', org.id, e.message);
+    });
 
     return { user, org };
 };
@@ -221,10 +216,8 @@ const register = async (userBody) => {
         terms_accepted: true // Manual registration implies acceptance via modal
     });
 
-    // Send Welcome Email
-    try {
-        await emailService.sendWelcomeEmail(user.email, user.name);
-    } catch (e) { console.error('Welcome email failed:', e); }
+    // Send Welcome Email asynchronously
+    emailService.sendWelcomeEmail(user.email, user.name).catch(e => console.error('[AUTH-SERVICE] Welcome email failed:', e));
 
     return user;
 };

@@ -349,14 +349,14 @@ const getAppointmentsByUserId = async (userId) => {
                     SELECT COUNT(*) 
                     FROM appointments a2
                     JOIN QueueRanks q2 ON a2.id = q2.id
-                    WHERE a2.slot_id = a.slot_id 
+                    WHERE a2.slot_id IS NOT DISTINCT FROM a.slot_id 
                       AND a2.status IN ('confirmed', 'pending', 'serving')
                       AND q2.calculated_queue < q.calculated_queue
                 ), 0) as people_ahead,
                 qm.serving_token,
                 qm.total_active as total_in_slot,
                 s.name as service_name, s.estimated_service_time, r.name as resource_name,
-                o.name as org_name, o.address as org_address, o.city as org_city, o.state as org_state, o.pincode as org_pincode, o.contact_phone as org_contact_phone, o.contact_email as org_contact_email, o.logo_url as org_logo_url,
+                o.name as org_name, COALESCE(p.address, o.address) as org_address, p.city as org_city, p.state as org_state, p.pincode as org_pincode, o.phone as org_contact_phone, o.contact_email as org_contact_email, logo.image_url as org_logo_url,
                 sl.start_time, sl.end_time, a.reschedule_count,
                 a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
                 psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
@@ -366,6 +366,10 @@ const getAppointmentsByUserId = async (userId) => {
          LEFT JOIN QueueMetadata qm ON a.slot_id = qm.slot_id
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN organizations o ON a.org_id = o.id
+         LEFT JOIN organization_profiles p ON o.id = p.org_id
+         LEFT JOIN (
+            SELECT org_id, image_url FROM organization_images WHERE image_type = 'logo'
+         ) logo ON o.id = logo.org_id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
          LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
@@ -393,7 +397,7 @@ const getAppointmentsByOrgId = async (orgId) => {
                 COALESCE(q.calculated_queue, 0) as live_queue_number,
                 u.name as user_name, u.email as user_email,
                 s.name as service_name, r.name as resource_name,
-                o.name as org_name, o.address as org_address, o.city as org_city, o.state as org_state, o.pincode as org_pincode, o.contact_phone as org_contact_phone, o.contact_email as org_contact_email, o.logo_url as org_logo_url,
+                o.name as org_name, COALESCE(p.address, o.address) as org_address, p.city as org_city, p.state as org_state, p.pincode as org_pincode, o.phone as org_contact_phone, o.contact_email as org_contact_email, logo.image_url as org_logo_url,
                 sl.start_time, sl.end_time, a.reschedule_count,
                 a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
                 psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
@@ -403,6 +407,10 @@ const getAppointmentsByOrgId = async (orgId) => {
          LEFT JOIN users u ON a.user_id = u.id
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN organizations o ON a.org_id = o.id
+         LEFT JOIN organization_profiles p ON o.id = p.org_id
+         LEFT JOIN (
+            SELECT org_id, image_url FROM organization_images WHERE image_type = 'logo'
+         ) logo ON o.id = logo.org_id
          LEFT JOIN resources r ON a.resource_id = r.id
          LEFT JOIN slots sl ON a.slot_id = sl.id
          LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
