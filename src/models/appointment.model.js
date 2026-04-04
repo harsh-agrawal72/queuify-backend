@@ -360,8 +360,10 @@ const getAppointmentsByUserId = async (userId) => {
                 ), 0) as people_ahead,
                 qm.serving_token,
                 qm.total_active as total_in_slot,
+                u.name as user_name, u.email as user_email,
                 s.name as service_name, s.estimated_service_time, r.name as resource_name,
-                o.name as org_name, COALESCE(p.address, o.address) as org_address, p.city as org_city, p.state as org_state, p.pincode as org_pincode, logo.image_url as org_logo_url,
+                o.name as org_name, o.contact_email as org_contact_email, o.contact_phone as org_contact_phone,
+                COALESCE(p.address, o.address) as org_address, p.city as org_city, p.state as org_state, p.pincode as org_pincode, logo.image_url as org_logo_url,
                 sl.start_time, sl.end_time, a.reschedule_count,
                 a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
                 psl.start_time as proposed_start_time, psl.end_time as proposed_end_time,
@@ -369,6 +371,7 @@ const getAppointmentsByUserId = async (userId) => {
          FROM appointments a
          LEFT JOIN QueueRanks q ON a.id = q.id
          LEFT JOIN QueueMetadata qm ON a.slot_id = qm.slot_id
+         LEFT JOIN users u ON a.user_id = u.id
          LEFT JOIN services s ON a.service_id = s.id
          LEFT JOIN organizations o ON a.org_id = o.id
          LEFT JOIN organization_profiles p ON o.id = p.org_id

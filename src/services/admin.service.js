@@ -773,13 +773,13 @@ const getAppointments = async (orgId, queryParams) => {
     let paramCount = 1;
 
     if (status) {
-        paramCount++;
         if (status === 'reschedule_proposed') {
             queryText += ` AND a.reschedule_status = 'pending'`;
         } else {
+            paramCount++;
             queryText += ` AND a.status = $${paramCount}`;
+            params.push(status);
         }
-        params.push(status);
     }
 
     if (resourceId) {
@@ -821,13 +821,13 @@ const getAppointments = async (orgId, queryParams) => {
         let countParamCount = 1;
 
         if (status) {
-            countParamCount++;
             if (status === 'reschedule_proposed') {
                 countQuery += ` AND a.reschedule_status = 'pending'`;
             } else {
+                countParamCount++;
                 countQuery += ` AND a.status = $${countParamCount}`;
+                countParams.push(status);
             }
-            countParams.push(status);
         }
 
         if (resourceId) {
@@ -849,6 +849,7 @@ const getAppointments = async (orgId, queryParams) => {
             countParamCount++;
             const countSearchParts = [`u.name ILIKE $${countParamCount}`, `u.email ILIKE $${countParamCount}`];
             if (hasCustomerName) countSearchParts.push(`a.customer_name ILIKE $${countParamCount}`);
+            if (hasCustomerPhone) countSearchParts.push(`a.customer_phone ILIKE $${countParamCount}`);
             if (hasTokenNumber) countSearchParts.push(`CAST(a.token_number AS TEXT) ILIKE $${countParamCount}`);
             
             countQuery += ` AND (${countSearchParts.join(' OR ')})`;
