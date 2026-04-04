@@ -46,28 +46,26 @@ const config = require('../config/config');
  * Get full organization profile with images and trust score
  */
 const getFullProfile = async (orgId) => {
-    const org = await organizationModel.getOrganizationById(orgId);
-    const profile = await organizationProfileModel.getProfileByOrgId(orgId) || {};
-    const rawImages = await organizationImageModel.getImagesByOrgId(orgId);
+    // 🚀 Parallel fetch to eliminate sequential wait times
+    const [org, profileResult, rawImages] = await Promise.all([
+        organizationModel.getOrganizationById(orgId),
+        organizationProfileModel.getProfileByOrgId(orgId),
+        organizationImageModel.getImagesByOrgId(orgId)
+    ]);
+
+    const profile = profileResult || {};
     const trustScore = calculateTrustScore(profile, rawImages);
 
     // Transform image URLs
     const images = rawImages.map(img => {
         let finalUrl = img.image_url;
-
-        // If no image_url, it's a binary image in the DB
         if (!finalUrl && img.id) {
             finalUrl = `/v1/organizations/image/${img.id}`;
         }
-
         if (finalUrl && !finalUrl.startsWith('http')) {
             finalUrl = `${config.baseUrl}${finalUrl}`;
         }
-
-        return {
-            ...img,
-            image_url: finalUrl
-        };
+        return { ...img, image_url: finalUrl };
     });
 
     return {
@@ -75,7 +73,8 @@ const getFullProfile = async (orgId) => {
         images,
         trustScore,
         isVerified: trustScore >= 80 || profile.verified,
-        email_verified: org?.email_verified || false
+        email_verified: org?.email_verified || false,
+        org_is_setup_completed: org?.org_is_setup_completed || false
     };
 };
 

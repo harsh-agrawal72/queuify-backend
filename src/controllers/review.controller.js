@@ -42,21 +42,23 @@ const submitReview = catchAsync(async (req, res) => {
 
 const getOrgReviews = catchAsync(async (req, res) => {
     const { orgId } = req.params;
-    const reviews = await reviewModel.getReviewsByOrgId(orgId);
+    const limit = parseInt(req.query.limit) || 20;
+    const page = parseInt(req.query.page) || 1;
+    const offset = (page - 1) * limit;
 
-    // Calculate aggregate (optional, but good for UI)
-    const totalReviews = reviews.length;
-    let averageRating = 0;
-    if (totalReviews > 0) {
-        const sum = reviews.reduce((acc, curr) => acc + curr.rating, 0);
-        averageRating = Number((sum / totalReviews).toFixed(1));
-    }
+    // Parallel fetch for best performance
+    const [reviews, stats] = await Promise.all([
+        reviewModel.getReviewsByOrgId(orgId, limit, offset),
+        reviewModel.getReviewsStatsByOrgId(orgId)
+    ]);
 
     res.status(httpStatus.OK).send({
         reviews,
-        stats: {
-            totalReviews,
-            averageRating
+        stats,
+        pagination: {
+            page,
+            limit,
+            hasMore: reviews.length === limit
         }
     });
 });
