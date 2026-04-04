@@ -134,6 +134,10 @@ module.exports = {
         const { reason } = req.body;
         const result = await appointmentService.flagDispute(req.params.appointmentId, req.user.id, reason);
         res.send(result);
+    }),
+    cancelPendingPayment: catchAsync(async (req, res) => {
+        const result = await appointmentService.cancelPendingPayment(req.params.appointmentId, req.user.id);
+        res.send(result);
     })
 };
 

@@ -1173,6 +1173,71 @@ const flagDispute = async (appointmentId, userId, reason) => {
     }
 };
 
+/**
+ * Cancel a pending payment appointment (Delete from DB and release seat)
+ * @param {string} appointmentId
+ * @param {string} userId
+ */
+const cancelPendingPayment = async (appointmentId, userId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Fetch and Lock
+        const apptRes = await client.query(
+            "SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE",
+            [appointmentId, userId]
+        );
+
+        if (apptRes.rows.length === 0) {
+            // Already gone or not found, just return success
+            await client.query('COMMIT');
+            return { success: true };
+        }
+        
+        const appt = apptRes.rows[0];
+
+        // 2. Security Check: Only allow if still pending_payment
+        if (appt.status !== 'pending_payment') {
+            await client.query('COMMIT');
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Only pending payment appointments can be instantly cleared');
+        }
+
+        // 3. Decrement slot booked_count
+        if (appt.slot_id) {
+            await client.query(
+                "UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1",
+                [appt.slot_id]
+            );
+        }
+
+        // 4. DELETE the appointment (user requested it "gaayab from DB")
+        await client.query("DELETE FROM appointments WHERE id = $1", [appointmentId]);
+
+        await client.query('COMMIT');
+
+        // 5. Emit Socket Update (to refresh Admin Dashboards)
+        const socket = require('../socket/index');
+        try {
+            socket.getIO().to(`org_${appt.org_id}`).emit('queue_update', { 
+                type: 'APPOINTMENT_DELETED',
+                appointmentId, 
+                slotId: appt.slot_id 
+            });
+        } catch (sErr) {
+            console.warn('[Socket-Async] Update failed:', sErr.message);
+        }
+
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('[cancelPendingPayment] Error:', error);
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     bookAppointment,
     cancelAppointment,
@@ -1188,5 +1253,6 @@ module.exports = {
     triggerEmergencyMode,
     verifyOtp,
     markArrived,
-    flagDispute
+    flagDispute,
+    cancelPendingPayment
 };

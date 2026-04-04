@@ -20,6 +20,8 @@ router
     .route('/:appointmentId/cancel')
     .post(auth('user'), validate(appointmentValidation.cancelAppointment), appointmentController.cancelAppointment); // Using POST as it's an action, or could use PATCH/DELETE
 
+router.delete('/:appointmentId/cancel-pending', auth('user'), appointmentController.cancelPendingPayment);
+
 router
     .route('/:appointmentId/status')
     .patch(auth('admin'), validate(appointmentValidation.updateStatus), appointmentController.updateStatus);

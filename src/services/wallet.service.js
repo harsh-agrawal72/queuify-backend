@@ -36,9 +36,9 @@ const creditLockedFunds = async (orgId, amount, appointmentId, description = 'Ap
         
         const wallet = await getWalletByOrgId(orgId);
         
-        // 1. Update wallet's locked funds
+        // 1. Update wallet's locked funds and lifetime earnings
         await client.query(
-            'UPDATE wallets SET locked_funds = locked_funds + $1, total_earned = total_earned + $1 WHERE id = $2',
+            'UPDATE wallets SET locked_funds = locked_funds + $1, total_earned = total_earned + $1, lifetime_earned = lifetime_earned + $1 WHERE id = $2',
             [amount, wallet.id]
         );
 

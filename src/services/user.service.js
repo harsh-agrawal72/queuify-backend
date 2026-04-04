@@ -14,7 +14,7 @@ const getUserStats = async (userId) => {
     return cacheService.getOrSet(`user_stats_${userId}`, async () => {
         // 1. Total Appointments
         const totalRes = await pool.query(
-            'SELECT COUNT(*) FROM appointments WHERE user_id = $1',
+            "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status != 'pending_payment'",
             [userId]
         );
 

@@ -33,8 +33,8 @@ const getGlobalOverview = async () => {
         // 3. Booking Stats (All time)
         const bookingsRes = await pool.query(`
             SELECT 
-                COUNT(*) as total, 
-                SUM(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 ELSE 0 END) as today,
+                COUNT(*) FILTER (WHERE status != 'pending_payment') as total, 
+                SUM(CASE WHEN DATE(created_at) = CURRENT_DATE AND status != 'pending_payment' THEN 1 ELSE 0 END) as today,
                 SUM(CASE WHEN status = 'waitlisted_urgent' THEN 1 ELSE 0 END) as total_urgent,
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as total_pending,
                 SUM(CASE WHEN DATE(created_at) = CURRENT_DATE AND status = 'waitlisted_urgent' THEN 1 ELSE 0 END) as today_urgent

@@ -42,10 +42,11 @@ const getOverview = async (orgId) => {
             totalCapacityRes,
             totalBookedRes,
             recentActivityRes,
-            orgRes
+            orgRes,
+            walletRes
         ] = await Promise.all([
             query('SELECT COUNT(*) FROM slots WHERE org_id = $1', [orgId]),
-            query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + interval '1 day'", [orgId]),
+            query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status != 'pending_payment' AND created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + interval '1 day'", [orgId]),
             query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'confirmed'", [orgId]),
             query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'completed'", [orgId]),
             query("SELECT COUNT(*) FROM appointments WHERE org_id = $1 AND status = 'cancelled'", [orgId]),
@@ -60,7 +61,8 @@ const getOverview = async (orgId) => {
                 ORDER BY a.created_at DESC
                 LIMIT 5
             `, [orgId]),
-            query('SELECT industry_type FROM organizations WHERE id = $1', [orgId])
+            query('SELECT industry_type FROM organizations WHERE id = $1', [orgId]),
+            query('SELECT COALESCE(lifetime_earned, 0) as lifetime FROM wallets WHERE org_id = $1', [orgId])
         ]);
 
         console.log("Next Slot:", nextSlotRes.rows[0]);
@@ -79,7 +81,8 @@ const getOverview = async (orgId) => {
             utilization: utilization,
             nextSlot: nextSlotRes.rows[0] || null,
             recentActivity: recentActivityRes.rows,
-            orgType: orgType
+            orgType: orgType,
+            lifetimeEarning: parseFloat(walletRes.rows[0]?.lifetime || 0)
         };
     } catch (error) {
         console.error("Error in getOverview:", error);
@@ -155,7 +158,7 @@ const getTodayQueue = async (orgId) => {
             (a.slot_id IS NOT NULL AND sl.start_time >= CURRENT_DATE AND sl.start_time < CURRENT_DATE + interval '1 day')
             OR (a.slot_id IS NULL AND a.created_at >= CURRENT_DATE AND a.created_at < CURRENT_DATE + interval '1 day')
         )
-        AND a.status != 'cancelled'
+        AND a.status NOT IN ('cancelled', 'pending_payment')
         ORDER BY a.created_at ASC
     `, [orgId]);
     return res.rows;
@@ -207,12 +210,15 @@ const getAnalytics = async (orgId, filters = {}) => {
         pIdx++;
     }
 
-    // ═══════════════════════════════════════
+    // 0. Lifetime Earning from Wallet
+    const walletRes = await query('SELECT COALESCE(lifetime_earned, 0) as lifetime FROM wallets WHERE org_id = $1', [orgId]);
+    const lifetimeEarningTotal = parseFloat(walletRes.rows[0]?.lifetime || 0);
+
     // 1. All Analytical Queries (Parallelized)
     // ═══════════════════════════════════════
     const kpiQuery = `
         SELECT
-            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE a.status::text != 'pending_payment') AS total,
             COUNT(*) FILTER (WHERE a.status::text IN ('confirmed', 'booked', 'serving', 'completed')) AS confirmed,
             COUNT(*) FILTER (WHERE a.status::text = 'cancelled') AS cancelled,
             COUNT(*) FILTER (WHERE a.status::text = 'completed') AS completed,
@@ -511,6 +517,7 @@ const getAnalytics = async (orgId, filters = {}) => {
         completedBookings: safeNum(completed),
         utilization: safeNum(utilization),
         cancellationRate: safeNum(cancellationRate),
+        lifetimeEarning: safeNum(lifetimeEarningTotal),
         // Growth vs previous period
         growth: {
             bookings: safeNum(bookingChange),

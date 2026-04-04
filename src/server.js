@@ -8,6 +8,7 @@ const http = require('http');
 let socket;
 let reminderCron;
 let settlementCron;
+let paymentCleanupCron;
 
 try {
     socket = require('./socket/index');
@@ -28,6 +29,13 @@ try {
 } catch (e) {
     console.warn('Settlement cron module not loaded:', e.message);
     settlementCron = { init: () => { }, runSettlement: async () => ({}) };
+}
+
+try {
+    paymentCleanupCron = require('./cron/paymentCleanup');
+} catch (e) {
+    console.warn('Payment Cleanup cron module not loaded:', e.message);
+    paymentCleanupCron = { init: () => { } };
 }
 
 let server;
@@ -51,6 +59,12 @@ const startServer = () => {
         settlementCron.init();
     } catch (e) {
         console.warn('Settlement cron init failed:', e.message);
+    }
+
+    try {
+        paymentCleanupCron.init();
+    } catch (e) {
+        console.warn('Payment Cleanup cron init failed:', e.message);
     }
 
     // ── Manual Test Trigger for Settlement (DEV only) ──
