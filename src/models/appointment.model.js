@@ -301,7 +301,8 @@ const getAppointmentById = async (id) => {
                      s.name as service_name, s.queue_scope,
                      r.name as resource_name,
                      o.name as org_name, o.contact_email as org_contact_email, o.contact_phone as org_contact_phone,
-                     o.address as org_address, o.city as org_city, o.state as org_state, o.pincode as org_pincode, o.logo_url as org_logo_url,
+                     COALESCE(p.address, o.address) as org_address, p.city as org_city, p.state as org_state, p.pincode as org_pincode, 
+                     logo.image_url as org_logo_url,
                      u.name as user_name, u.email as user_email,
                      sl.start_time, sl.end_time, a.reschedule_count,
                      a.proposed_slot_id, a.reschedule_status, a.reschedule_reason, a.is_priority,
@@ -310,9 +311,13 @@ const getAppointmentById = async (id) => {
              LEFT JOIN services s ON a.service_id = s.id
              LEFT JOIN resources r ON a.resource_id = r.id
              LEFT JOIN organizations o ON a.org_id = o.id
+             LEFT JOIN organization_profiles p ON o.id = p.org_id
+             LEFT JOIN (
+                SELECT org_id, image_url FROM organization_images WHERE image_type = 'logo'
+             ) logo ON o.id = logo.org_id
              LEFT JOIN users u ON a.user_id = u.id
              LEFT JOIN slots sl ON a.slot_id = sl.id
-          LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
+             LEFT JOIN slots psl ON a.proposed_slot_id = psl.id
              WHERE a.id = $1::uuid`,
             [id]
         );
