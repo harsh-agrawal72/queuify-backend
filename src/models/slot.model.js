@@ -85,24 +85,24 @@ const getSlotsWithDetails = async (filters) => {
  * Get available slots for user booking (future, not full)
  */
 const getAvailableSlots = async (orgId, filters = {}) => {
-    let query = 'SELECT * FROM slots WHERE org_id = $1 AND booked_count < max_capacity AND start_time > NOW() AND is_active = TRUE AND status = \'active\'';
+    let query = 'SELECT s.* FROM slots s WHERE s.org_id = $1 AND s.booked_count < s.max_capacity AND s.end_time > NOW() AND s.is_active = TRUE AND (s.status = \'active\' OR s.status = \'Available\')';
     const params = [orgId];
     let idx = 2;
 
     if (filters.serviceId) {
-        query += ` AND EXISTS (SELECT 1 FROM resource_services rs WHERE rs.resource_id = slots.resource_id AND rs.service_id = $${idx++})`;
+        query += ` AND EXISTS (SELECT 1 FROM resource_services rs WHERE rs.resource_id = s.resource_id AND rs.service_id = $${idx++})`;
         params.push(filters.serviceId);
     }
     if (filters.resourceId) {
-        query += ` AND resource_id = $${idx++}`;
+        query += ` AND s.resource_id = $${idx++}`;
         params.push(filters.resourceId);
     }
     if (filters.date) {
-        query += ` AND DATE(start_time AT TIME ZONE 'UTC') = $${idx++}`;
+        query += ` AND DATE(s.start_time AT TIME ZONE 'UTC') = $${idx++}`;
         params.push(filters.date);
     }
 
-    query += ' ORDER BY start_time ASC';
+    query += ' ORDER BY s.start_time ASC';
 
     const result = await pool.query(query, params);
     return result.rows;
