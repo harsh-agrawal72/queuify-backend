@@ -731,7 +731,12 @@ const hardDeleteSlot = async (orgId, slotId) => {
 };
 
 const getAppointments = async (orgId, queryParams) => {
-    const { page = 1, limit = 10, status, search, resourceId, date } = queryParams;
+    let { page = 1, limit = 10, status, search, resourceId, date } = queryParams;
+    
+    // Parse to integers and provide fallbacks to prevent NaN
+    page = parseInt(page) || 1;
+    limit = parseInt(limit) || 10;
+    
     const offset = (page - 1) * limit;
 
     const apptCols = await getColumnNames('appointments');
@@ -875,11 +880,13 @@ const getAppointments = async (orgId, queryParams) => {
             return { ...apt, display_token: displayToken };
         });
 
+        const total = parseInt(countRes.rows[0].count);
         return {
             appointments: formattedAppointments,
-            total: parseInt(countRes.rows[0].count),
-            page: parseInt(page),
-            limit: parseInt(limit)
+            total: total,
+            totalPages: Math.ceil(total / limit),
+            page: page,
+            limit: limit
         };
     } catch (e) {
         console.error('[Admin-GetAppointments] Error:', e);

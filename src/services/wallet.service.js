@@ -131,12 +131,12 @@ const refundFunds = async (orgId, appointmentId, amount, isFullRefund = true) =>
 
         if (tx.status === 'locked') {
             await client.query(
-                'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), total_earned = GREATEST(total_earned - $1, 0), lifetime_earned = GREATEST(lifetime_earned - $1, 0) WHERE id = $2',
                 [amount, wallet.id]
             );
         } else if (tx.status === 'available') {
             await client.query(
-                'UPDATE wallets SET available_balance = GREATEST(available_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                'UPDATE wallets SET available_balance = GREATEST(available_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0), lifetime_earned = GREATEST(lifetime_earned - $1, 0) WHERE id = $2',
                 [amount, wallet.id]
             );
         }
@@ -291,7 +291,7 @@ const resolveDispute = async (orgId, appointmentId, decision) => {
         } else {
             // Refund to user (simulated)
             await client.query(
-                'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0), lifetime_earned = GREATEST(lifetime_earned - $1, 0) WHERE id = $2',
                 [tx.amount, wallet.id]
             );
             await client.query("UPDATE wallet_transactions SET status = 'cancelled' WHERE id = $1", [tx.id]);
