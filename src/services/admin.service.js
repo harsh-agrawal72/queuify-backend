@@ -1415,6 +1415,23 @@ const getPredictiveInsights = async (orgId) => {
             GROUP BY a.service_id, a.resource_id, svc.name, r.name
         `, [orgId]);
 
+        // Add resource-level averages across all their services
+        const resourceAvgRes = await query(`
+            SELECT 
+                a.resource_id,
+                r.name as resource_name,
+                AVG(EXTRACT(EPOCH FROM (a.completed_at - a.serving_started_at)) / 60) as avg_duration_minutes,
+                COUNT(*) as completion_count
+            FROM appointments a
+            LEFT JOIN resources r ON a.resource_id = r.id
+            WHERE a.org_id = $1::uuid 
+            AND a.status = 'completed'
+            AND a.serving_started_at IS NOT NULL 
+            AND a.completed_at IS NOT NULL
+            AND a.completed_at > NOW() - interval '30 days'
+            GROUP BY a.resource_id, r.name
+        `, [orgId]);
+
         // 2. Resource Efficiency (Efficiency vs Service Average)
         const resourceEfficiency = avgDurationRes.rows.map(row => {
             const serviceAvg = avgDurationRes.rows
@@ -1472,8 +1489,15 @@ const getPredictiveInsights = async (orgId) => {
 
         return {
             averageDurations: avgDurationRes.rows.map(r => ({
+                serviceId: r.service_id,
+                resourceId: r.resource_id,
                 service: r.service_name,
                 resource: r.resource_name,
+                minutes: Math.round(parseFloat(r.avg_duration_minutes))
+            })),
+            resourceAverages: resourceAvgRes.rows.map(r => ({
+                resourceId: r.resource_id,
+                resourceName: r.resource_name,
                 minutes: Math.round(parseFloat(r.avg_duration_minutes))
             })),
             resourceEfficiency,
@@ -1591,28 +1615,41 @@ const retryRefund = async (orgId, appointmentId) => {
 
 const getResourcePerformance = async (orgId, resourceId) => {
     // Calculate average service time (in minutes) for this resource over last 30 days
-    // Duration is time between 'serving' status (serving_at) and 'completed' (completed_at)
+    // Duration is time between 'serving' status (serving_started_at) and 'completed' (completed_at)
     const res = await query(`
         SELECT 
-            AVG(EXTRACT(EPOCH FROM (completed_at - serving_at))/60) as avg_speed,
+            AVG(EXTRACT(EPOCH FROM (completed_at - serving_started_at))/60) as avg_speed,
             COUNT(*) as completed_count
         FROM appointments
         WHERE resource_id = $1 
         AND org_id = $2 
         AND status = 'completed'
-        AND serving_at IS NOT NULL 
+        AND serving_started_at IS NOT NULL 
         AND completed_at IS NOT NULL
         AND completed_at >= NOW() - INTERVAL '30 days'
     `, [resourceId, orgId]);
 
     const stats = res.rows[0];
-    const avgSpeed = parseFloat(stats.avg_speed);
+    let avgSpeed = parseFloat(stats.avg_speed);
+    let isHistorical = true;
+
+    if (isNaN(avgSpeed)) {
+        // Fallback to average estimated service time from linked services
+        const servicesRes = await query(`
+            SELECT AVG(s.estimated_service_time) as avg_est
+            FROM services s
+            JOIN resource_services rs ON s.id = rs.service_id
+            WHERE rs.resource_id = $1 AND s.org_id = $2 AND s.is_active = TRUE
+        `, [resourceId, orgId]);
+        avgSpeed = parseFloat(servicesRes.rows[0]?.avg_est);
+        isHistorical = false;
+    }
     
-    // If no history, we suggest a default based on the resource type or a fixed 15 mins
     return {
         resourceId,
-        avg_service_time: !isNaN(avgSpeed) ? Math.round(avgSpeed) : null,
-        completed_count: parseInt(stats.completed_count) || 0
+        avg_service_time: !isNaN(avgSpeed) ? Math.round(avgSpeed) : 15,
+        completed_count: parseInt(stats.completed_count) || 0,
+        isHistorical
     };
 };
 
