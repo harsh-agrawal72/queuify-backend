@@ -42,11 +42,11 @@ const getRefundPolicy = (slotStartTime, cancelledBy) => {
 
     console.log(`[RefundPolicy] Calculation: SlotStartTime=${slotStart.toISOString()}, Now=${now.toISOString()}, hoursUntilSlot=${hoursUntilSlot.toFixed(2)}`);
 
-    if (hoursUntilSlot >= 6) {
-        return { percentage: 100, label: 'Full refund (>6h notice)' };
+    if (hoursUntilSlot >= 3) {
+        return { percentage: 100, label: 'Full refund (>=3h notice)' };
     } else {
-        // As per user request: >6hr = 100%, otherwise 50%
-        return { percentage: 50, label: 'Partial refund (<6h notice)' };
+        // As per user request: if cancelled less than 3h before, 85% refund
+        return { percentage: 85, label: 'Partial refund (<3h notice)' };
     }
 };
 
