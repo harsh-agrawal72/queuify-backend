@@ -18,11 +18,11 @@ const payoutValidation = {
         amount: Joi.number().required().min(100),
         bankDetails: Joi.object().required().keys({
             accountHolder: Joi.string().required(),
-            accountNumber: Joi.string().required(),
-            ifsc: Joi.string().required(),
+            accountNumber: Joi.string().allow('', null),
+            ifsc: Joi.string().allow('', null),
             bankName: Joi.string().allow('', null),
             upiId: Joi.string().allow('', null)
-        })
+        }).or('accountNumber', 'upiId')
     })
 };
 router.post('/payout', auth('admin'), validate(payoutValidation), walletController.requestPayout);
