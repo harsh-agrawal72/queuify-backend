@@ -229,27 +229,49 @@ const holdFundsForDispute = async (orgId, appointmentId, reason) => {
         await client.query('BEGIN');
         const wallet = await getWalletByOrgId(orgId);
 
-        // 1. Find the locked transaction
+        // 1. Find all credits related to this appointment (locked or available)
         const txRes = await client.query(
-            "SELECT * FROM wallet_transactions WHERE reference_id = $1 AND type = 'credit' AND status = 'locked' FOR UPDATE",
+            "SELECT * FROM wallet_transactions WHERE reference_id = $1 AND (status = 'locked' OR status = 'available') AND type IN ('credit', 'fee') FOR UPDATE",
             [appointmentId]
         );
+        
         if (txRes.rows.length === 0) {
-            throw new ApiError(httpStatus.NOT_FOUND, 'No locked funds found for this appointment');
+            // Check if it's already disputed
+            const alreadyDisputed = await client.query(
+                "SELECT id FROM wallet_transactions WHERE reference_id = $1 AND status = 'disputed' LIMIT 1",
+                [appointmentId]
+            );
+            if (alreadyDisputed.rows.length > 0) return true; // Already held
+            
+            throw new ApiError(httpStatus.NOT_FOUND, 'No eligible funds found for this appointment to dispute');
         }
-        const tx = txRes.rows[0];
+        
+        const txs = txRes.rows;
+        let totalHeld = 0;
 
-        // 2. Update wallet: locked -> disputed
-        await client.query(
-            'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), disputed_balance = disputed_balance + $1 WHERE id = $2',
-            [tx.amount, wallet.id]
-        );
+        for (const tx of txs) {
+            const amount = parseFloat(tx.amount);
+            totalHeld += amount;
 
-        // 3. Update transaction status
-        await client.query(
-            "UPDATE wallet_transactions SET status = 'disputed', description = description || $1 WHERE id = $2",
-            [` — Disputed: ${reason}`, tx.id]
-        );
+            // 2. Update wallet balances based on tx status
+            if (tx.status === 'locked') {
+                await client.query(
+                    'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), disputed_balance = disputed_balance + $1 WHERE id = $2',
+                    [amount, wallet.id]
+                );
+            } else if (tx.status === 'available') {
+                await client.query(
+                    'UPDATE wallets SET available_balance = GREATEST(available_balance - $1, 0), disputed_balance = disputed_balance + $1 WHERE id = $2',
+                    [amount, wallet.id]
+                );
+            }
+
+            // 3. Update transaction status
+            await client.query(
+                "UPDATE wallet_transactions SET status = 'disputed', description = description || $1 WHERE id = $2",
+                [` — Disputed: ${reason}`, tx.id]
+            );
+        }
 
         await client.query('COMMIT');
         return true;
@@ -271,40 +293,71 @@ const resolveDispute = async (orgId, appointmentId, decision) => {
         await client.query('BEGIN');
         const wallet = await getWalletByOrgId(orgId);
 
-        // 1. Find the disputed transaction
+        // 1. Find the disputed transactions
         const txRes = await client.query(
-            "SELECT * FROM wallet_transactions WHERE reference_id = $1 AND type = 'credit' AND status = 'disputed' FOR UPDATE",
+            "SELECT * FROM wallet_transactions WHERE reference_id = $1 AND status = 'disputed' FOR UPDATE",
             [appointmentId]
         );
         if (txRes.rows.length === 0) {
             throw new ApiError(httpStatus.NOT_FOUND, 'No disputed funds found for this appointment');
         }
-        const tx = txRes.rows[0];
+        
+        const txs = txRes.rows;
+        let totalInDispute = 0;
+        txs.forEach(t => totalInDispute += parseFloat(t.amount));
 
         if (decision === 'release') {
-            // Move to available
+            // Move back to available
             await client.query(
                 'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
-                [tx.amount, wallet.id]
+                [totalInDispute, wallet.id]
             );
-            await client.query("UPDATE wallet_transactions SET status = 'available' WHERE id = $1", [tx.id]);
+            await client.query(
+                "UPDATE wallet_transactions SET status = 'available' WHERE reference_id = $1 AND status = 'disputed'",
+                [appointmentId]
+            );
         } else {
-            // Refund to user (simulated)
+            // REAL REFUND to user
+            const razorpayService = require('./razorpay.service');
+            const appointmentService = require('./appointment.service');
+            const appt = await appointmentService.getAppointmentById(appointmentId);
+
+            if (!appt || !appt.payment_id) {
+                // If no payment ID, just clear internal wallet
+                console.log(`[Dispute-Refund] No payment_id found for appt ${appointmentId}. Performing manual wallet adjustment only.`);
+            } else {
+                // Trigger real Razorpay refund for the full amount (price)
+                await razorpayService.refundPayment(appt.payment_id, appt.price, {
+                    reason: 'dispute_resolution',
+                    appointment_id: appointmentId
+                });
+            }
+
+            // Deduct from admin wallet (Draining the held amount)
             await client.query(
                 'UPDATE wallets SET disputed_balance = GREATEST(disputed_balance - $1, 0), total_earned = GREATEST(total_earned - $1, 0), lifetime_earned = GREATEST(lifetime_earned - $1, 0) WHERE id = $2',
-                [tx.amount, wallet.id]
+                [totalInDispute, wallet.id]
             );
-            await client.query("UPDATE wallet_transactions SET status = 'cancelled' WHERE id = $1", [tx.id]);
+
+            await client.query(
+                "UPDATE wallet_transactions SET status = 'cancelled' WHERE reference_id = $1 AND status = 'disputed'", 
+                [appointmentId]
+            );
+
             await client.query(
                 'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
-                [wallet.id, -tx.amount, 'refund', 'completed', appointmentId, `Dispute Resolved: Refunded to User`]
+                [wallet.id, -totalInDispute, 'refund', 'completed', appointmentId, `Dispute Resolved: Refunded to User via Gateway`]
             );
+            
+            // Mark appointment as fully refunded/cancelled in its status
+            await client.query("UPDATE appointments SET status = 'cancelled', dispute_status = 'resolved' WHERE id = $1", [appointmentId]);
         }
 
         await client.query('COMMIT');
         return true;
     } catch (e) {
         await client.query('ROLLBACK');
+        console.error('[Dispute-Resolution] Error:', e.message);
         throw e;
     } finally {
         client.release();
