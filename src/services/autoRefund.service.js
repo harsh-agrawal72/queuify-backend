@@ -326,69 +326,59 @@ const processNoShowSettlement = async (appointmentId) => {
         }
 
         const originalAmount = parseFloat(appt.price);
-        const splitAmount = parseFloat((originalAmount / 2).toFixed(2));
+        const adminPayout = parseFloat((originalAmount * 0.70).toFixed(2));
+        const platformProfit = parseFloat((originalAmount * 0.30).toFixed(2));
 
-        console.log(`[NoShow-Settlement] Splitting ₹${originalAmount} (50/50) -> ₹${splitAmount} each for Appt ${appointmentId}`);
+        console.log(`[NoShow-Settlement] Splitting ₹${originalAmount} (70/30) -> Admin: ₹${adminPayout}, Platform: ₹${platformProfit} for Appt ${appointmentId}`);
 
-        // 3. Trigger 50% Razorpay Refund
-        let razorpayRefundId = null;
-        let refundSuccessful = true;
-        
-        if (appt.payment_id) {
-            try {
-                const rzpRefund = await razorpayService.refundPayment(appt.payment_id, splitAmount, {
-                    appointment_id: appointmentId,
-                    reason: 'No-Show: 50% partial refund'
-                });
-                razorpayRefundId = rzpRefund.id;
-            } catch (rzpErr) {
-                console.error(`[NoShow-Settlement] Razorpay API refund FAILED:`, rzpErr.message);
-                refundSuccessful = false;
-            }
-        }
-
-        // 4. Update Appointment
+        // 3. Update Appointment (User gets 0% refund)
         await client.query(
             `UPDATE appointments 
              SET payment_status = $1, 
-                 refund_amount = $2, 
-                 razorpay_refund_id = $3,
+                 refund_amount = 0, 
                  updated_at = NOW() 
-             WHERE id = $4`,
-            [refundSuccessful ? 'no_show_settled' : 'settlement_failed', splitAmount, razorpayRefundId, appointmentId]
+             WHERE id = $2`,
+            ['no_show_settled', appointmentId]
         );
 
-        // 5. Release remaining 50% to Organization Wallet
+        // 4. Release 70% to Organization Wallet
         const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
         if (walletRes.rows.length > 0) {
             const walletId = walletRes.rows[0].id;
-            // 50% goes to available (as no-show fee)
+            // 70% goes to available (as no-show fee)
             await client.query(
                 `UPDATE wallets SET 
                     locked_funds = GREATEST(locked_funds - $1, 0), 
                     available_balance = available_balance + $2,
                     total_earned = total_earned + $2
                  WHERE id = $3`,
-                [originalAmount, splitAmount, walletId]
+                [originalAmount, adminPayout, walletId]
             );
 
             // Update original locked transaction
             await client.query(
-                `UPDATE wallet_transactions SET status = 'cancelled', description = description || ' (No-Show: 50/50 split)'
+                `UPDATE wallet_transactions SET status = 'cancelled', description = description || ' (No-Show: 70/30 split)'
                  WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
                 [appointmentId]
             );
 
-            // Log the payout portion
+            // Log the payout portion (70%)
             await client.query(
                 `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                 VALUES ($1, $2, 'payout', 'completed', $3, $4)`,
-                [walletId, splitAmount, appointmentId, `No-Show fee (50%): ${appointmentId}`]
+                 VALUES ($1, $2, 'available', 'completed', $3, $4)`,
+                [walletId, adminPayout, appointmentId, `No-Show fee (70%): ${appointmentId}`]
+            );
+
+            // Log the platform profit (30%) as a separate commission entry
+            await client.query(
+                `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
+                 VALUES ($1, $2, 'commission', 'completed', $3, $4)`,
+                [walletId, platformProfit, appointmentId, `Platform Commission (30%): ${appointmentId}`]
             );
         }
 
         await client.query('COMMIT');
-        return { settled: true, userRefund: splitAmount, adminPayout: splitAmount };
+        return { settled: true, userRefund: 0, adminPayout: adminPayout, platformProfit: platformProfit };
 
     } catch (err) {
         await client.query('ROLLBACK');
