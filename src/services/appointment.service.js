@@ -382,11 +382,15 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
     if (appointment.org_id !== orgId) {
         throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
     }
+
+    if (status === 'no_show' && appointment.check_in_method === 'user_signal') {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Cannot mark as No-Show: User has already signaled arrival ("I am here").');
+    }
+
     const updatedAppointment = await appointmentModel.updateAppointmentStatus(appointmentId, status, admin_remarks);
 
     // If status changed to completed, cancelled, or no_show, trigger auto-advancement
     if (['completed', 'cancelled', 'no_show'].includes(status)) {
-        // USER REQUEST: Disable automatic "Start Serving" for the next appointment.
         // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
         
         // Also trigger waitlist fill if space opened up
@@ -1127,6 +1131,15 @@ const markArrived = async (appointmentId, userId) => {
         [appointmentId, userId]
     );
     if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found or unauthorized');
+    
+    // Notify admin
+    const socket = require('../socket/index');
+    socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, { 
+        type: 'USER_ARRIVED', 
+        appointmentId,
+        userName: res.rows[0].user_name // If joined, but usually just a generic trigger is enough
+    });
+
     return res.rows[0];
 };
 
@@ -1142,7 +1155,10 @@ const markDelayed = async (appointmentId, userId) => {
     
     // Notify admin
     const socket = require('../socket/index');
-    socket.emitQueueUpdate({ orgId: res.rows[0].org_id });
+    socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, { 
+        type: 'USER_DELAYED', 
+        appointmentId 
+    });
     
     return res.rows[0];
 };
@@ -1270,6 +1286,7 @@ module.exports = {
     triggerEmergencyMode,
     verifyOtp,
     markArrived,
+    markDelayed,
     flagDispute,
     cancelPendingPayment
 };
