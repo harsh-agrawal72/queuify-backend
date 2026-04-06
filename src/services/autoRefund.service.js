@@ -13,7 +13,6 @@
  *   └───────────────────────────────────────────────────────┘
  *
  *   Admin cancellations ALWAYS give 100% refund.
- *   (Note: ₹20 penalty is currently DISABLED in settlement cron).
  */
 
 const { pool } = require('../config/db');

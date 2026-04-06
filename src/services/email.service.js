@@ -246,6 +246,41 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
+    sendWayReminderEmail: async (to, appointment) => {
+        const subject = '⏰ Almost Your Turn! Click "On the Way"';
+        const userName = appointment.userName || appointment.user_name || 'there';
+        const orgName = appointment.orgName || appointment.org_name || 'Clinic';
+        const serviceName = appointment.serviceName || appointment.service_name || 'Service';
+        const predictedTime = appointment.startTime;
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="margin: 0; font-size: 24px; color: #4f46e5;">It's Almost Your Turn!</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello <strong>${userName}</strong>, you're expected at the counter in about <strong>10 minutes</strong>.</p>
+            
+            <div style="background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 20px; padding: 32px; margin: 24px 0; text-align: center;">
+                <p style="margin: 0; font-size: 13px; font-weight: 800; color: #5b21b6; text-transform: uppercase; letter-spacing: 0.1em;">Action Required: "On the Way"</p>
+                <div style="margin-top: 20px;">
+                    <p style="margin: 0; color: #1e293b; font-weight: 700; font-size: 18px;">${serviceName}</p>
+                    <p style="margin: 4px 0 0 0; color: #64748b;">At: <strong>${orgName}</strong></p>
+                    ${predictedTime ? `<p style="margin: 12px 0 0 0; color: #7c3aed; font-size: 15px; font-weight: 600;">Expected Turn: ${formatTime(predictedTime)}</p>` : ''}
+                </div>
+            </div>
+
+            <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 16px; padding: 20px; margin-bottom: 24px;">
+                <p style="margin: 0; color: #92400e; font-size: 14px; line-height: 1.5;">
+                    <strong>Important:</strong> If you are heading to the clinic, please click the <strong>"On the Way"</strong> button in your dashboard. This ensures the doctor knows you are coming and won't skip your turn!
+                </p>
+            </div>
+            
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/dashboard" class="button" style="background: #4f46e5; box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3);">Open Dashboard & Mark "On the Way"</a>
+            </div>
+            
+            <p style="text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px;">Thank you for helping us maintain a smooth queue experience.</p>
+        `, `Reminder: Your turn for ${serviceName} is in ~10 mins. Mark yourself "On the Way"!`);
+        await sendEmail(to, subject, html);
+    },
+
     sendAdminBookingNotification: async (to, appointment) => {
         const tokenNumber = appointment.token_number || appointment.tokenNumber || 'N/A';
         const subject = `New Booking: #${tokenNumber} - ${appointment.service_name || 'Service'}`;
