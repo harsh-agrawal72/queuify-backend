@@ -1123,14 +1123,30 @@ const verifyOtp = async (appointmentId, otp, orgId, adminRemarks = null) => {
 };
 
 /**
- * User signals arrival at the clinic
+ * User signals arrival at the clinic via QR scan
  */
-const markArrived = async (appointmentId, userId) => {
-    const res = await pool.query(
-        "UPDATE appointments SET check_in_method = 'user_signal', updated_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING *",
+const markArrived = async (appointmentId, userId, scannedOrgId) => {
+    // First, verify the appointment exists and belongs to the user
+    const check = await pool.query(
+        "SELECT id, org_id FROM appointments WHERE id = $1 AND user_id = $2",
         [appointmentId, userId]
     );
-    if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found or unauthorized');
+
+    if (check.rows.length === 0) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found or unauthorized');
+    }
+
+    const appointment = check.rows[0];
+
+    // Verify scan if scannedOrgId is provided (QR scan enforcement)
+    if (scannedOrgId && scannedOrgId !== appointment.org_id) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid QR Code. Please scan the QR code of the correct clinic.');
+    }
+
+    const res = await pool.query(
+        "UPDATE appointments SET check_in_method = 'user_signal', updated_at = NOW() WHERE id = $1 RETURNING *",
+        [appointmentId]
+    );
     
     // Notify admin
     const socket = require('../socket/index');

@@ -127,7 +127,8 @@ module.exports = {
         res.send(result);
     }),
     markArrived: catchAsync(async (req, res) => {
-        const result = await appointmentService.markArrived(req.params.appointmentId, req.user.id);
+        const { scannedOrgId } = req.body;
+        const result = await appointmentService.markArrived(req.params.appointmentId, req.user.id, scannedOrgId);
         res.send(result);
     }),
     markDelayed: catchAsync(async (req, res) => {

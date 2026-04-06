@@ -912,7 +912,7 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
     try {
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
+        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status, check_in_method FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
@@ -925,9 +925,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
         const price = parseFloat(priceRes.rows[0]?.price || 0);
 
-        // Only require OTP verification if the appointment was actually paid online and funds are in escrow.
-        // Walk-in or offline paid appointments can be directly marked as completed by the admin.
-        if (status === 'completed' && appointment.payment_status === 'paid' && price > 0) {
+        // Only require OTP verification if:
+        // 1. It's a paid online appointment with price > 0
+        // 2. AND they haven't verified presence via QR scan (user_signal)
+        if (status === 'completed' && appointment.payment_status === 'paid' && price > 0 && appointment.check_in_method !== 'user_signal') {
             throw new ApiError(httpStatus.BAD_REQUEST, 'Online paid appointments must be verified via OTP to release escrow funds.');
         }
 
