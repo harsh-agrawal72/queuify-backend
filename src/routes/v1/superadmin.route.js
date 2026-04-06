@@ -56,4 +56,7 @@ router.route('/broadcast')
 router.get('/payouts', superadminController.getPayoutRequests);
 router.patch('/payouts/:payoutId/status', superadminController.updatePayoutStatus);
 
+router.get('/disputes', superadminController.getActiveDisputes);
+router.patch('/disputes/:appointmentId/resolve', superadminController.resolvePlatformDispute);
+
 module.exports = router;

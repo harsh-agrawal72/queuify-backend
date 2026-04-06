@@ -198,6 +198,18 @@ const updatePayoutStatus = catchAsync(async (req, res) => {
     res.send(result);
 });
 
+const getActiveDisputes = catchAsync(async (req, res) => {
+    const disputes = await superadminService.getActiveDisputes();
+    res.send(disputes);
+});
+
+const resolvePlatformDispute = catchAsync(async (req, res) => {
+    const { appointmentId } = req.params;
+    const { decision } = req.body; // 'release' | 'refund'
+    const result = await superadminService.resolvePlatformDispute(appointmentId, decision, req.user.id);
+    res.send(result);
+});
+
 module.exports = {
     getOverview,
     getGlobalMonitor,
@@ -226,5 +238,7 @@ module.exports = {
     sendBroadcast,
     getBroadcastHistory,
     getPayoutRequests,
-    updatePayoutStatus
+    updatePayoutStatus,
+    getActiveDisputes,
+    resolvePlatformDispute
 };
