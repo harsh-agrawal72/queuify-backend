@@ -102,8 +102,8 @@ const getOrgDetails = async (orgId) => {
 };
 
 const updateOrgDetails = async (orgId, updateBody) => {
-    const { 
-        name, contactEmail, openTime, closeTime, phone, address, 
+    const {
+        name, contactEmail, openTime, closeTime, phone, address,
         email_notification, new_booking_notification, queue_mode_default,
         payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id
     } = updateBody;
@@ -127,7 +127,7 @@ const updateOrgDetails = async (orgId, updateBody) => {
          WHERE id = $15
          RETURNING *`,
         [
-            name, contactEmail, openTime, closeTime, phone, address, 
+            name, contactEmail, openTime, closeTime, phone, address,
             email_notification, new_booking_notification, queue_mode_default,
             payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id,
             orgId
@@ -373,8 +373,8 @@ const getAnalytics = async (orgId, filters = {}) => {
 
     // ── Utilization Processing (The Precise Formula) ──
     const capacityTotal = parseInt(utilRes.rows[0].capacity) || 0;
-    const bookedVolume = parseInt(volumeRes.rows[0].volume) || 0; 
-    
+    const bookedVolume = parseInt(volumeRes.rows[0].volume) || 0;
+
     // Utilization = (Bookings linked to slots in period / Capacity of slots in period) * 100. 
     // We cap at 100% and show 0% if no capacity is defined.
     let utilization = 0;
@@ -400,17 +400,17 @@ const getAnalytics = async (orgId, filters = {}) => {
 
         // Bookings count
         const foundTrend = trendRes.rows.find(r => r.date === ds);
-        
+
         // Utilization calculation for this day
         const dailyCapEntry = dailyUtilRes.rows.find(r => (r.date instanceof Date ? r.date : new Date(r.date)).toISOString().split('T')[0] === ds);
         const dailyBookEntry = dailyBookedRes.rows.find(r => (r.date instanceof Date ? r.date : new Date(r.date)).toISOString().split('T')[0] === ds);
-        
+
         const dayCap = parseInt(dailyCapEntry?.capacity || 0);
         const dayBook = parseInt(dailyBookEntry?.booked || 0);
         const dayUtil = dayCap > 0 ? Math.min(Math.round((dayBook / dayCap) * 100), 100) : 0;
 
-        dailyStats.push({ 
-            date: ds, 
+        dailyStats.push({
+            date: ds,
             count: parseInt(foundTrend?.count || 0),
             utilization: dayUtil,
             capacity: dayCap,
@@ -508,7 +508,7 @@ const getAnalytics = async (orgId, filters = {}) => {
     // Return
     // ═══════════════════════════════════════
     const safeNum = (val) => (isFinite(val) && !isNaN(val)) ? val : 0;
-    
+
     return {
         // KPIs
         totalBookings: safeNum(total),
@@ -525,7 +525,7 @@ const getAnalytics = async (orgId, filters = {}) => {
             utilization: safeNum(utilization - prevUtilization),
         },
         // Charts
-        dailyBookings: dailyStats || [], 
+        dailyBookings: dailyStats || [],
         bookingsByService: (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })),
         bookingsByResource: (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })),
         statusDistribution: statusDistribution || [],
@@ -533,18 +533,18 @@ const getAnalytics = async (orgId, filters = {}) => {
             const d = parseInt(r.day);
             const h = parseInt(r.hour);
             const c = parseInt(r.count);
-            return { 
-                day: isFinite(d) ? d : 0, 
-                hour: isFinite(h) ? h : 0, 
-                count: isFinite(c) ? c : 0 
+            return {
+                day: isFinite(d) ? d : 0,
+                hour: isFinite(h) ? h : 0,
+                count: isFinite(c) ? c : 0
             };
         }),
         // Insights
         insights: insights || [],
         // Meta
-        dateRange: { 
-            start: startStr, 
-            end: endStr 
+        dateRange: {
+            start: startStr,
+            end: endStr
         },
         orgName,
         orgType
@@ -732,11 +732,11 @@ const hardDeleteSlot = async (orgId, slotId) => {
 
 const getAppointments = async (orgId, queryParams) => {
     let { page = 1, limit = 10, status, search, resourceId, date } = queryParams;
-    
+
     // Parse to integers and provide fallbacks to prevent NaN
     page = parseInt(page) || 1;
     limit = parseInt(limit) || 10;
-    
+
     const offset = (page - 1) * limit;
 
     const apptCols = await getColumnNames('appointments');
@@ -850,11 +850,11 @@ const getAppointments = async (orgId, queryParams) => {
 
         if (date) {
             countParamCount++;
-        countQuery += ` AND (
+            countQuery += ` AND (
             (a.slot_id IS NOT NULL AND DATE(s.start_time) = $${countParamCount}) OR
             (a.slot_id IS NULL AND (a.preferred_date = $${countParamCount} OR (a.preferred_date IS NULL AND DATE(a.created_at) = $${countParamCount})))
         )`;
-        countParams.push(date);
+            countParams.push(date);
         }
 
         if (search) {
@@ -863,7 +863,7 @@ const getAppointments = async (orgId, queryParams) => {
             if (hasCustomerName) countSearchParts.push(`a.customer_name ILIKE $${countParamCount}`);
             if (hasCustomerPhone) countSearchParts.push(`a.customer_phone ILIKE $${countParamCount}`);
             if (hasTokenNumber) countSearchParts.push(`CAST(a.token_number AS TEXT) ILIKE $${countParamCount}`);
-            
+
             countQuery += ` AND (${countSearchParts.join(' OR ')})`;
             countParams.push(`%${search}%`);
         }
@@ -899,12 +899,12 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
     if (slotId) {
         const appointmentModel = require('../models/appointment.model');
         const result = await appointmentModel.rescheduleAppointment(appointmentId, null, slotId, true, orgId);
-        
+
         if (result.appointment.slot_id) {
             const { checkAndNotifySlotWaiters } = require('./appointment.service');
             checkAndNotifySlotWaiters(result.appointment.slot_id).catch(err => console.error(`[Admin-ForceMove-Notify] Error:`, err));
         }
-        
+
         return result.appointment;
     }
 
@@ -920,7 +920,7 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         // --- PAYMENT SECURITY CHECK ---
         const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
         const price = parseFloat(priceRes.rows[0]?.price || 0);
-        
+
         // Only require OTP verification if the appointment was actually paid online and funds are in escrow.
         // Walk-in or offline paid appointments can be directly marked as completed by the admin.
         if (status === 'completed' && appointment.payment_status === 'paid' && price > 0) {
@@ -972,6 +972,16 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             }
         }
 
+        // 13. Async No-Show Settlement
+        if (status === 'no_show' && appointment.status !== 'no_show') {
+            if (appointment.payment_status === 'paid' && price > 0) {
+                console.log(`[Admin-NoShow-Settlement] Triggering 50/50 split for Appointment ${appointmentId}`);
+                autoRefundService.processNoShowSettlement(appointmentId)
+                    .then(result => console.log(`[Admin-NoShow-Settlement] Success:`, result))
+                    .catch(err => console.error(`[Admin-NoShow-Settlement] FAILED:`, err.message));
+            }
+        }
+
         // --- POST-COMMIT ACTIONS ---
         // Real-time update
         try {
@@ -996,7 +1006,7 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         if (['completed', 'cancelled', 'no_show'].includes(status)) {
             const reassignmentService = require('./reassignment.service');
             // Call fillSlotFromWaitlist for all these statuses to ensure waitlisted/pending users get the spot
-            reassignmentService.fillSlotFromWaitlist(appointment.slot_id).catch(e => 
+            reassignmentService.fillSlotFromWaitlist(appointment.slot_id).catch(e =>
                 console.error(`[Admin-StatusUpdate-WaitlistFill] Failed for slot ${appointment.slot_id}:`, e.message)
             );
         }
@@ -1024,11 +1034,11 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                 const data = details.rows[0];
 
                 if (data && data.user_email && data.email_notification_enabled !== false) {
-                     emailService.sendStatusUpdateEmail(data.user_email, data).catch(e => console.error('[Email-Async] User email failed:', e.message));
+                    emailService.sendStatusUpdateEmail(data.user_email, data).catch(e => console.error('[Email-Async] User email failed:', e.message));
                 }
 
                 if (data && data.notification_enabled !== false) {
-                     notificationService.sendNotification(
+                    notificationService.sendNotification(
                         data.user_id,
                         'Appointment Status Updated',
                         `Your appointment for ${data.service_name} status: ${status.toUpperCase()}.`,
@@ -1146,6 +1156,7 @@ const getLiveQueue = async (orgId, date) => {
             a.status,
             a.payment_status,
             a.price,
+            a.check_in_method,
             a.created_at,
             ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
             a.service_id,
@@ -1220,7 +1231,7 @@ const getLiveQueue = async (orgId, date) => {
 const createManualAppointment = async (orgId, appointmentData) => {
     const appointmentModel = require('../models/appointment.model');
     console.log('[createManualAppointment] Incoming Data:', JSON.stringify(appointmentData, null, 2));
-    
+
     // Generate a short numeric OR alphanumeric token (e.g., W-123)
     if (!appointmentData.token_number) {
         const rand = Math.floor(100 + Math.random() * 899); // 3 digits
@@ -1294,7 +1305,7 @@ const globalSearch = async (orgId, searchQuery) => {
         // Search Appointments (by Patient Name, Email, or Token)
         const apptCols = await getColumnNames('appointments');
         const hasTokenNumber = apptCols.includes('token_number');
-        
+
         const searchConditions = [`u.name ILIKE $2`, `u.email ILIKE $2`];
         if (hasTokenNumber) {
             searchConditions.push(`CAST(a.token_number AS TEXT) ILIKE $2`);
@@ -1444,7 +1455,7 @@ const getPredictiveInsights = async (orgId) => {
             const serviceAvg = avgDurationRes.rows
                 .filter(r => r.service_id === row.service_id)
                 .reduce((acc, r, _, arr) => acc + (parseFloat(r.avg_duration_minutes) / arr.length), 0);
-            
+
             const duration = parseFloat(row.avg_duration_minutes);
             const efficiency = (serviceAvg > 0 && duration > 0) ? (serviceAvg / duration) : 1;
             const efficiency_score = Math.min(Math.round(efficiency * 100), 200); // Cap at 200% for sanity
@@ -1476,12 +1487,12 @@ const getPredictiveInsights = async (orgId) => {
         const currentQueues = await getLiveQueue(orgId);
         const waitTimePredictions = currentQueues.map(q => {
             const waitingCount = q.appointments.filter(a => a.status === 'confirmed' || a.status === 'pending').length;
-            
+
             // Find specific average for this resource/service
-            const stats = avgDurationRes.rows.find(r => 
+            const stats = avgDurationRes.rows.find(r =>
                 r.service_id === q.service_id && (q.resource_id ? r.resource_id === q.resource_id : true)
             );
-            
+
             const avgMins = stats ? parseFloat(stats.avg_duration_minutes) : 15; // fallback to 15m
             const predictedWait = waitingCount * avgMins;
 
@@ -1608,7 +1619,7 @@ const retryRefund = async (orgId, appointmentId) => {
         'SELECT id, status, payment_status, org_id FROM appointments WHERE id = $1 AND org_id = $2',
         [appointmentId, orgId]
     );
-    
+
     if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
     const apt = res.rows[0];
 
@@ -1651,7 +1662,7 @@ const getResourcePerformance = async (orgId, resourceId) => {
         avgSpeed = parseFloat(servicesRes.rows[0]?.avg_est);
         isHistorical = false;
     }
-    
+
     return {
         resourceId,
         avg_service_time: !isNaN(avgSpeed) ? Math.round(avgSpeed) : 15,

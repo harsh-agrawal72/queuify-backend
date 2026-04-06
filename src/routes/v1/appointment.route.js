@@ -61,6 +61,7 @@ router.get('/debug/slot-queues', async (req, res) => {
 });
 
 router.post('/:appointmentId/arrive', auth('user'), appointmentController.markArrived);
+router.post('/:appointmentId/delay', auth('user'), appointmentController.markDelayed);
 router.post('/:appointmentId/dispute', auth('user'), validate({
     body: require('joi').object().keys({
         reason: require('joi').string().required().max(500)

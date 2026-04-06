@@ -90,6 +90,7 @@ const runSettlement = async () => {
             }
         }
 
+        /* 
         // ── Case 3: Admin Penalty — Last-Minute Admin Cancellations ──
         // If an admin cancelled a paid appointment within 4 hours of its slot,
         // deduct ₹20 penalty from their wallet (if not already penalized).
@@ -157,6 +158,7 @@ const runSettlement = async () => {
                 console.error(`[Settlement] Penalty error for appt ${row.appointment_id}:`, e.message);
             }
         }
+        */
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
         const summary = {

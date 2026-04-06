@@ -12,8 +12,8 @@
  *   │  < 1 hour                │  0%        │  No refund    │
  *   └───────────────────────────────────────────────────────┘
  *
- *   Admin cancellations ALWAYS give 100% refund + ₹20 penalty
- *   (penalty is applied separately by settlement cron).
+ *   Admin cancellations ALWAYS give 100% refund.
+ *   (Note: ₹20 penalty is currently DISABLED in settlement cron).
  */
 
 const { pool } = require('../config/db');
@@ -293,4 +293,111 @@ const getRefundPreview = async (appointmentId, cancelledBy = 'user') => {
     };
 };
 
-module.exports = { processRefund, getRefundPolicy, getRefundPreview };
+/**
+ * Process a 50/50 settlement for No-Show appointments.
+ * User gets 50% refund, Org gets 50% payout.
+ * 
+ * @param {string} appointmentId 
+ */
+const processNoShowSettlement = async (appointmentId) => {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // 1. Fetch appointment details
+        const apptRes = await client.query(
+            `SELECT a.id, a.org_id, a.user_id, a.price, a.payment_status, a.status, a.payment_id
+             FROM appointments a
+             WHERE a.id = $1`,
+            [appointmentId]
+        );
+
+        const appt = apptRes.rows[0];
+        if (!appt) {
+            await client.query('ROLLBACK');
+            return { settled: false, reason: 'Appointment not found' };
+        }
+
+        // 2. Only process if this was a paid appointment
+        if (appt.payment_status !== 'paid' || parseFloat(appt.price) <= 0) {
+            await client.query('ROLLBACK');
+            return { settled: false, reason: 'No payment to settle' };
+        }
+
+        const originalAmount = parseFloat(appt.price);
+        const splitAmount = parseFloat((originalAmount / 2).toFixed(2));
+
+        console.log(`[NoShow-Settlement] Splitting ₹${originalAmount} (50/50) -> ₹${splitAmount} each for Appt ${appointmentId}`);
+
+        // 3. Trigger 50% Razorpay Refund
+        let razorpayRefundId = null;
+        let refundSuccessful = true;
+        
+        if (appt.payment_id) {
+            try {
+                const rzpRefund = await razorpayService.refundPayment(appt.payment_id, splitAmount, {
+                    appointment_id: appointmentId,
+                    reason: 'No-Show: 50% partial refund'
+                });
+                razorpayRefundId = rzpRefund.id;
+            } catch (rzpErr) {
+                console.error(`[NoShow-Settlement] Razorpay API refund FAILED:`, rzpErr.message);
+                refundSuccessful = false;
+            }
+        }
+
+        // 4. Update Appointment
+        await client.query(
+            `UPDATE appointments 
+             SET payment_status = $1, 
+                 refund_amount = $2, 
+                 razorpay_refund_id = $3,
+                 updated_at = NOW() 
+             WHERE id = $4`,
+            [refundSuccessful ? 'no_show_settled' : 'settlement_failed', splitAmount, razorpayRefundId, appointmentId]
+        );
+
+        // 5. Release remaining 50% to Organization Wallet
+        const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
+        if (walletRes.rows.length > 0) {
+            const walletId = walletRes.rows[0].id;
+            // 50% goes to available (as no-show fee)
+            await client.query(
+                `UPDATE wallets SET 
+                    locked_funds = GREATEST(locked_funds - $1, 0), 
+                    available_balance = available_balance + $2,
+                    total_earned = total_earned + $2
+                 WHERE id = $3`,
+                [originalAmount, splitAmount, walletId]
+            );
+
+            // Update original locked transaction
+            await client.query(
+                `UPDATE wallet_transactions SET status = 'cancelled', description = description || ' (No-Show: 50/50 split)'
+                 WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
+                [appointmentId]
+            );
+
+            // Log the payout portion
+            await client.query(
+                `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
+                 VALUES ($1, $2, 'payout', 'completed', $3, $4)`,
+                [walletId, splitAmount, appointmentId, `No-Show fee (50%): ${appointmentId}`]
+            );
+        }
+
+        await client.query('COMMIT');
+        return { settled: true, userRefund: splitAmount, adminPayout: splitAmount };
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`[NoShow-Settlement] Error:`, err.message);
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = { processRefund, getRefundPolicy, getRefundPreview, processNoShowSettlement };
+

@@ -1131,6 +1131,23 @@ const markArrived = async (appointmentId, userId) => {
 };
 
 /**
+ * User signals they are on the way / delayed
+ */
+const markDelayed = async (appointmentId, userId) => {
+    const res = await pool.query(
+        "UPDATE appointments SET check_in_method = 'user_delayed', updated_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING *",
+        [appointmentId, userId]
+    );
+    if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found or unauthorized');
+    
+    // Notify admin
+    const socket = require('../socket/index');
+    socket.emitQueueUpdate({ orgId: res.rows[0].org_id });
+    
+    return res.rows[0];
+};
+
+/**
  * User flags a dispute for an appointment
  */
 const flagDispute = async (appointmentId, userId, reason) => {

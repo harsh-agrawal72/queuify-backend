@@ -130,6 +130,10 @@ module.exports = {
         const result = await appointmentService.markArrived(req.params.appointmentId, req.user.id);
         res.send(result);
     }),
+    markDelayed: catchAsync(async (req, res) => {
+        const result = await appointmentService.markDelayed(req.params.appointmentId, req.user.id);
+        res.send(result);
+    }),
     flagDispute: catchAsync(async (req, res) => {
         const { reason } = req.body;
         const result = await appointmentService.flagDispute(req.params.appointmentId, req.user.id, reason);
