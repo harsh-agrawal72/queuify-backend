@@ -750,7 +750,7 @@ const getAppointments = async (orgId, queryParams) => {
     let queryText = `
         SELECT 
             a.id, a.org_id, a.user_id, a.service_id, a.resource_id, a.slot_id,
-            a.status, a.payment_status, a.price, a.razorpay_refund_id,
+            a.status, a.payment_status, a.price, a.razorpay_refund_id, a.check_in_method,
             ${hasCancelledBy ? 'a.cancelled_by,' : "NULL as cancelled_by,"}
             a.created_at, 
             ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
@@ -916,6 +916,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
+
+        if (status === 'no_show' && appointment.check_in_method === 'user_signal') {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Cannot mark as No-Show: User has already signaled arrival ("I am here").');
+        }
 
         // --- PAYMENT SECURITY CHECK ---
         const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
