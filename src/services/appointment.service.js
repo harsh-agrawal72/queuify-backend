@@ -1053,73 +1053,8 @@ const triggerEmergencyMode = async (orgId, resourceId, date) => {
     return reassignmentService.triggerEmergencyMode(orgId, resourceId, date);
 };
 
-const verifyOtp = async (appointmentId, otp, orgId, adminRemarks = null) => {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-
-        // 1. Fetch appointment details
-        const res = await client.query(
-            'SELECT id, otp_code, org_id, price, payment_status, status FROM appointments WHERE id = $1',
-            [appointmentId]
-        );
-        const appointment = res.rows[0];
-
-        if (!appointment) {
-            throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
-        }
-
-        if (appointment.org_id !== orgId) {
-            throw new ApiError(httpStatus.FORBIDDEN, 'Unauthorized access to this appointment');
-        }
-
-        // 2. Check if already completed
-        if (appointment.status === 'completed') {
-            throw new ApiError(httpStatus.BAD_REQUEST, 'Appointment is already completed');
-        }
-
-        // 3. Verify OTP
-        // Detailed logging to solve the "Invalid OTP" mystery
-        console.log(`[OTP-Verify] ID: ${appointmentId}, DB-OTP: "${appointment.otp_code}", Provided: "${otp}"`);
-        
-        const storedOtp = String(appointment.otp_code || '').trim();
-        const providedOtp = String(otp || '').trim();
-
-        if (storedOtp !== providedOtp) {
-            throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid 4-digit OTP provided');
-        }
-
-        // 4. If Paid, release funds from escrow
-        if (parseFloat(appointment.price) > 0) {
-            const walletService = require('./wallet.service');
-            await walletService.releaseFunds(appointment.org_id, appointment.id, client);
-        }
-
-        // 5. Update Status to Completed & Save Remarks
-        await client.query(
-            "UPDATE appointments SET status = 'completed', completed_at = NOW(), admin_remarks = $2 WHERE id = $1",
-            [appointmentId, adminRemarks]
-        );
-
-        await client.query('COMMIT');
-
-        // Logic for auto-advancement after completion (Fire and Forget)
-        (async () => {
-            try {
-                console.log(`[OTP] Appointment ${appointmentId} verified and completed.`);
-            } catch (e) {
-                console.error('[OTP-Async] Advancement failed:', e);
-            }
-        })();
-
-        return { success: true };
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('[verifyOtp] Error:', error);
-        throw error;
-    } finally {
-        client.release();
-    }
+const verifyOtp = async (appointmentId) => {
+    throw new ApiError(httpStatus.GONE, 'OTP verification has been replaced by mandatory QR scanning.');
 };
 
 /**

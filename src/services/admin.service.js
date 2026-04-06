@@ -921,15 +921,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             throw new ApiError(httpStatus.BAD_REQUEST, 'Cannot mark as No-Show: User has already signaled arrival ("I am here").');
         }
 
-        // --- PAYMENT SECURITY CHECK ---
-        const priceRes = await client.query('SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2', [appointment.resource_id, appointment.service_id]);
-        const price = parseFloat(priceRes.rows[0]?.price || 0);
-
-        // Only require OTP verification if:
-        // 1. It's a paid online appointment with price > 0
-        // 2. AND they haven't verified presence via QR scan (user_signal)
-        if (status === 'completed' && appointment.payment_status === 'paid' && price > 0 && appointment.check_in_method !== 'user_signal') {
-            throw new ApiError(httpStatus.BAD_REQUEST, 'Online paid appointments must be verified via OTP to release escrow funds.');
+        // --- MANDATORY VERIFICATION CHECK ---
+        const isWalkIn = !appointment.user_id;
+        if (status === 'completed' && !isWalkIn && appointment.check_in_method !== 'user_signal') {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Online customers must scan the clinic QR code to verify presence before completion.');
         }
 
         const apptCols = await getColumnNames('appointments');

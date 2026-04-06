@@ -40,7 +40,7 @@ router
 
 router.post('/emergency-mode', auth('admin'), validate(appointmentValidation.triggerEmergencyMode), appointmentController.triggerEmergencyMode);
 
-router.post('/:appointmentId/verify-otp', auth('admin'), validate(appointmentValidation.verifyOtp), appointmentController.verifyOtp);
+
 
 router.get('/:appointmentId/queue', auth(), appointmentController.getQueueStatus);
 

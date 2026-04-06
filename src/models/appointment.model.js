@@ -142,12 +142,14 @@ const createAppointment = async (appointmentBody) => {
         const values = [orgId, slotId || null, userId || null, serviceId, resourceId || null, slotId ? 'confirmed' : 'pending', pref_resource || 'ANY', pref_time || 'FLEXIBLE', preferredDate];
         const valuePlaceholders = ['$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9'];
 
-        // Add Automated Payment Columns
+        // OTP logic removed in favor of mandatory QR scanning
+        /*
         if (existingCols.includes('otp_code')) {
             columns.push('otp_code');
             values.push(otpCode);
             valuePlaceholders.push(`$${values.length}`);
         }
+        */
 
         // Fetch Price from Mapping (with fallback to Resource Price then Service Base Price)
         if (existingCols.includes('price')) {

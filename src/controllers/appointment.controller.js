@@ -121,11 +121,7 @@ module.exports = {
             ...result
         });
     }),
-    verifyOtp: catchAsync(async (req, res) => {
-        const { otp, remarks } = req.body;
-        const result = await appointmentService.verifyOtp(req.params.appointmentId, otp, req.user.org_id, remarks);
-        res.send(result);
-    }),
+
     markArrived: catchAsync(async (req, res) => {
         const { scannedOrgId } = req.body;
         const result = await appointmentService.markArrived(req.params.appointmentId, req.user.id, scannedOrgId);
