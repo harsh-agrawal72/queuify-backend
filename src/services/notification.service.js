@@ -1,65 +1,120 @@
-const notificationModel = require('../models/notification.model');
+const admin = require('../config/firebase');
 const { pool } = require('../config/db');
-const socket = require('../socket/index');
 
 /**
- * Send a notification to a user (respects notification_enabled preference)
+ * Save a push token for a user
  */
-const sendNotification = async (userId, title, message, type, link) => {
-    try {
-        // Check if user has notifications enabled
-        const userRes = await pool.query('SELECT notification_enabled FROM users WHERE id = $1', [userId]);
-        if (userRes.rows.length > 0 && userRes.rows[0].notification_enabled === false) {
-            console.log(`[Notification-Service] Skipping notification for user ${userId} (preference: disabled)`);
-            return null; // User has disabled notifications
-        }
-    } catch (err) {
-        console.error('Failed to check notification preference:', err.message);
-    }
-    
-    // 1. Create DB Notification
-    const notification = await notificationModel.createNotification({ userId, title, message, type, link });
+const savePushToken = async (userId, token) => {
+    return await pool.query(
+        'UPDATE users SET push_token = $1, updated_at = NOW() WHERE id = $2 RETURNING id',
+        [token, userId]
+    );
+};
 
-    // 2. Emit real-time WebSocket event directly to user
+/**
+ * Send an in-app notification (saved to DB) AND a push notification (if token exists)
+ */
+const sendNotification = async (userId, title, message, type = 'general', link = '/') => {
     try {
-        const io = socket.getIO();
-        if (io) {
-            io.to(`user_${userId}`).emit('new_notification', {
-                ...notification,
-                time: notification.created_at // Alias for admin layout
+        // 1. Save to Database (In-App Notification)
+        // Note: Assuming a 'notifications' table exists based on controller usage
+        const dbResult = await pool.query(
+            'INSERT INTO notifications (user_id, title, message, type, link, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *',
+            [userId, title, message, type, link]
+        );
+
+        // 2. Fetch User's Push Token
+        const userRes = await pool.query('SELECT push_token FROM users WHERE id = $1', [userId]);
+        const pushToken = userRes.rows[0]?.push_token;
+
+        // 3. Send Push Notification if token exists
+        if (pushToken) {
+            await sendPushNotification(pushToken, {
+                title,
+                body: message,
+                click_action: link
             });
         }
-    } catch (err) {
-        console.error('Failed to emit real-time notification via sockets:', err.message);
-    }
 
-    return notification;
+        return dbResult.rows[0];
+    } catch (error) {
+        console.error('Error in sendNotification:', error.message);
+        // Don't throw, we want at least one part to succeed if possible
+        return null;
+    }
 };
 
 /**
- * Get user notifications
+ * Send a raw push notification via FCM
+ */
+const sendPushNotification = async (token, payload) => {
+    if (!token) return;
+
+    const message = {
+        notification: {
+            title: payload.title,
+            body: payload.body,
+        },
+        data: payload.data || {},
+        token: token,
+        webpush: {
+            notification: {
+                icon: payload.icon || '/logo192.png',
+                click_action: payload.click_action || '/',
+            },
+        },
+    };
+
+    try {
+        const response = await admin.messaging().send(message);
+        return response;
+    } catch (error) {
+        if (error.code === 'messaging/registration-token-not-registered') {
+            console.warn('Push token expired. Removing from DB...');
+            await pool.query('UPDATE users SET push_token = NULL WHERE push_token = $1', [token]);
+        } else {
+            console.error('FCM Error:', error);
+        }
+    }
+};
+
+/**
+ * Get internal notifications for a user
  */
 const getNotifications = async (userId) => {
-    return notificationModel.getUserNotifications(userId);
+    const result = await pool.query(
+        'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
+        [userId]
+    );
+    return result.rows;
 };
 
 /**
- * Mark notification as read
+ * Mark a single notification as read
  */
 const markAsRead = async (notificationId) => {
-    return notificationModel.markAsRead(notificationId);
+    const result = await pool.query(
+        'UPDATE notifications SET is_read = TRUE WHERE id = $1 RETURNING *',
+        [notificationId]
+    );
+    return result.rows[0];
 };
 
 /**
- * Mark all as read
+ * Mark all notifications as read for a user
  */
 const markAllAsRead = async (userId) => {
-    await notificationModel.markAllAsRead(userId);
+    return await pool.query(
+        'UPDATE notifications SET is_read = TRUE WHERE user_id = $1',
+        [userId]
+    );
 };
 
 module.exports = {
     sendNotification,
+    sendPushNotification,
     getNotifications,
     markAsRead,
-    markAllAsRead
+    markAllAsRead,
+    savePushToken
 };

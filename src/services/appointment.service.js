@@ -309,6 +309,40 @@ const advanceQueueAutomatically = async (serviceId, resourceId = null, slotId = 
                     [nextApptId]
                 );
                 console.log(`Queue advanced: Appointment ${nextApptId} is now serving.`);
+
+                // --- NOTIFICATION Logic ---
+                // 1. Notify the user now being served
+                const { rows: [advAppt] } = await client.query('SELECT a.*, s.name as service_name, o.name as org_name FROM appointments a JOIN services s ON a.service_id = s.id JOIN organizations o ON a.org_id = o.id WHERE a.id = $1', [nextApptId]);
+                if (advAppt) {
+                    await notificationService.sendNotification(
+                        advAppt.user_id,
+                        '📢 It is your turn!',
+                        `You are now being served for ${advAppt.service_name} at ${advAppt.org_name}. Please proceed.`,
+                        'appointment',
+                        `/queue/${advAppt.id}`
+                    );
+                }
+
+                // 2. Notify the NEXT person in line (The "Be Ready" alert)
+                const nextNextRes = await client.query(
+                    `SELECT a.id, a.user_id, a.queue_number, s.name as service_name 
+                     FROM appointments a 
+                     JOIN services s ON a.service_id = s.id
+                     WHERE ${partitionFilter} AND a.status = 'confirmed' 
+                     ORDER BY a.created_at ASC LIMIT 1`,
+                    filterParams
+                );
+                if (nextNextRes.rows.length > 0) {
+                    const nextUser = nextNextRes.rows[0];
+                    await notificationService.sendNotification(
+                        nextUser.user_id,
+                        '⏳ You are NEXT!',
+                        `There is only 1 person ahead of you for ${nextUser.service_name}. Please be ready!`,
+                        'appointment',
+                        `/queue/${nextUser.id}`
+                    );
+                }
+                // --- End Notifications ---
             }
         }
 
