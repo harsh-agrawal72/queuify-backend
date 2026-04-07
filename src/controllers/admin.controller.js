@@ -60,8 +60,8 @@ const getAppointments = catchAsync(async (req, res) => {
 });
 
 const updateAppointmentStatus = catchAsync(async (req, res) => {
-    const { status, reason = null, slotId = null } = req.body;
-    const appointment = await adminService.updateAppointmentStatus(req.user.org_id, req.params.appointmentId, status, reason, slotId);
+    const { status, reason = null, slotId = null, admin_remarks = undefined } = req.body;
+    const appointment = await adminService.updateAppointmentStatus(req.user.org_id, req.params.appointmentId, status, reason, slotId, admin_remarks);
     res.json({ success: true, data: appointment });
 });
 

@@ -894,7 +894,7 @@ const getAppointments = async (orgId, queryParams) => {
     }
 };
 
-const updateAppointmentStatus = async (orgId, appointmentId, status, reason = null, slotId = null) => {
+const updateAppointmentStatus = async (orgId, appointmentId, status, reason = null, slotId = null, admin_remarks = undefined) => {
     // 1. Direct Reschedule / Force Move
     if (slotId) {
         const appointmentModel = require('../models/appointment.model');
@@ -930,6 +930,7 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         const apptCols = await getColumnNames('appointments');
         const hasCancelledBy = apptCols.includes('cancelled_by');
         const hasCancellationReason = apptCols.includes('cancellation_reason');
+        const hasAdminRemarks = apptCols.includes('admin_remarks');
 
         let updateQuery = `UPDATE appointments SET status = $1, updated_at = NOW()`;
         const updateParams = [status, appointmentId];
@@ -946,6 +947,12 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
                 updateParams.push(reason);
             }
             updateQuery = `UPDATE appointments SET ${cancelSet}, updated_at = NOW()`;
+        }
+
+        // Handle Admin Remarks if provided
+        if (admin_remarks !== undefined && hasAdminRemarks) {
+            updateParams.push(admin_remarks);
+            updateQuery = updateQuery.replace('SET ', `SET admin_remarks = $${updateParams.length}, `);
         }
 
         // 10. Persist the status change
@@ -1158,6 +1165,7 @@ const getLiveQueue = async (orgId, date) => {
             a.price,
             a.check_in_method,
             a.created_at,
+            a.admin_remarks,
             ${hasTokenNumber ? 'a.token_number,' : "NULL as token_number,"}
             a.service_id,
             a.resource_id,
