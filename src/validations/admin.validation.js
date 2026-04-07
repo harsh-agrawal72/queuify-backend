@@ -36,6 +36,7 @@ const updateAppointmentStatus = {
         status: Joi.string().valid('pending', 'confirmed', 'completed', 'cancelled', 'serving', 'no_show').optional(),
         slotId: Joi.string().uuid().optional(),
         reason: Joi.string().optional().allow('', null),
+        admin_remarks: Joi.string().optional().allow('', null),
     }).min(1),
 };
 
