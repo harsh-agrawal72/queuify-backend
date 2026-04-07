@@ -27,3 +27,6 @@ tmp*
 fix.js
 modified.json
 *.log
+
+# Firebase Config
+src/config/firebase-service-account.json
