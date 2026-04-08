@@ -35,6 +35,10 @@ router.post('/create-order', auth('user'), paymentController.createOrder);
 // Verify payment and credit locked funds to org wallet
 router.post('/verify-payment', auth('user'), paymentController.verifyPayment);
 
+// Membership Plan Payments
+router.post('/create-plan-order', auth('user'), paymentController.createPlanOrder);
+router.post('/verify-plan-payment', auth('user'), paymentController.verifyPlanPayment);
+
 // ─── Refund Preview ───
 const autoRefundService = require('../../services/autoRefund.service');
 
