@@ -67,18 +67,22 @@ const processRefund = async (appointmentId, cancelledBy) => {
                     s.start_time
              FROM appointments a
              LEFT JOIN slots s ON a.slot_id = s.id
-             WHERE a.id = $1`,
+             WHERE a.id = $1::uuid`,
             [appointmentId]
         );
 
         const appt = apptRes.rows[0];
         if (!appt) {
+            console.error(`[AutoRefund] Appointment NOT FOUND: ${appointmentId}`);
             await client.query('ROLLBACK');
             return { refunded: false, reason: 'Appointment not found' };
         }
 
+        console.log(`[AutoRefund] Found: ID=${appt.id}, Status=${appt.status}, PaymentStatus=${appt.payment_status}, Price=${appt.price}, PaymentID=${appt.payment_id}`);
+
         // 2. Only process if this was a paid appointment
         if (appt.payment_status !== 'paid' || parseFloat(appt.price) <= 0) {
+            console.warn(`[AutoRefund] Skipping: PaymentStatus is "${appt.payment_status}" (expected "paid") or Price is ${appt.price}.`);
             await client.query('ROLLBACK');
             return { refunded: false, reason: 'No payment to refund' };
         }
@@ -86,7 +90,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
         // 3. Verify there's actually a locked transaction to refund
         const lockedTxRes = await client.query(
             `SELECT id, amount FROM wallet_transactions
-             WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'
+             WHERE reference_id = $1::uuid AND type = 'credit' AND status = 'locked'
              LIMIT 1`,
             [appointmentId]
         );
@@ -95,7 +99,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             // Check if funds were already released (completed case) — refund from available
             const availableTxRes = await client.query(
                 `SELECT id, amount FROM wallet_transactions
-                 WHERE reference_id = $1 AND type = 'credit' AND status = 'available'
+                 WHERE reference_id = $1::uuid AND type = 'credit' AND status = 'available'
                  LIMIT 1`,
                 [appointmentId]
             );
@@ -118,7 +122,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             // Mark locked funds as forfeited (moved to available for org)
             await client.query(
                 `UPDATE wallet_transactions SET status = 'available', description = description || ' (Forfeited - late cancellation)'
-                 WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
+                 WHERE reference_id = $1::uuid AND type = 'credit' AND status = 'locked'`,
                 [appointmentId]
             );
             await client.query(
@@ -171,7 +175,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                  refund_amount = $2, 
                  razorpay_refund_id = $3,
                  updated_at = NOW() 
-             WHERE id = $4 
+             WHERE id = $4::uuid 
              RETURNING status, payment_status`,
             [finalPaymentStatus, refundAmount, razorpayRefundId, appointmentId]
         );
@@ -202,7 +206,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 // Update the original locked transaction
                 await client.query(
                     `UPDATE wallet_transactions SET status = 'cancelled', description = description || $1
-                     WHERE reference_id = $2 AND type = 'credit' AND status = 'locked'`,
+                     WHERE reference_id = $2::uuid AND type = 'credit' AND (status = 'locked' OR status = 'available')`,
                     [` — ${policy.label}`, appointmentId]
                 );
                 // Log the refund transaction
@@ -217,7 +221,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
             await client.query(
                 `UPDATE wallet_transactions 
                  SET description = description || ' (Auto-refund failed: Manual action required)'
-                 WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
+                 WHERE reference_id = $1::uuid AND type = 'credit' AND (status = 'locked' OR status = 'available')`,
                 [appointmentId]
             );
         }
@@ -268,7 +272,7 @@ const getRefundPreview = async (appointmentId, cancelledBy = 'user') => {
         `SELECT a.price, a.payment_status, s.start_time
          FROM appointments a
          LEFT JOIN slots s ON a.slot_id = s.id
-         WHERE a.id = $1`,
+         WHERE a.id = $1::uuid`,
         [appointmentId]
     );
 

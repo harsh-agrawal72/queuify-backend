@@ -8,7 +8,8 @@ const createPlan = catchAsync(async (req, res) => {
 });
 
 const getPlans = catchAsync(async (req, res) => {
-    const plans = await planService.getPlans();
+    const { target_role } = req.query;
+    const plans = await planService.getPlans(target_role);
     res.send(plans);
 });
 
@@ -31,10 +32,16 @@ const deletePlan = catchAsync(async (req, res) => {
     res.status(httpStatus.NO_CONTENT).send();
 });
 
+const assignUserPlan = catchAsync(async (req, res) => {
+    const result = await planService.assignPlanToUser(req.user.id, req.body.planId);
+    res.send(result);
+});
+
 module.exports = {
     createPlan,
     getPlans,
     getPlan,
     updatePlan,
-    deletePlan
+    deletePlan,
+    assignUserPlan
 };

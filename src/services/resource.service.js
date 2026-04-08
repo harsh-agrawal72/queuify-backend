@@ -62,10 +62,11 @@ const getResources = async (orgId, publicOnly = false) => {
                COALESCE(
                  json_agg(
                    json_build_object('id', rs.service_id, 'price', rs.price)
-                 ) FILTER (WHERE rs.service_id IS NOT NULL), '[]'
+                 ) FILTER (WHERE rs.service_id IS NOT NULL AND s.is_active = TRUE), '[]'
                ) as service_mappings
         FROM resources r
         LEFT JOIN resource_services rs ON r.id = rs.resource_id
+        LEFT JOIN services s ON rs.service_id = s.id
         WHERE r.org_id = $1 AND r.is_active = TRUE
         GROUP BY r.id 
         ORDER BY r.created_at DESC
@@ -80,10 +81,11 @@ const getResourceById = async (orgId, resourceId) => {
                COALESCE(
                  json_agg(
                    json_build_object('id', rs.service_id, 'price', rs.price)
-                 ) FILTER (WHERE rs.service_id IS NOT NULL), '[]'
+                 ) FILTER (WHERE rs.service_id IS NOT NULL AND s.is_active = TRUE), '[]'
                ) as service_mappings
         FROM resources r
         LEFT JOIN resource_services rs ON r.id = rs.resource_id
+        LEFT JOIN services s ON rs.service_id = s.id
         WHERE r.id = $1 AND r.org_id = $2
         GROUP BY r.id
     `, [resourceId, orgId]);

@@ -235,9 +235,6 @@ const cancelAppointment = async (appointmentId, userId, reason = null) => {
                         console.error(`[Cancel-Async] Admin/Org email failed:`, emailErr.message);
                     }
                 }
-                if (appointment.slot_id) {
-                    await checkAndNotifySlotWaiters(appointment.slot_id);
-                }
 
                 // ── Auto-Refund Engine ──
                 // Fire refund asynchronously so it doesn't block the cancellation response
@@ -247,6 +244,11 @@ const cancelAppointment = async (appointmentId, userId, reason = null) => {
                     autoRefundService.processRefund(appointment.id, 'user')
                         .then(result => console.log(`[User-Cancel-Refund] Success:`, result))
                         .catch(e => console.error('[User-Cancel-Refund] FAILED:', e.message));
+                } else {
+                    console.log(`[User-Cancel-Refund] No refund triggered for Appointment ${appointment.id}. payment_status: ${appointment.payment_status}, price: ${appointment.price}`);
+                }
+                if (appointment.slot_id) {
+                    await checkAndNotifySlotWaiters(appointment.slot_id);
                 }
             } catch (e) { console.error('[Cancel-Async] FAILURE:', e); }
         })();
@@ -492,11 +494,13 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
                 if (status === 'cancelled' && appointment.payment_status === 'paid' && parseFloat(appointment.price) > 0) {
                     try {
                         const autoRefundService = require('./autoRefund.service');
-                        console.log(`[UserUpdate-Async] Admin cancelled paid appointment. Triggering refund for appt=${appointmentId}`);
+                        console.log(`[Admin-Update-Refund] Triggering refund for Appointment ${appointmentId}`);
                         await autoRefundService.processRefund(appointmentId, 'admin');
                     } catch (refundErr) {
-                        console.error(`[UserUpdate-Async] Admin refund trigger failed:`, refundErr.message);
+                        console.error(`[Admin-Update-Refund] Refund trigger failed:`, refundErr.message);
                     }
+                } else if (status === 'cancelled') {
+                    console.log(`[Admin-Update-Refund] Skipping refund for Appointment ${appointmentId}. payment_status: ${appointment.payment_status}, price: ${appointment.price}`);
                 }
 
                 // 4. Notify Admins
