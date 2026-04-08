@@ -12,7 +12,7 @@ const config = require('../config/config');
  * @param {Object} extraClaims
  * @returns {string}
  */
-const generateToken = (userId, role, orgId, expiresIn = '1d', secret = config.jwt.secret, extraClaims = {}) => {
+const generateToken = (userId, role, orgId, expiresIn = `${config.jwt.accessExpirationMinutes}m`, secret = config.jwt.secret, extraClaims = {}) => {
     const payload = {
         sub: userId,
         role,
@@ -29,12 +29,12 @@ const generateToken = (userId, role, orgId, expiresIn = '1d', secret = config.jw
  * @returns {Promise<Object>}
  */
 const generateAuthTokens = async (user, extraClaims = {}) => {
-    const accessToken = generateToken(user.id, user.role, user.org_id, '1d', config.jwt.secret, extraClaims);
+    const accessToken = generateToken(user.id, user.role, user.org_id, `${config.jwt.accessExpirationMinutes}m`, config.jwt.secret, extraClaims);
 
     return {
         access: {
             token: accessToken,
-            expires: new Date(Date.now() + (60 * 60 * 24 * 1000)),
+            expires: new Date(Date.now() + (config.jwt.accessExpirationMinutes * 60 * 1000)),
         },
     };
 };

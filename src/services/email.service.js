@@ -246,6 +246,35 @@ module.exports = {
         await sendEmail(to, subject, html);
     },
 
+    sendThreeHourReminderEmail: async (to, appointment) => {
+        const subject = '🗓️ Your Appointment is in 3 Hours - Queuify';
+        const userName = appointment.userName || appointment.user_name || 'there';
+        const orgName = appointment.orgName || appointment.org_name || 'Organization';
+        const serviceName = appointment.serviceName || appointment.service_name || 'Service';
+        const predictedTime = appointment.startTime;
+
+        const html = wrapInProfessionalLayout(`
+            <h2 style="margin: 0; font-size: 24px; color: #0f172a;">3-Hour Reminder</h2>
+            <p style="color: #64748b; font-size: 16px;">Hello ${userName}, just a courtesy reminder that your appointment is scheduled for today.</p>
+            
+            <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 20px; padding: 32px; margin: 24px 0;">
+                <p style="margin: 0; font-size: 13px; font-weight: 700; color: #0369a1; text-transform: uppercase;">Time Remaining: ~3 Hours</p>
+                <div style="margin-top: 16px;">
+                    <p style="margin: 0; color: #0c4a6e; font-weight: 600; font-size: 18px;">${serviceName}</p>
+                    <p style="margin: 4px 0 0 0; color: #0369a1;">Location: <strong>${orgName}</strong></p>
+                    ${predictedTime ? `<p style="margin: 8px 0 0 0; color: #0284c7; font-size: 14px;"><strong>Expected Session:</strong> ${formatTime(predictedTime)}</p>` : ''}
+                </div>
+            </div>
+            
+            <p style="color: #64748b; font-size: 14px; text-align: center;">Please ensure you are ready to reach <strong>${orgName}</strong> on time. You can track the live queue speed using the link below.</p>
+
+            <div style="text-align: center;">
+                <a href="${config.clientUrl}/dashboard" class="button" style="background: #0284c7; box-shadow: 0 10px 15px -3px rgba(2, 132, 199, 0.3);">Check Live Queue Status</a>
+            </div>
+        `, `Reminder: Your appointment for ${serviceName} is in 3 hours.`);
+        await sendEmail(to, subject, html);
+    },
+
     sendWayReminderEmail: async (to, appointment) => {
         const subject = '⏰ Almost Your Turn! Click "On the Way"';
         const userName = appointment.userName || appointment.user_name || 'there';

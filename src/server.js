@@ -112,7 +112,8 @@ const connectDB = async () => {
             '20260401_ensure_org_slugs.sql',
             '20260401_fix_broadcast_schema.sql',
             '20260403_add_payment_breakdown_columns.sql',
-            '20260404_add_reviews_table.sql'
+            '20260404_add_reviews_table.sql',
+            '20260408_add_3h_reminder_column.sql'
         ];
         
         for (const migration of migrations) {

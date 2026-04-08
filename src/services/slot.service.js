@@ -103,12 +103,18 @@ const getAvailableSlots = async (orgId, filters = {}) => {
     }
 
     return slots
-        .filter(slot => new Date(slot.start_time) > now) // Only show future slots
+        .filter(slot => new Date(slot.end_time) > now) // Only show slots that haven't ended yet
         .map(slot => {
             const slotStart = new Date(slot.start_time);
-            const baseTime = slotStart; // Since slotStart > now, baseTime is always slotStart
             const minutesToAdd = slot.booked_count * estimatedServiceTime;
-            const estimatedNextTime = new Date(baseTime.getTime() + minutesToAdd * 60000);
+            
+            // If the slot has already started, we calculate from 'now' if the queue would have already reached the current time.
+            // But if the queue is already long, they are added to the end of the existing queue starting from slotStart.
+            let estimatedNextTime = new Date(slotStart.getTime() + minutesToAdd * 60000);
+            
+            if (estimatedNextTime < now) {
+                estimatedNextTime = now;
+            }
 
             // Format time for the message (IST)
             const timeStr = new Intl.DateTimeFormat('en-IN', {
