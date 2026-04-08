@@ -1,12 +1,21 @@
 const httpStatus = require('../utils/httpStatus');
 const catchAsync = require('../utils/catchAsync');
 const userService = require('../services/user.service');
+const userModel = require('../models/user.model');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../config/db');
 
 const getUserStats = catchAsync(async (req, res) => {
     const stats = await userService.getUserStats(req.user.id);
     res.send(stats);
+});
+
+const getProfile = catchAsync(async (req, res) => {
+    const user = await userModel.getUserById(req.user.id);
+    if (!user) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+    }
+    res.send(user);
 });
 
 const updateProfile = catchAsync(async (req, res) => {
@@ -51,6 +60,7 @@ const getUserImage = catchAsync(async (req, res) => {
 
 module.exports = {
     getUserStats,
+    getProfile,
     updateProfile,
     deleteAccount,
     uploadProfilePicture,

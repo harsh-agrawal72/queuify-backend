@@ -8,6 +8,7 @@ const upload = require('../../utils/upload');
 const router = express.Router();
 
 router.get('/stats', auth('user', 'admin', 'superadmin'), userController.getUserStats);
+router.get('/profile', auth('user', 'admin', 'superadmin'), userController.getProfile);
 router.patch('/profile', auth('user', 'admin', 'superadmin'), userController.updateProfile);
 router.get('/profile/image/:imageId', userController.getUserImage);
 router.post('/profile/image', auth('user', 'admin', 'superadmin'), upload.single('profile_picture'), userController.uploadProfilePicture);
