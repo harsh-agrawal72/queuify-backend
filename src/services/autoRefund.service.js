@@ -45,12 +45,10 @@ const getRefundPolicy = (slotStartTime, cancelledBy, planFeatures = null) => {
     if (hoursUntilSlot >= 3) {
         return { percentage: 100, label: 'Full refund (>=3h notice)' };
     } else {
-        // Use plan feature protection if available and higher than base 85%
-        const planProtection = planFeatures?.refund_protection || 0;
-        const refundPercentage = Math.max(85, planProtection);
+        // Feature removed: No plan-based protection for late cancellations anymore
         return { 
-            percentage: refundPercentage, 
-            label: refundPercentage === 100 ? 'Shielded full refund (Premium Protection)' : 'Partial refund (<3h notice)' 
+            percentage: 85, 
+            label: 'Partial refund (<3h notice)' 
         };
     }
 };

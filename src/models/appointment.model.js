@@ -340,8 +340,8 @@ const getAppointmentsByUserId = async (userId) => {
         `WITH UserQueueRanks AS (
             SELECT a_qr.id, 
                    ROW_NUMBER() OVER (
-                       PARTITION BY a_qr.slot_id
-                       ORDER BY a_qr.created_at ASC, a_qr.id ASC
+                       PARTITION BY a_qr.slot_id, a_qr.preferred_date
+                       ORDER BY (CASE WHEN a_qr.is_priority = TRUE THEN 0 ELSE 1 END), a_qr.created_at ASC, a_qr.id ASC
                    ) as calculated_queue
             FROM appointments a_qr
             JOIN services s_qr ON a_qr.service_id = s_qr.id
@@ -401,8 +401,8 @@ const getAppointmentsByOrgId = async (orgId) => {
         `WITH OrgQueueRanks AS (
             SELECT a_qr.id, 
                    ROW_NUMBER() OVER (
-                       PARTITION BY a_qr.slot_id
-                       ORDER BY a_qr.created_at ASC, a_qr.id ASC
+                       PARTITION BY a_qr.slot_id, a_qr.preferred_date
+                       ORDER BY (CASE WHEN a_qr.is_priority = TRUE THEN 0 ELSE 1 END), a_qr.created_at ASC, a_qr.id ASC
                    ) as calculated_queue
             FROM appointments a_qr
             JOIN services s_qr ON a_qr.service_id = s_qr.id
@@ -517,7 +517,11 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
             );
         } else {
             apptRes = await client.query(
-                'SELECT * FROM appointments WHERE id = $1 AND user_id = $2 FOR UPDATE',
+                `SELECT a.*, p.features as plan_features 
+                 FROM appointments a
+                 LEFT JOIN users u ON a.user_id = u.id
+                 LEFT JOIN plans p ON u.plan_id = p.id
+                 WHERE a.id = $1 AND a.user_id = $2 FOR UPDATE`,
                 [appointmentId, userId]
             );
         }
@@ -528,8 +532,15 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
             throw new Error(`Cannot reschedule appointment in ${appt.status} status`);
         }
 
-        if (!isAdmin && appt.reschedule_count >= 1) {
-            throw new Error('This appointment has already been rescheduled once and cannot be moved again');
+        if (!isAdmin) {
+            const planFeatures = appt.plan_features || {};
+            const limit = planFeatures.reschedule_limit !== undefined ? parseInt(planFeatures.reschedule_limit) : 0;
+            if (appt.reschedule_count >= limit) {
+                if (limit === 0) {
+                    throw new Error('Rescheduling is not allowed in your current plan. Please upgrade to Standard or Premium.');
+                }
+                throw new Error(`You have already reached the reschedule limit of ${limit} for this appointment.`);
+            }
         }
 
         if (appt.slot_id === newSlotId) {

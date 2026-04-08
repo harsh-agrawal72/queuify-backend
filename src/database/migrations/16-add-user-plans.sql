@@ -15,15 +15,15 @@ UPDATE plans SET target_role = 'admin' WHERE target_role IS NULL;
 -- Insert 3 tiers of User Plans if they don't exist
 -- Using a subquery to avoid duplicates if rerun
 INSERT INTO plans (name, price_monthly, price_yearly, commission_rate, features, target_role)
-SELECT 'Free', 0, 0, 0, '{"max_active_appointments": 2, "notifications": ["email"], "priority": false, "refund_protection": 0}', 'user'
+SELECT 'Free', 0, 0, 0, '{"max_active_appointments": 2, "notifications": ["email"], "priority": false, "reschedule_limit": 0}', 'user'
 WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Free' AND target_role = 'user');
 
 INSERT INTO plans (name, price_monthly, price_yearly, commission_rate, features, target_role)
-SELECT 'Standard', 99, 990, 0, '{"max_active_appointments": 5, "notifications": ["email", "push"], "priority": false, "refund_protection": 50}', 'user'
+SELECT 'Standard', 99, 990, 0, '{"max_active_appointments": 5, "notifications": ["email", "push"], "priority": false, "reschedule_limit": 1}', 'user'
 WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Standard' AND target_role = 'user');
 
 INSERT INTO plans (name, price_monthly, price_yearly, commission_rate, features, target_role)
-SELECT 'Premium', 249, 2490, 0, '{"max_active_appointments": 999, "notifications": ["email", "push", "sms"], "priority": true, "refund_protection": 100}', 'user'
+SELECT 'Premium', 249, 2490, 0, '{"max_active_appointments": 999, "notifications": ["email", "push", "sms"], "priority": true, "reschedule_limit": 999}', 'user'
 WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Premium' AND target_role = 'user');
 
 -- 4. Assign the 'Free' plan to all existing users who don't have one
