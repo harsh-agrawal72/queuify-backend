@@ -67,13 +67,18 @@ const sendPushNotification = async (token, payload) => {
 
     try {
         const response = await admin.messaging().send(message);
+        console.log('✅ FCM Success:', response);
         return response;
     } catch (error) {
-        if (error.code === 'messaging/registration-token-not-registered') {
-            console.warn('Push token expired. Removing from DB...');
+        if (error.code === 'messaging/registration-token-not-registered' || error.code === 'messaging/invalid-registration-token') {
+            console.warn(`[FCM-Cleanup] Token expired or invalid for user. Removing from DB...`);
             await pool.query('UPDATE users SET push_token = NULL WHERE push_token = $1', [token]);
         } else {
-            console.error('FCM Error:', error);
+            console.error('❌ FCM Send Error:', {
+                code: error.code,
+                message: error.message,
+                token: token.substring(0, 10) + '...'
+            });
         }
     }
 };

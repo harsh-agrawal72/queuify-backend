@@ -52,6 +52,7 @@ CREATE TABLE users (
     notification_enabled BOOLEAN DEFAULT true,
     email_notification_enabled BOOLEAN DEFAULT true,
     phone VARCHAR(20),
+    push_token TEXT,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
