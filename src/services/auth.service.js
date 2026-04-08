@@ -13,6 +13,7 @@ const templates = require('../config/templates');
 const serviceService = require('./service.service');
 const resourceService = require('./resource.service');
 const walletService = require('./wallet.service');
+const planService = require('./plan.service');
 
 
 /**
@@ -33,14 +34,15 @@ const loginWithGoogle = async (token) => {
         let user = await userModel.getUserByEmail(email);
 
         if (!user) {
+            const freePlan = await planService.getPlanByName('Free', 'user');
             user = await userModel.createUser({
                 name: finalName,
                 email,
-                password: null,
                 role: 'user',
                 is_email_verified: true,
                 provider: 'google',
-                google_id: googleId
+                google_id: googleId,
+                plan_id: freePlan?.id
             });
         } else {
             if (!user.google_id) {
@@ -146,7 +148,7 @@ const registerOrganization = async (orgBody, adminBody) => {
         is_email_verified: true,
         terms_accepted: true
     });
-    
+
     // Send Welcome Email asynchronously
     emailService.sendWelcomeEmail(user.email, user.name).catch(e => console.error('[AUTH-SERVICE] Welcome email failed:', e));
 
@@ -206,6 +208,14 @@ const register = async (userBody) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 8);
+
+    // Assign "Free" plan to regular users
+    let planId = null;
+    if (finalRole === 'user') {
+        const freePlan = await planService.getPlanByName('Free', 'user');
+        planId = freePlan?.id;
+    }
+
     const user = await userModel.createUser({
         name,
         email,
@@ -213,7 +223,8 @@ const register = async (userBody) => {
         role: finalRole,
         orgId: finalOrgId,
         phone: phone || null,
-        terms_accepted: true // Manual registration implies acceptance via modal
+        terms_accepted: true,
+        plan_id: planId
     });
 
     // Send Welcome Email asynchronously

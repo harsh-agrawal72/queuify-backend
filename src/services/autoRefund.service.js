@@ -25,16 +25,17 @@ const httpStatus = require('../utils/httpStatus');
  * Calculate refund percentage based on cancellation timing
  * @param {Date} slotStartTime - When the appointment was scheduled to start
  * @param {string} cancelledBy - 'user' | 'admin'
+ * @param {Object} planFeatures - User's plan features
  * @returns {{ percentage: number, label: string }}
  */
-const getRefundPolicy = (slotStartTime, cancelledBy) => {
+const getRefundPolicy = (slotStartTime, cancelledBy, planFeatures = null) => {
     if (cancelledBy === 'admin') {
         return { percentage: 100, label: 'Full refund (Admin cancellation)' };
     }
 
     const now = new Date();
     const slotStart = new Date(slotStartTime);
-    
+
     // Ensure both are compared in the same numeric space (total milliseconds from epoch)
     const diffMs = slotStart.getTime() - now.getTime();
     const hoursUntilSlot = diffMs / (1000 * 60 * 60);
@@ -44,8 +45,13 @@ const getRefundPolicy = (slotStartTime, cancelledBy) => {
     if (hoursUntilSlot >= 3) {
         return { percentage: 100, label: 'Full refund (>=3h notice)' };
     } else {
-        // As per user request: if cancelled less than 3h before, 85% refund
-        return { percentage: 85, label: 'Partial refund (<3h notice)' };
+        // Use plan feature protection if available and higher than base 85%
+        const planProtection = planFeatures?.refund_protection || 0;
+        const refundPercentage = Math.max(85, planProtection);
+        return { 
+            percentage: refundPercentage, 
+            label: refundPercentage === 100 ? 'Shielded full refund (Premium Protection)' : 'Partial refund (<3h notice)' 
+        };
     }
 };
 
@@ -61,12 +67,14 @@ const processRefund = async (appointmentId, cancelledBy) => {
     try {
         await client.query('BEGIN');
 
-        // 1. Fetch appointment details
+        // 1. Fetch appointment details and user plan features
         const apptRes = await client.query(
             `SELECT a.id, a.org_id, a.user_id, a.price, a.payment_status, a.status, a.payment_id,
-                    s.start_time
+                    s.start_time, p.features as plan_features
              FROM appointments a
              LEFT JOIN slots s ON a.slot_id = s.id
+             LEFT JOIN users u ON a.user_id = u.id
+             LEFT JOIN plans p ON u.plan_id = p.id
              WHERE a.id = $1::uuid`,
             [appointmentId]
         );
@@ -110,8 +118,8 @@ const processRefund = async (appointmentId, cancelledBy) => {
             }
         }
 
-        // 4. Calculate refund amount
-        const policy = getRefundPolicy(appt.start_time, cancelledBy);
+        // 4. Calculate refund amount with plan consideration
+        const policy = getRefundPolicy(appt.start_time, cancelledBy, appt.plan_features);
         const originalAmount = parseFloat(appt.price);
         const refundAmount = parseFloat(((policy.percentage / 100) * originalAmount).toFixed(2));
 
@@ -145,7 +153,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
         // 6. Trigger External Razorpay Refund
         let razorpayRefundId = null;
         let refundSuccessful = true;
-        
+
         if (refundAmount > 0 && appt.payment_id) {
             try {
                 console.log(`[AutoRefund] Triggering actual Razorpay refund for appt=${appointmentId}, payment=${appt.payment_id}, amount=₹${refundAmount}`);
@@ -167,7 +175,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
 
         // 7. Finalize status based on refund success
         const finalPaymentStatus = refundSuccessful ? 'refunded' : 'refund_failed';
-        
+
         const updateApptRes = await client.query(
             `UPDATE appointments 
              SET status = 'cancelled', 
@@ -199,7 +207,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 const remainder = originalAmount - refundAmount;
                 if (remainder > 0) {
                     await client.query(
-                         'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
+                        'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), available_balance = available_balance + $1 WHERE id = $2',
                         [remainder, walletId]
                     );
                 }
@@ -268,22 +276,24 @@ const processRefund = async (appointmentId, cancelledBy) => {
  * Get the refund policy preview for an appointment (for displaying in UI before cancellation)
  */
 const getRefundPreview = async (appointmentId, cancelledBy = 'user') => {
-    const apptRes = await pool.query(
-        `SELECT a.price, a.payment_status, s.start_time
+    const apptInfo = await pool.query(
+        `SELECT a.price, a.payment_status, s.start_time, p.features as plan_features
          FROM appointments a
          LEFT JOIN slots s ON a.slot_id = s.id
+         LEFT JOIN users u ON a.user_id = u.id
+         LEFT JOIN plans p ON u.plan_id = p.id
          WHERE a.id = $1::uuid`,
         [appointmentId]
     );
 
-    if (!apptRes.rows[0]) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+    if (!apptInfo.rows[0]) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
-    const appt = apptRes.rows[0];
+    const appt = apptInfo.rows[0];
     if (appt.payment_status !== 'paid' || parseFloat(appt.price) <= 0) {
         return { hasPaidAmount: false };
     }
 
-    const policy = getRefundPolicy(appt.start_time, cancelledBy);
+    const policy = getRefundPolicy(appt.start_time, cancelledBy, appt.plan_features);
     const originalAmount = parseFloat(appt.price);
     const refundAmount = parseFloat(((policy.percentage / 100) * originalAmount).toFixed(2));
 

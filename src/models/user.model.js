@@ -4,13 +4,13 @@ const { pool } = require('../config/db');
  * Create a new user
  */
 const createUser = async (userBody) => {
-    const { name, email, password, role, orgId, isPasswordSet, provider, google_id, phone, terms_accepted } = userBody;
+    const { name, email, password, role, orgId, isPasswordSet, provider, google_id, phone, terms_accepted, plan_id } = userBody;
     const isPwdSet = isPasswordSet !== undefined ? isPasswordSet : true;
 
-    // 1. Create the user with core columns first (avoids crash if terms columns are missing)
+    // 1. Create the user with core columns
     const result = await pool.query(
-        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null]
+        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone, plan_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null, plan_id || null]
     );
     const user = result.rows[0];
 
@@ -55,9 +55,12 @@ const updateUserByType = async (userId, updateBody) => {
  */
 const getUserByEmail = async (email) => {
     const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed 
+        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed,
+                p.name as plan_name, p.features as plan_features,
+                (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
+         LEFT JOIN plans p ON u.plan_id = p.id
          WHERE u.email = $1`,
         [email]
     );
@@ -69,9 +72,12 @@ const getUserByEmail = async (email) => {
  */
 const getUserById = async (id) => {
     const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed 
+        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed,
+                p.name as plan_name, p.features as plan_features,
+                (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
+         LEFT JOIN plans p ON u.plan_id = p.id
          WHERE u.id = $1`,
         [id]
     );

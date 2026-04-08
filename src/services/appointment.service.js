@@ -15,6 +15,24 @@ const notificationService = require('./notification.service');
  */
 const bookAppointment = async (appointmentBody) => {
     try {
+        const { userId } = appointmentBody;
+
+        // 0. Plan Limit & Priority Check
+        if (userId) {
+            const user = await userModel.getUserById(userId);
+            if (user && user.plan_features) {
+                const { max_active_appointments, priority } = user.plan_features;
+                const activeCount = user.active_bookings_count || 0;
+
+                if (activeCount >= max_active_appointments) {
+                    throw new Error(`BOOKING_LIMIT_REACHED|${max_active_appointments}`);
+                }
+                
+                // Inject priority flag for the model to pick up
+                if (priority) appointmentBody.is_priority = true;
+            }
+        }
+
         const result = await appointmentModel.createAppointment(appointmentBody);
         const { appointment, queue_number } = result;
 
@@ -31,59 +49,59 @@ const bookAppointment = async (appointmentBody) => {
                     console.log(`[Booking-Async] Starting notification process for Appointment: ${appointment.id}`);
                     const appointmentWithDetails = await appointmentModel.getAppointmentById(appointment.id);
                     const user = await userModel.getUserById(appointment.user_id);
-                const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointment.org_id]);
-                const org = orgRes.rows[0];
+                    const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointment.org_id]);
+                    const org = orgRes.rows[0];
 
-                if (!appointmentWithDetails) {
-                    console.error(`[Booking-Async] Could not fetch appointment details for ID: ${appointment.id}`);
-                    return;
-                }
-
-                // 1. Notify User (respecting org-wide toggle AND user preference)
-                const userEmailEnabled = user && user.email_notification_enabled !== false;
-                const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
-
-                try {
-                    if (userEmailEnabled && user && user.email) {
-                        console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
-                        await emailService.sendBookingConfirmation(user.email, {
-                            ...appointmentWithDetails,
-                            token_number: queue_number
-                        });
+                    if (!appointmentWithDetails) {
+                        console.error(`[Booking-Async] Could not fetch appointment details for ID: ${appointment.id}`);
+                        return;
                     }
-                } catch (emailErr) {
-                    console.error(`[Booking-Async] User email failed:`, emailErr.message);
-                }
 
-                if (org && (org.new_booking_notification === true || org.new_booking_notification === null)) {
-                    await notificationService.sendNotification(
-                        appointment.user_id,
-                        'Booking Confirmed',
-                        `Your appointment for ${appointmentWithDetails.service_name} at ${appointmentWithDetails.org_name} is confirmed. Your Token is #${queue_number}.`,
-                        'appointment',
-                        `/appointments`
-                    );
-                }
+                    // 1. Notify User (respecting org-wide toggle AND user preference)
+                    const userEmailEnabled = user && user.email_notification_enabled !== false;
+                    const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
 
-                // 2. Notify Admins
-                const orgBookingNotify = org && (org.new_booking_notification === true || org.new_booking_notification === null);
-                if (orgBookingNotify) {
-                    const admins = await userModel.getAdminsByOrg(appointment.org_id);
-                    const adminMessage = `New booking from ${user?.name || 'Customer'} for ${appointmentWithDetails.service_name}. Token assigned: #${queue_number}`;
+                    try {
+                        if (userEmailEnabled && user && user.email) {
+                            console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
+                            await emailService.sendBookingConfirmation(user.email, {
+                                ...appointmentWithDetails,
+                                token_number: queue_number
+                            });
+                        }
+                    } catch (emailErr) {
+                        console.error(`[Booking-Async] User email failed:`, emailErr.message);
+                    }
 
-                    console.log(`[Booking-Async] Notifying ${admins.length} admins.`);
-                    // In-App Notifications to all admins
-                    for (const admin of admins) {
+                    if (org && (org.new_booking_notification === true || org.new_booking_notification === null)) {
                         await notificationService.sendNotification(
-                            admin.id,
-                            'New Appointment Booking',
-                            adminMessage,
+                            appointment.user_id,
+                            'Booking Confirmed',
+                            `Your appointment for ${appointmentWithDetails.service_name} at ${appointmentWithDetails.org_name} is confirmed. Your Token is #${queue_number}.`,
                             'appointment',
-                            `/admin/appointments?search=${appointment.id}`
+                            `/appointments`
                         );
                     }
 
-                    // Email Notification to Org Contact
+                    // 2. Notify Admins
+                    const orgBookingNotify = org && (org.new_booking_notification === true || org.new_booking_notification === null);
+                    if (orgBookingNotify) {
+                        const admins = await userModel.getAdminsByOrg(appointment.org_id);
+                        const adminMessage = `New booking from ${user?.name || 'Customer'} for ${appointmentWithDetails.service_name}. Token assigned: #${queue_number}`;
+
+                        console.log(`[Booking-Async] Notifying ${admins.length} admins.`);
+                        // In-App Notifications to all admins
+                        for (const admin of admins) {
+                            await notificationService.sendNotification(
+                                admin.id,
+                                'New Appointment Booking',
+                                adminMessage,
+                                'appointment',
+                                `/admin/appointments?search=${appointment.id}`
+                            );
+                        }
+
+                        // Email Notification to Org Contact
                         try {
                             if (orgEmailEnabled) {
                                 console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
@@ -95,34 +113,38 @@ const bookAppointment = async (appointmentBody) => {
                         } catch (emailErr) {
                             console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
                         }
-                }
+                    }
 
-                // 3. Emit Queue Update for real-time dashboard refresh
-                try {
-                    socket.emitQueueUpdate({
-                        orgId: appointment.org_id,
-                        serviceId: appointment.service_id,
-                        resourceId: appointment.resource_id
-                    }, {
-                        type: 'new_booking',
-                        appointmentId: appointment.id,
-                        slotId: appointment.slot_id
-                    });
-                } catch (socketErr) {
-                    console.error('[Booking-Async] Socket update failed:', socketErr.message);
-                }
+                    // 3. Emit Queue Update for real-time dashboard refresh
+                    try {
+                        socket.emitQueueUpdate({
+                            orgId: appointment.org_id,
+                            serviceId: appointment.service_id,
+                            resourceId: appointment.resource_id
+                        }, {
+                            type: 'new_booking',
+                            appointmentId: appointment.id,
+                            slotId: appointment.slot_id
+                        });
+                    } catch (socketErr) {
+                        console.error('[Booking-Async] Socket update failed:', socketErr.message);
+                    }
 
-                if (appointment.slot_id) {
-                    await checkAndNotifySlotWaiters(appointment.slot_id);
-                }
-            } catch (e) {
-                console.error('[Booking-Async] FAILURE:', e);
+                    if (appointment.slot_id) {
+                        await checkAndNotifySlotWaiters(appointment.slot_id);
+                    }
+                } catch (e) {
+                    console.error('[Booking-Async] FAILURE:', e);
                 }
             })();
         }
 
         return { ...result, appointment };
     } catch (error) {
+        if (error.message.startsWith('BOOKING_LIMIT_REACHED')) {
+            const limit = error.message.split('|')[1];
+            throw new ApiError(httpStatus.BAD_REQUEST, `You have reached the maximum active bookings limit (${limit}) for your current plan.`);
+        }
         if (error.message === 'DUPLICATE_BOOKING_WARNING') {
             throw new ApiError(httpStatus.CONFLICT, 'DUPLICATE_BOOKING_WARNING');
         }
@@ -300,7 +322,8 @@ const advanceQueueAutomatically = async (serviceId, resourceId = null, slotId = 
             const nextRes = await client.query(
                 `SELECT id FROM appointments 
                  WHERE ${partitionFilter} AND status = 'confirmed' 
-                 ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+                 ORDER BY (CASE WHEN is_priority = TRUE THEN 0 ELSE 1 END), created_at ASC 
+                 LIMIT 1 FOR UPDATE SKIP LOCKED`,
                 filterParams
             );
 
@@ -331,7 +354,8 @@ const advanceQueueAutomatically = async (serviceId, resourceId = null, slotId = 
                      FROM appointments a 
                      JOIN services s ON a.service_id = s.id
                      WHERE ${partitionFilter} AND a.status = 'confirmed' 
-                     ORDER BY a.created_at ASC LIMIT 1`,
+                     ORDER BY (CASE WHEN a.is_priority = TRUE THEN 0 ELSE 1 END), a.created_at ASC 
+                     LIMIT 1`,
                     filterParams
                 );
                 if (nextNextRes.rows.length > 0) {
@@ -390,7 +414,9 @@ const getQueueUpdateSnapshot = async (serviceId, resourceId = null, slotId = nul
         `SELECT a.id FROM appointments a
          WHERE ${partitionFilter}
          AND a.status IN ('serving', 'pending', 'confirmed')
-         ORDER BY (CASE WHEN a.status = 'serving' THEN 0 ELSE 1 END), a.created_at ASC
+         ORDER BY (CASE WHEN a.status = 'serving' THEN 0 ELSE 1 END), 
+                  (CASE WHEN a.is_priority = TRUE THEN 0 ELSE 1 END), 
+                  a.created_at ASC
          LIMIT 1`,
         filterParams
     );
@@ -428,7 +454,7 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
     // If status changed to completed, cancelled, or no_show, trigger auto-advancement
     if (['completed', 'cancelled', 'no_show'].includes(status)) {
         // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
-        
+
         // Also trigger waitlist fill if space opened up
         if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
             try {
@@ -560,7 +586,7 @@ const checkAndNotifyDrift = async (appointmentId) => {
     try {
         const status = await getQueueStatus(appointmentId);
         const drift = status.time_drift_minutes;
-        
+
         // CASE 1: DELAY (Arrive Later)
         if (drift >= 15) {
             const { rows: waiters } = await pool.query(
@@ -577,7 +603,7 @@ const checkAndNotifyDrift = async (appointmentId) => {
                     `/appointments/${waiter.id}/queue`
                 );
             }
-        } 
+        }
         // CASE 2: FAST (Arrive Earlier)
         else if (drift <= -7) {
             const { rows: waiters } = await pool.query(
@@ -603,7 +629,7 @@ const checkAndNotifyDrift = async (appointmentId) => {
 
 const getUserAppointments = async (userId) => {
     const appointments = await appointmentModel.getAppointmentsByUserId(userId);
-    
+
     // Enrich active appointments with real-time AI metrics
     return Promise.all(appointments.map(async (appt) => {
         if (['pending', 'confirmed', 'serving'].includes(appt.status)) {
@@ -611,13 +637,13 @@ const getUserAppointments = async (userId) => {
                 // Get real-time average speed
                 const avgTime = (await getSystemAverageSpeed(appt.service_id, appt.resource_id)) || appt.estimated_service_time || 15;
                 const nominalAvg = appt.estimated_service_time || 15;
-                
+
                 // Simplified wait time for dashboard (can be further refined if start_time is far in future)
                 // For now, let's use the logic: Wait = (People Ahead) * avgTime
                 // If it's serving, it's roughly avgTime / 2 (on average)
                 const peopleAhead = parseInt(appt.people_ahead) || 0;
                 let estWait = peopleAhead * avgTime;
-                
+
                 // If there's a drift (AI vs Nominal), calculate it
                 const nominalWait = peopleAhead * nominalAvg;
                 const driftMins = Math.round(estWait - nominalWait);
@@ -666,7 +692,7 @@ const getSystemAverageSpeed = async (serviceId, resourceId = null) => {
 const getQueueStatus = async (appointmentId) => {
     try {
         console.log(`[Diagnostic-v2.2] START for ID: ${appointmentId}`);
-        
+
         // 1. Get Appointment
         const appointment = await appointmentModel.getAppointmentById(appointmentId);
         if (!appointment) {
@@ -701,7 +727,7 @@ const getQueueStatus = async (appointmentId) => {
         // 4. Ranking Query with safe SQL types
         const isPerResource = service.queue_scope === 'PER_RESOURCE';
         const scopeId = isPerResource ? (appointment.resource_id || appointment.service_id) : appointment.service_id;
-        
+
         // Use a default date if referenceDate is null to avoid SQL crashes
         const queryDate = referenceDate || new Date();
 
@@ -724,7 +750,7 @@ const getQueueStatus = async (appointmentId) => {
         const myEntry = rankedRows.find(r => r.id === appointmentId);
         const myRank = myEntry ? parseInt(myEntry.q_rank) : 0;
         const servingEntry = rankedRows.find(r => r.status === 'serving');
-        
+
         let currentServingNumber = 0;
         if (servingEntry) {
             currentServingNumber = parseInt(servingEntry.q_rank);
@@ -740,7 +766,7 @@ const getQueueStatus = async (appointmentId) => {
         const avgTime = (await getSystemAverageSpeed(appointment.service_id, appointment.resource_id)) || service.estimated_service_time || 15;
         const now = new Date();
         let waitMinutesTillStart = 0;
-        
+
         if (appointment.status === 'serving') {
             estimatedWaitMinutes = 0;
         } else if (servingEntry && servingEntry.serving_started_at) {
@@ -885,7 +911,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
 
         return result;
     } catch (error) {
-                if (error.message === 'Appointment not found') throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+        if (error.message === 'Appointment not found') throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
         if (error.message === 'New slot not found or inactive') throw new ApiError(httpStatus.NOT_FOUND, 'New slot not found or inactive');
         if (error.message === 'New slot is fully booked') throw new ApiError(httpStatus.BAD_REQUEST, 'New slot is fully booked');
         if (error.message.includes('Cannot reschedule')) throw new ApiError(httpStatus.BAD_REQUEST, error.message);
@@ -899,7 +925,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
 const checkAndNotifySlotWaiters = async (slotId) => {
     const slotNotificationModel = require('../models/slot_notification.model');
     const slotModel = require('../models/slot.model');
-    
+
     try {
         // 1. Get current slot status
         const slot = await slotModel.getSlotById(slotId);
@@ -914,7 +940,7 @@ const checkAndNotifySlotWaiters = async (slotId) => {
                 SELECT service_id FROM resource_services WHERE resource_id = $1 LIMIT 1
             )
         `, [slot.resource_id]);
-        
+
         const serviceData = res.rows[0];
         const estimatedServiceTime = serviceData?.estimated_service_time || 30;
 
@@ -926,7 +952,7 @@ const checkAndNotifySlotWaiters = async (slotId) => {
 
         // 3. Find pending notifications that match (desired_time <= currentEstimatedTime)
         const pending = await slotNotificationModel.getPendingNotificationsForSlot(slotId, currentEstimatedTime);
-        
+
         if (pending.length > 0) {
             const notificationIds = [];
             const timeStr = new Intl.DateTimeFormat('en-IN', {
@@ -954,9 +980,9 @@ const checkAndNotifySlotWaiters = async (slotId) => {
                             '/dashboard'
                         );
                     }
-                    
+
                     notificationIds.push(req.id);
-                    
+
                     // C. Email Notification
                     const userEmailEnabled = req.email_notification_enabled !== false;
 
@@ -987,7 +1013,7 @@ const checkAndNotifySlotWaiters = async (slotId) => {
 const proposeReschedule = async (appointmentId, orgId, proposedSlotId, reason) => {
     try {
         const appointment = await appointmentModel.proposeReschedule(appointmentId, orgId, proposedSlotId, reason);
-        
+
         // Notify User
         (async () => {
             try {
@@ -1030,7 +1056,7 @@ const proposeReschedule = async (appointmentId, orgId, proposedSlotId, reason) =
 const respondToReschedule = async (appointmentId, userId, action) => {
     try {
         const result = await appointmentModel.respondToReschedule(appointmentId, userId, action);
-        
+
         // Notify Admins and User on response
         (async () => {
             try {
@@ -1039,10 +1065,10 @@ const respondToReschedule = async (appointmentId, userId, action) => {
                 const user = await userModel.getUserById(userId);
                 const orgRes = await pool.query('SELECT name, contact_email, email_notification FROM organizations WHERE id = $1', [appointment.org_id]);
                 const org = orgRes.rows[0];
-                
+
                 const message = `${user?.name || 'User'} has ${action}ed the reschedule proposal.`;
                 const admins = await userModel.getAdminsByOrg(appointment.org_id);
-                
+
                 for (const admin of admins) {
                     await notificationService.sendNotification(
                         admin.id,
@@ -1065,7 +1091,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
                             token_number: appointment.token_number || 1
                         });
                     }
-                    
+
                     // Trigger slot notifications for both slots
                     if (result.oldSlotId) checkAndNotifySlotWaiters(result.oldSlotId);
                     if (appointment.slot_id) checkAndNotifySlotWaiters(appointment.slot_id);
@@ -1120,11 +1146,11 @@ const markArrived = async (appointmentId, userId, scannedOrgId) => {
         "UPDATE appointments SET check_in_method = 'user_signal', updated_at = NOW() WHERE id = $1 RETURNING *",
         [appointmentId]
     );
-    
+
     // Notify admin
     const socket = require('../socket/index');
-    socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, { 
-        type: 'USER_ARRIVED', 
+    socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, {
+        type: 'USER_ARRIVED',
         appointmentId,
         userName: res.rows[0].user_name // If joined, but usually just a generic trigger is enough
     });
@@ -1141,14 +1167,14 @@ const markDelayed = async (appointmentId, userId) => {
         [appointmentId, userId]
     );
     if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found or unauthorized');
-    
+
     // Notify admin
     const socket = require('../socket/index');
-    socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, { 
-        type: 'USER_DELAYED', 
-        appointmentId 
+    socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, {
+        type: 'USER_DELAYED',
+        appointmentId
     });
-    
+
     return res.rows[0];
 };
 
@@ -1216,7 +1242,7 @@ const cancelPendingPayment = async (appointmentId, userId) => {
             await client.query('COMMIT');
             return { success: true };
         }
-        
+
         const appt = apptRes.rows[0];
 
         // 2. Security Check: Only allow if still pending_payment
@@ -1241,10 +1267,10 @@ const cancelPendingPayment = async (appointmentId, userId) => {
         // 5. Emit Socket Update (to refresh Admin Dashboards)
         const socket = require('../socket/index');
         try {
-            socket.getIO().to(`org_${appt.org_id}`).emit('queue_update', { 
+            socket.getIO().to(`org_${appt.org_id}`).emit('queue_update', {
                 type: 'APPOINTMENT_DELETED',
-                appointmentId, 
-                slotId: appt.slot_id 
+                appointmentId,
+                slotId: appt.slot_id
             });
         } catch (sErr) {
             console.warn('[Socket-Async] Update failed:', sErr.message);

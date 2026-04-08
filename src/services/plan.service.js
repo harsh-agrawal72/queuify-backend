@@ -33,6 +33,11 @@ const getPlanById = async (id) => {
     return res.rows[0];
 };
 
+const getPlanByName = async (name, role = 'user') => {
+    const res = await pool.query('SELECT * FROM plans WHERE name = $1 AND target_role = $2', [name, role]);
+    return res.rows[0];
+};
+
 const updatePlan = async (id, updateBody) => {
     const { name, price_monthly, price_yearly, commission_rate, features, is_active, target_role } = updateBody;
 
@@ -95,6 +100,7 @@ module.exports = {
     createPlan,
     getPlans,
     getPlanById,
+    getPlanByName,
     updatePlan,
     deletePlan,
     assignPlanToUser

@@ -16,23 +16,32 @@ const savePushToken = async (userId, token) => {
  */
 const sendNotification = async (userId, title, message, type = 'general', link = '/') => {
     try {
-        // 1. Save to Database (In-App Notification)
-        // Note: Assuming a 'notifications' table exists based on controller usage
+        // 1. Create In-App Notification
         const dbResult = await pool.query(
             'INSERT INTO notifications (user_id, title, message, type, link, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *',
             [userId, title, message, type, link]
         );
 
-        // 2. Fetch User's Push Token
-        const userRes = await pool.query('SELECT push_token FROM users WHERE id = $1', [userId]);
-        const pushToken = userRes.rows[0]?.push_token;
+        // 2. Fetch User's Push Token and Plan Features
+        const userRes = await pool.query(
+            `SELECT u.push_token, p.features as plan_features 
+             FROM users u 
+             LEFT JOIN plans p ON u.plan_id = p.id 
+             WHERE u.id = $1`, 
+            [userId]
+        );
+        const user = userRes.rows[0];
+        const pushToken = user?.push_token;
+        const planFeatures = user?.plan_features || { notifications: ['email'] }; // Fallback for safety
 
-        // 3. Send Push Notification if token exists
-        if (pushToken) {
+        // 3. Send Push Notification if token exists AND plan allows it
+        const isPushAllowed = planFeatures.notifications?.includes('push');
+
+        if (pushToken && isPushAllowed) {
             await sendPushNotification(pushToken, {
                 title,
                 body: message,
-                click_action: link
+                data: { link: link || '/dashboard' }
             });
         }
 

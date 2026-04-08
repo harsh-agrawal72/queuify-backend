@@ -4,7 +4,7 @@ const ApiError = require('../utils/ApiError');
 const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
 
 const createAppointment = async (appointmentBody) => {
-    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false, customer_name, customer_phone } = appointmentBody;
+    const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false, customer_name, customer_phone, is_priority } = appointmentBody;
 
     const client = await pool.connect();
 
@@ -12,7 +12,7 @@ const createAppointment = async (appointmentBody) => {
         await client.query('BEGIN');
 
         // 0. Broad Duplicate Check: Prevent multiple active bookings for same user/service on same day
-        const dayCheckDate = slotId 
+        const dayCheckDate = slotId
             ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date((await client.query('SELECT start_time FROM slots WHERE id = $1', [slotId])).rows[0]?.start_time || new Date()))
             : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 
@@ -25,12 +25,12 @@ const createAppointment = async (appointmentBody) => {
 
         if (broadCheck.rows.length > 0 && !bypassDuplicate) {
             const existing = broadCheck.rows[0];
-            
+
             // 1. If it's pure duplicate (same slot or same day active), block
             if (['confirmed', 'pending', 'serving'].includes(existing.status)) {
                 throw new Error("DUPLICATE_BOOKING_WARNING");
             }
-            
+
             // 2. If it's pending_payment for THE SAME SLOT, we can resume it
             if (existing.status === 'pending_payment' && existing.slot_id === slotId) {
                 // (Existing logic to resume payment)
@@ -52,7 +52,7 @@ const createAppointment = async (appointmentBody) => {
 
                 const queueRes = await client.query(
                     `WITH RankedQueue AS (
-                        SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY created_at ASC) as q_rank
+                        SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY (CASE WHEN is_priority = TRUE THEN 0 ELSE 1 END), created_at ASC) as q_rank
                         FROM appointments
                         WHERE status IN ('pending', 'confirmed', 'serving', 'completed')
                         AND ${filterClause}
@@ -154,14 +154,14 @@ const createAppointment = async (appointmentBody) => {
         // Fetch Price from Mapping (with fallback to Resource Price then Service Base Price)
         if (existingCols.includes('price')) {
             let price = 0;
-            
+
             if (resourceId) {
                 // 1. Check for specific Service + Resource combo price
                 const rsPriceRes = await client.query(
                     'SELECT price FROM resource_services WHERE resource_id = $1 AND service_id = $2',
                     [resourceId, serviceId]
                 );
-                
+
                 if (rsPriceRes.rows.length > 0 && parseFloat(rsPriceRes.rows[0].price) > 0) {
                     price = rsPriceRes.rows[0].price;
                 } else {
@@ -227,6 +227,11 @@ const createAppointment = async (appointmentBody) => {
             values.push(appointmentBody.token_number || null);
             valuePlaceholders.push(`$${values.length}`);
         }
+        if (existingCols.includes('is_priority')) {
+            columns.push('is_priority');
+            values.push(is_priority || false);
+            valuePlaceholders.push(`$${values.length}`);
+        }
 
         const appointmentRes = await client.query(
             `INSERT INTO appointments (${columns.join(', ')}) 
@@ -269,7 +274,7 @@ const createAppointment = async (appointmentBody) => {
 
         const queueRes = await client.query(
             `WITH RankedQueue AS (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY created_at ASC) as q_rank
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY (CASE WHEN is_priority = TRUE THEN 0 ELSE 1 END), created_at ASC) as q_rank
                 FROM appointments
                 WHERE status IN ('pending', 'confirmed', 'serving', 'completed')
                 AND ${filterClause}
@@ -299,7 +304,7 @@ const createAppointment = async (appointmentBody) => {
 const getAppointmentById = async (id) => {
     try {
         const result = await pool.query(
-             `SELECT a.*, 
+            `SELECT a.*, 
                      s.name as service_name, s.queue_scope,
                      r.name as resource_name,
                      o.name as org_name,
@@ -635,21 +640,21 @@ const proposeReschedule = async (appointmentId, orgId, proposedSlotId, reason) =
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         // Ensure slot exists and belongs to the same org/service
         const slotRes = await client.query('SELECT service_id, org_id FROM slots WHERE id = $1', [proposedSlotId]);
         if (slotRes.rows.length === 0) throw new Error('Slot not found');
         if (slotRes.rows[0].org_id !== orgId) throw new Error('Slot does not belong to this organization');
-        
+
         const result = await client.query(
             `UPDATE appointments 
              SET proposed_slot_id = $1, reschedule_status = 'pending', reschedule_reason = $2 
              WHERE id = $3 AND org_id = $4 RETURNING *`,
             [proposedSlotId, reason, appointmentId, orgId]
         );
-        
+
         if (result.rows.length === 0) throw new Error('Appointment not found');
-        
+
         await client.query('COMMIT');
         return result.rows[0];
     } catch (e) {
@@ -664,7 +669,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         // 1. Fetch appointment (With explicit uuid casts for reliability)
         const apptRes = await client.query(
             'SELECT * FROM appointments WHERE id = $1::uuid AND user_id = $2::uuid FOR UPDATE',
@@ -672,9 +677,9 @@ const respondToReschedule = async (appointmentId, userId, action) => {
         );
         if (apptRes.rows.length === 0) throw new Error('Appointment not found');
         const appt = apptRes.rows[0];
-        
+
         if (appt.reschedule_status !== 'pending') throw new Error('No pending reschedule proposal found');
-        
+
         if (action === 'decline') {
             await client.query(
                 `UPDATE appointments 
@@ -685,10 +690,10 @@ const respondToReschedule = async (appointmentId, userId, action) => {
             await client.query('COMMIT');
             return { ...appt, reschedule_status: 'declined' };
         }
-        
+
         // action === 'accept'
         const newSlotId = appt.proposed_slot_id;
-        
+
         // 2. Fetch and Lock new slot
         const slotRes = await client.query(
             'SELECT * FROM slots WHERE id = $1::uuid AND is_active = TRUE FOR UPDATE',
@@ -724,7 +729,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
              WHERE id = $4::uuid RETURNING *`,
             [newSlotId, newSlot.resource_id, newPreferredDate, appointmentId]
         );
-        
+
         await client.query('COMMIT');
         return { appointment: updatedApptRes.rows[0], oldSlotId: appt.slot_id };
     } catch (e) {
