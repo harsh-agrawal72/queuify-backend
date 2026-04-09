@@ -27,7 +27,7 @@ const formatUserWithPlan = (user) => {
     
     // Parse plan_features if it's a string, or set defaults if missing
     try {
-        if (typeof user.plan_features === 'string') {
+        if (user.plan_features && typeof user.plan_features === 'string') {
             user.plan_features = JSON.parse(user.plan_features);
         }
     } catch (e) {
@@ -35,7 +35,8 @@ const formatUserWithPlan = (user) => {
         user.plan_features = null;
     }
 
-    if (!user.plan_features) {
+    // Safety: ensure plan_features is an object
+    if (!user.plan_features || typeof user.plan_features !== 'object') {
         user.plan_features = (user.role === 'admin' || user.role === 'staff') 
             ? { ...DEFAULT_ADMIN_FEATURES } 
             : { ...DEFAULT_USER_FEATURES };
@@ -51,14 +52,27 @@ const createUser = async (userBody) => {
     const { name, email, password, role, orgId, isPasswordSet, provider, google_id, phone, terms_accepted, plan_id } = userBody;
     const isPwdSet = isPasswordSet !== undefined ? isPasswordSet : true;
 
-    // 1. Create the user with core columns
+    // 1. Create the user with core columns that are GUARANTEED to exist
     const result = await pool.query(
-        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone, plan_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
-        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null, plan_id || null]
+        'INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, activated_at, provider, google_id, phone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+        [name, email, password, role, orgId || null, isPwdSet, isPwdSet ? new Date() : null, provider || 'local', google_id || null, phone || null]
     );
-    const user = result.rows[0];
+    let user = result.rows[0];
 
-    // 2. Try to update terms_accepted (optional step, prevents crash if columns don't exist yet)
+    // 2. Try to update plan_id (defensive: might not exist yet)
+    if (plan_id) {
+        try {
+            const planResult = await pool.query(
+                'UPDATE users SET plan_id = $1 WHERE id = $2 RETURNING *',
+                [plan_id, user.id]
+            );
+            if (planResult.rows[0]) user = planResult.rows[0];
+        } catch (e) {
+            console.warn('[USER-MODEL] plan_id column not found in users table. Skipping plan assignment during registration.');
+        }
+    }
+
+    // 3. Try to update terms_accepted (optional step, prevents crash if columns don't exist yet)
     if (terms_accepted) {
         try {
             const updateResult = await pool.query(
@@ -66,7 +80,7 @@ const createUser = async (userBody) => {
                 [true, user.id]
             );
             if (updateResult.rows.length > 0) {
-                return updateResult.rows[0];
+                user = updateResult.rows[0];
             }
         } catch (e) {
             console.warn('[USER-MODEL] Terms columns not found yet. Signup succeeded but terms not recorded.', e.message);
@@ -98,50 +112,119 @@ const updateUserByType = async (userId, updateBody) => {
  * Get user by email
  */
 const getUserByEmail = async (email) => {
-    const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name, 
-                o.is_setup_completed as org_is_setup_completed,
-                o.is_onboarded as org_is_onboarded,
-                o.status as org_status,
-                o.subscription_expiry,
-                p.name as plan_name, p.features as plan_features,
-                (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
-         FROM users u 
-         LEFT JOIN organizations o ON u.org_id = o.id 
-         LEFT JOIN plans p ON (
-            CASE 
-                WHEN u.role IN ('admin', 'staff') THEN o.plan_id 
-                ELSE u.plan_id 
-            END
-         ) = p.id
-         WHERE u.email = $1`, [email]
+    // 1. Minimum Viable Query: Fetch core user data only
+    const userRes = await pool.query(
+        'SELECT * FROM users WHERE email = $1', 
+        [email]
     );
-    return formatUserWithPlan(result.rows[0]);
+    let user = userRes.rows[0];
+    if (!user) return null;
+
+    // 2. Safe Hydration: Fetch organization details if linked
+    if (user.org_id) {
+        try {
+            const orgRes = await pool.query(
+                'SELECT type as org_type, name as org_name, is_setup_completed as org_is_setup_completed, is_onboarded as org_is_onboarded, status as org_status FROM organizations WHERE id = $1',
+                [user.org_id]
+            );
+            if (orgRes.rows[0]) {
+                user = { ...user, ...orgRes.rows[0] };
+            }
+        } catch (e) {
+            console.warn('[USER-MODEL] Failed to fetch safe org details:', e.message);
+            // Fallback: fetch at least the name/status if the fancy columns are missing
+            try {
+                const fallbackOrg = await pool.query('SELECT name as org_name, status as org_status FROM organizations WHERE id = $1', [user.org_id]);
+                if (fallbackOrg.rows[0]) user = { ...user, ...fallbackOrg.rows[0] };
+            } catch (inner) { /* ignore */ }
+        }
+    }
+
+    // 3. Safe Hydration: Fetch Plan details
+    try {
+        const planIdToFetch = (user.role === 'admin' || user.role === 'staff') ? (user.plan_id || user.plan_id) : user.plan_id; 
+        // Note: For admins, we usually check the org plan, but here we check whatever ID is available safely
+        const planRes = await pool.query(
+            'SELECT name as plan_name, features as plan_features FROM plans WHERE id = $1',
+            [user.plan_id]
+        );
+        if (planRes.rows[0]) {
+            user = { ...user, ...planRes.rows[0] };
+        }
+    } catch (e) {
+        console.warn('[USER-MODEL] Failed to fetch safe plan details:', e.message);
+    }
+
+    // 4. Safe Hydration: Active Bookings count
+    try {
+        const countRes = await pool.query(
+            'SELECT COUNT(*)::int as active_bookings_count FROM appointments WHERE user_id = $1 AND status IN (\'pending\', \'confirmed\', \'serving\')',
+            [user.id]
+        );
+        user.active_bookings_count = countRes.rows[0]?.active_bookings_count || 0;
+    } catch (e) {
+        user.active_bookings_count = 0;
+    }
+
+    return formatUserWithPlan(user);
 };
 
 /**
  * Get user by ID
  */
 const getUserById = async (id) => {
-    const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name, 
-                o.is_setup_completed as org_is_setup_completed,
-                o.is_onboarded as org_is_onboarded,
-                o.status as org_status,
-                o.subscription_expiry,
-                p.name as plan_name, p.features as plan_features,
-                (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
-         FROM users u 
-         LEFT JOIN organizations o ON u.org_id = o.id 
-         LEFT JOIN plans p ON (
-            CASE 
-                WHEN u.role IN ('admin', 'staff') THEN o.plan_id 
-                ELSE u.plan_id 
-            END
-         ) = p.id
-         WHERE u.id = $1`, [id]
+    // 1. Minimum Viable Query: Fetch core user data only
+    const userRes = await pool.query(
+        'SELECT * FROM users WHERE id = $1', 
+        [id]
     );
-    return formatUserWithPlan(result.rows[0]);
+    let user = userRes.rows[0];
+    if (!user) return null;
+
+    // 2. Safe Hydration: Fetch organization details if linked
+    if (user.org_id) {
+        try {
+            const orgRes = await pool.query(
+                'SELECT type as org_type, name as org_name, is_setup_completed as org_is_setup_completed, is_onboarded as org_is_onboarded, status as org_status FROM organizations WHERE id = $1',
+                [user.org_id]
+            );
+            if (orgRes.rows[0]) {
+                user = { ...user, ...orgRes.rows[0] };
+            }
+        } catch (e) {
+            console.warn('[USER-MODEL] Failed to fetch safe org details:', e.message);
+            try {
+                const fallbackOrg = await pool.query('SELECT name as org_name, status as org_status FROM organizations WHERE id = $1', [user.org_id]);
+                if (fallbackOrg.rows[0]) user = { ...user, ...fallbackOrg.rows[0] };
+            } catch (inner) { /* ignore */ }
+        }
+    }
+
+    // 3. Safe Hydration: Fetch Plan details
+    try {
+        const planRes = await pool.query(
+            'SELECT name as plan_name, features as plan_features FROM plans WHERE id = $1',
+            [user.plan_id]
+        );
+        if (planRes.rows[0]) {
+            user = { ...user, ...planRes.rows[0] };
+        }
+    } catch (e) {
+        console.warn('[USER-MODEL] Failed to fetch safe plan details:', e.message);
+    }
+
+     // 4. Safe Hydration: Active Bookings count
+     try {
+        const countRes = await pool.query(
+            'SELECT COUNT(*)::int as active_bookings_count FROM appointments WHERE user_id = $1 AND status IN (\'pending\', \'confirmed\', \'serving\')',
+            [user.id]
+        );
+        user.active_bookings_count = countRes.rows[0]?.active_bookings_count || 0;
+    } catch (e) {
+        user.active_bookings_count = 0;
+    }
+
+    return formatUserWithPlan(user);
 };
 
 /**
