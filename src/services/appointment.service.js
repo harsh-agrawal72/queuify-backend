@@ -264,8 +264,14 @@ const cancelAppointment = async (appointmentId, userId, reason = null) => {
                     const autoRefundService = require('./autoRefund.service');
                     console.log(`[User-Cancel-Refund] Triggering automated refund for Appointment ${appointment.id}`);
                     autoRefundService.processRefund(appointment.id, 'user')
-                        .then(result => console.log(`[User-Cancel-Refund] Success:`, result))
-                        .catch(e => console.error('[User-Cancel-Refund] FAILED:', e.message));
+                        .then(result => {
+                            if (result && result.refunded) {
+                                console.log(`[User-Cancel-Refund] ✅ Success: ${JSON.stringify(result)}`);
+                            } else {
+                                console.log(`[User-Cancel-Refund] ⚠️ Refund not applicable or failed: ${JSON.stringify(result)}`);
+                            }
+                        })
+                        .catch(e => console.error('[User-Cancel-Refund] ❌ FAILED:', e.message));
                 } else {
                     console.log(`[User-Cancel-Refund] No refund triggered for Appointment ${appointment.id}. payment_status: ${appointment.payment_status}, price: ${appointment.price}`);
                 }
@@ -520,8 +526,9 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
                 if (status === 'cancelled' && appointment.payment_status === 'paid' && parseFloat(appointment.price) > 0) {
                     try {
                         const autoRefundService = require('./autoRefund.service');
-                        console.log(`[Admin-Update-Refund] Triggering refund for Appointment ${appointmentId}`);
-                        await autoRefundService.processRefund(appointmentId, 'admin');
+                        console.log(`[Admin-Update-Refund] Triggering actual refund for Appointment ${appointmentId}`);
+                        const refundResult = await autoRefundService.processRefund(appointmentId, 'admin');
+                        console.log(`[Admin-Update-Refund] Process Result:`, JSON.stringify(refundResult));
                     } catch (refundErr) {
                         console.error(`[Admin-Update-Refund] Refund trigger failed:`, refundErr.message);
                     }

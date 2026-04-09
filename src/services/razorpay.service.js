@@ -14,7 +14,7 @@ const getRazorpayInstance = () => {
     const keyId = config.razorpay.keyId;
     const keySecret = config.razorpay.keySecret;
     
-    console.log(`[RazorpayService] Initializing with Key ID: ${keyId ? 'PRESENT' : 'MISSING'}`);
+    console.log(`[RazorpayService] Initializing instance with Key ID: ${keyId ? keyId.substring(0, 10) + '...' : 'MISSING'}`);
 
     if (!keyId || !keySecret) {
         throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Razorpay configuration (Key ID or Secret) is missing in environment variables.');

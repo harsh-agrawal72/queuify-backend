@@ -60,6 +60,7 @@ const getRefundPolicy = (slotStartTime, cancelledBy, planFeatures = null) => {
  * @param {string} cancelledBy - 'user' | 'admin'
  */
 const processRefund = async (appointmentId, cancelledBy) => {
+    console.log(`[AutoRefund] === START === appt=${appointmentId}, by=${cancelledBy}`);
     const client = await pool.connect();
 
     try {
@@ -110,7 +111,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 [appointmentId]
             );
             if (availableTxRes.rows.length === 0) {
-                console.log(`[AutoRefund] No locked or available funds for Appointment ${appointmentId}. Skipping refund.`);
+                console.log(`[AutoRefund] !!! CRITICAL: No locked or available funds for Appointment ${appointmentId} found in wallet_transactions.`);
                 await client.query('ROLLBACK');
                 return { refunded: false, reason: 'No locked or available funds found for this appointment' };
             }
@@ -163,7 +164,10 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 razorpayRefundId = rzpRefund.id;
                 console.log(`[AutoRefund] Razorpay API success: ${razorpayRefundId}`);
             } catch (rzpErr) {
-                console.error(`[AutoRefund] Razorpay API refund FAILED for appt=${appointmentId}:`, rzpErr.message);
+                console.error(`[AutoRefund] !!! RAZORPAY ERROR appt=${appointmentId}:`, rzpErr.status, rzpErr.message);
+                if (rzpErr.response) {
+                    console.error(`[AutoRefund] Razorpay Response Data:`, JSON.stringify(rzpErr.response.data));
+                }
                 refundSuccessful = false;
             }
         } else {
