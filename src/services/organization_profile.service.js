@@ -102,7 +102,6 @@ const syncSetupStatus = async (orgId) => {
         profile.city && 
         profile.state && 
         profile.pincode &&
-        images.some(img => img.image_type === 'logo') &&
         images.some(img => img.image_type === 'pan_card') &&
         images.some(img => img.image_type === 'aadhar_card')
     );
