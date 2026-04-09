@@ -127,6 +127,66 @@ const forceUpdateV3 = catchAsync(async (req, res) => {
     res.send({ message: "Admin plans updated successfully to V3! Please refresh your dashboard now." });
 });
 
+const syncUserPlans = catchAsync(async (req, res) => {
+    const { pool } = require('../config/db');
+    
+    const plans = [
+        {
+            name: 'Free',
+            price_monthly: 0,
+            price_yearly: 0,
+            commission_rate: 0,
+            features: {
+                max_active_appointments: 2,
+                notifications: ['email'],
+                priority: false,
+                reschedule_limit: 0
+            }
+        },
+        {
+            name: 'Standard',
+            price_monthly: 49,
+            price_yearly: 490,
+            commission_rate: 0,
+            features: {
+                max_active_appointments: 5,
+                notifications: ['email', 'push'],
+                priority: false,
+                reschedule_limit: 1
+            }
+        },
+        {
+            name: 'Premium',
+            price_monthly: 149,
+            price_yearly: 1490,
+            commission_rate: 0,
+            features: {
+                max_active_appointments: 999,
+                notifications: ['email', 'push', 'sms'],
+                priority: true,
+                reschedule_limit: 999
+            }
+        }
+    ];
+
+    for (const p of plans) {
+        // Use a combination of name and target_role for UPSERT logic if possible, 
+        // but here we just check if it exists or update based on name if target_role matches.
+        await pool.query(
+            `INSERT INTO plans (name, price_monthly, price_yearly, commission_rate, features, target_role)
+             VALUES ($1, $2, $3, $4, $5, 'user')
+             ON CONFLICT (name) WHERE target_role = 'user' DO UPDATE SET 
+                price_monthly = EXCLUDED.price_monthly,
+                price_yearly = EXCLUDED.price_yearly,
+                commission_rate = EXCLUDED.commission_rate,
+                features = EXCLUDED.features`,
+            [p.name, p.price_monthly, p.price_yearly, p.commission_rate, JSON.stringify(p.features)]
+        );
+    }
+
+    res.send({ message: "User plans synced successfully! Free (0), Standard (49), Premium (149) are now active." });
+});
+
 module.exports = {
     createPlan,
     getPlans,
@@ -134,5 +194,6 @@ module.exports = {
     updatePlan,
     deletePlan,
     assignUserPlan,
-    forceUpdateV3
+    forceUpdateV3,
+    syncUserPlans
 };
