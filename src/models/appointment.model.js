@@ -521,7 +521,7 @@ const rescheduleAppointment = async (appointmentId, userId, newSlotId, isAdmin =
                  FROM appointments a
                  LEFT JOIN users u ON a.user_id = u.id
                  LEFT JOIN plans p ON u.plan_id = p.id
-                 WHERE a.id = $1 AND a.user_id = $2 FOR UPDATE`,
+                 WHERE a.id = $1 AND a.user_id = $2 FOR UPDATE OF a`,
                 [appointmentId, userId]
             );
         }

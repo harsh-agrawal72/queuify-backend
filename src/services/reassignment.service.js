@@ -88,7 +88,7 @@ const reassignAppointments = async (slotId) => {
                     (s.start_time > $${startTimeParamIdx}::timestamp) DESC, -- Prefer "next" slots
                     (s.booked_count::float / NULLIF(s.max_capacity, 0)::float) ASC, 
                     ABS(EXTRACT(EPOCH FROM (s.start_time - $${startTimeParamIdx}::timestamp))) ASC
-                 LIMIT 1 FOR UPDATE`,
+                 LIMIT 1 FOR UPDATE OF s`,
                 params
             );
 
@@ -262,7 +262,7 @@ const fillSlotFromWaitlist = async (slotId) => {
                     (a.status = 'waitlisted_urgent') DESC, -- 1. Urgent status first
                     (a.preferred_date <= $3::date) DESC,   -- 2. Today or past dates first
                     a.created_at ASC                       -- 3. Oldest in those groups first
-                 LIMIT 1 FOR UPDATE SKIP LOCKED`,
+                 LIMIT 1 FOR UPDATE OF a SKIP LOCKED`,
                 [slot.org_id, slot.resource_id, localDate]
             );
 

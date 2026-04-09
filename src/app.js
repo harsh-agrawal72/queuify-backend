@@ -45,6 +45,7 @@ if (config.env !== 'test') {
 const allowedOrigins = [
     "https://queuify.onrender.com",
     "https://queuify.in",
+    "https://www.queuify.in",
     "http://localhost:5173", // optional for local dev
 ];
 
@@ -94,7 +95,6 @@ app.get('/health', (req, res) => {
 
 // Monitoring
 const { monitoringMiddleware, errorLoggingMiddleware } = require('./middlewares/monitoring');
-app.use(monitoringMiddleware);
 app.use(monitoringMiddleware);
 
 // API routes

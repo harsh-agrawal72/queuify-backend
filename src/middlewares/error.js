@@ -44,6 +44,20 @@ const errorHandler = (err, req, res, next) => {
         console.error(err);
     }
 
+    // CORS Safety Net: Manually set headers in case they were missed by the middleware
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+        "https://queuify.onrender.com",
+        "https://queuify.in",
+        "https://www.queuify.in",
+        "http://localhost:5173"
+    ];
+
+    if (origin && allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
     res.status(statusCode).json(response);
 };
 
