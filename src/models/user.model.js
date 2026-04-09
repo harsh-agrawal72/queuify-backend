@@ -60,7 +60,8 @@ const getUserByEmail = async (email) => {
                 o.is_onboarded as org_is_onboarded,
                 o.status as org_status,
                 o.subscription_expiry,
-                p.name as plan_name, p.features as plan_features,
+                COALESCE(p.name, 'Free') as plan_name, 
+                COALESCE(p.features, '{"max_resources":1,"max_admins":1,"analytics":"basic","has_custom_branding":false,"has_top_position":false,"has_one_on_one_support":false,"has_customer_insight":false,"has_premium_features":false}'::jsonb) as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
@@ -85,7 +86,8 @@ const getUserById = async (id) => {
                 o.is_onboarded as org_is_onboarded,
                 o.status as org_status,
                 o.subscription_expiry,
-                p.name as plan_name, p.features as plan_features,
+                COALESCE(p.name, 'Free') as plan_name, 
+                COALESCE(p.features, '{"max_resources":1,"max_admins":1,"analytics":"basic","has_custom_branding":false,"has_top_position":false,"has_one_on_one_support":false,"has_customer_insight":false,"has_premium_features":false}'::jsonb) as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
