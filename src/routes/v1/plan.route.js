@@ -3,9 +3,11 @@ const auth = require('../../middlewares/auth');
 const validate = require('../../middlewares/validate');
 const planController = require('../../controllers/plan.controller');
 
+const { optionalAuth } = require('../../middlewares/auth');
+
 const router = express.Router();
 
-router.get('/', planController.getPlans);
+router.get('/', optionalAuth, planController.getPlans);
 router.get('/force-update-v3', planController.forceUpdateV3);
 router.get('/sync-user-plans', planController.syncUserPlans);
 router.post('/assign', auth('user'), planController.assignUserPlan);

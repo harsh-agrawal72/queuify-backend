@@ -14,19 +14,23 @@ const createPlan = async (planBody) => {
     return res.rows[0];
 };
 
-const getPlans = async (role = null) => {
-    let query = 'SELECT * FROM plans WHERE is_active = true';
+const getPlans = async (role = null, includeInactive = false) => {
+    let query = 'SELECT * FROM plans WHERE 1=1';
     const params = [];
 
+    if (!includeInactive) {
+        query += ' AND is_active = true';
+    }
+
     if (role) {
-        query += ' AND target_role = $1';
         params.push(role);
+        query += ` AND target_role = $${params.length}`;
     }
 
     // Exclude test plans (specifically the 10 Rs one)
     query += ' AND price_monthly != 10';
 
-    query += ' ORDER BY price_monthly ASC';
+    query += ' ORDER BY target_role ASC, price_monthly ASC';
     const res = await pool.query(query, params);
     return res.rows;
 };

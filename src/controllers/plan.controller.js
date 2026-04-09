@@ -9,7 +9,9 @@ const createPlan = catchAsync(async (req, res) => {
 
 const getPlans = catchAsync(async (req, res) => {
     const { target_role } = req.query;
-    const plans = await planService.getPlans(target_role);
+    // Superadmins can see all plans (including inactive ones)
+    const includeInactive = req.user && req.user.role === 'superadmin';
+    const plans = await planService.getPlans(target_role, includeInactive);
     res.send(plans);
 });
 

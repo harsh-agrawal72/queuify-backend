@@ -105,8 +105,8 @@ const registerOrganization = async (orgBody, adminBody) => {
     }
 
     // Fetch the default 'Free' plan for admins
-    const freePlanRes = await query("SELECT id FROM plans WHERE name = 'Free' AND target_role = 'admin' LIMIT 1");
-    const freePlanId = freePlanRes.rows[0]?.id;
+    const freePlan = await planService.getPlanByName('Free', 'admin');
+    const freePlanId = freePlan?.id;
 
     // 1. Create Org
     const org = await organizationModel.createOrganization({
@@ -197,11 +197,16 @@ const register = async (userBody) => {
         const codeSuffix = Math.floor(100 + Math.random() * 900);
         const orgCode = `${codePrefix}${codeSuffix}`; // collision possible but rare for demo
 
+        // Fetch the default 'Free' plan for admins
+        const freePlan = await planService.getPlanByName('Free', 'admin');
+
         const org = await organizationModel.createOrganization({
             name: orgName.trim(),
             slug,
             contactEmail: email,
-            orgCode
+            orgCode,
+            plan_id: freePlan?.id,
+            plan: 'Free'
         });
         finalRole = 'admin';
         finalOrgId = org.id;
