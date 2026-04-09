@@ -180,21 +180,18 @@ const processRefund = async (appointmentId, cancelledBy) => {
         // 7. Finalize status based on refund success
         const finalPaymentStatus = refundSuccessful ? 'refunded' : 'refund_failed';
 
-        const updateApptRes = await client.query(
+        await client.query(
             `UPDATE appointments 
              SET status = 'cancelled', 
                  payment_status = $1, 
                  refund_amount = $2, 
                  razorpay_refund_id = $3,
                  updated_at = NOW() 
-             WHERE id = $4::uuid 
-             RETURNING status, payment_status`,
+             WHERE id = $4::uuid`,
             [finalPaymentStatus, refundAmount, razorpayRefundId, appointmentId]
         );
 
-        if (updateApptRes.rowCount > 0) {
-            console.log(`[AutoRefund] Appointment status updated to: cancelled, payment_status to: ${finalPaymentStatus}`);
-        }
+        console.log(`[AutoRefund] Appointment status updated to: cancelled, payment_status to: ${finalPaymentStatus}`);
 
         // 8. Wallet finalize
         if (refundSuccessful) {
@@ -202,12 +199,19 @@ const processRefund = async (appointmentId, cancelledBy) => {
             const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
             if (walletRes.rows.length > 0) {
                 const walletId = walletRes.rows[0].id;
-                // Deduct from locked funds (the refunded portion)
+                
+                // 100% of the REFUNDED amount is deducted from earnings
+                // Deduct from locked funds AND total/lifetime earnings
                 await client.query(
-                    'UPDATE wallets SET locked_funds = GREATEST(locked_funds - $1, 0), total_earned = GREATEST(total_earned - $1, 0) WHERE id = $2',
+                    `UPDATE wallets SET 
+                        locked_funds = GREATEST(locked_funds - $1, 0), 
+                        total_earned = GREATEST(total_earned - $1, 0),
+                        lifetime_earned = GREATEST(lifetime_earned - $1, 0)
+                     WHERE id = $2`,
                     [refundAmount, walletId]
                 );
-                // If partial refund, the remainder becomes available
+
+                // If partial refund, the remainder becomes available to organization
                 const remainder = originalAmount - refundAmount;
                 if (remainder > 0) {
                     await client.query(
@@ -215,13 +219,15 @@ const processRefund = async (appointmentId, cancelledBy) => {
                         [remainder, walletId]
                     );
                 }
-                // Update the original locked transaction
+
+                // Update the original locked transaction status to 'cancelled' (since it was refunded)
                 await client.query(
                     `UPDATE wallet_transactions SET status = 'cancelled', description = description || $1
                      WHERE reference_id = $2::uuid AND type = 'credit' AND (status = 'locked' OR status = 'available')`,
                     [` — ${policy.label}`, appointmentId]
                 );
-                // Log the refund transaction
+
+                // Log the refund transaction as a negative amount in the ledger
                 await client.query(
                     `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
                      VALUES ($1, $2, 'refund', 'completed', $3, $4)`,

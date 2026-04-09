@@ -7,6 +7,9 @@ const ApiError = require('../utils/ApiError');
 const socket = require('../socket/index');
 const emailService = require('./email.service');
 const notificationService = require('./notification.service');
+// Delayed require for circular dependencies
+let autoRefundService;
+let reassignmentService;
 
 /**
  * Book an appointment
@@ -457,6 +460,30 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
 
     const updatedAppointment = await appointmentModel.updateAppointmentStatus(appointmentId, status, admin_remarks);
 
+    // --- CRITICAL FINANCIAL TRIGGER: Admin-Initiated Cancellation Refund ---
+    if (status === 'cancelled' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
+        try {
+            if (!autoRefundService) autoRefundService = require('./autoRefund.service');
+            console.log(`[Admin-Update-Sync] ADMIN CANCELLED: Triggering immediate 100% refund for Appt ${appointmentId}`);
+            const refundResult = await autoRefundService.processRefund(appointmentId, 'admin');
+            console.log(`[Admin-Update-Sync] Refund Result for Appt ${appointmentId}:`, JSON.stringify(refundResult));
+        } catch (refundErr) {
+            console.error(`[Admin-Update-Sync] !!! Critical: Synchronous Administrative Refund Failed for Appt ${appointmentId}:`, refundErr.message);
+        }
+    }
+
+    // --- CRITICAL FINANCIAL TRIGGER: No-Show Settlement ---
+    if (status === 'no_show' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
+        try {
+            if (!autoRefundService) autoRefundService = require('./autoRefund.service');
+            console.log(`[Admin-Update-Sync] NO-SHOW: Triggering 70/30 settlement for Appt ${appointmentId}`);
+            const result = await autoRefundService.processNoShowSettlement(appointmentId);
+            console.log(`[Admin-Update-Sync] Settlement Result for Appt ${appointmentId}:`, JSON.stringify(result));
+        } catch (settleErr) {
+            console.error(`[Admin-Update-Sync] !!! Critical: Synchronous No-Show Settlement Failed for Appt ${appointmentId}:`, settleErr.message);
+        }
+    }
+
     // If status changed to completed, cancelled, or no_show, trigger auto-advancement
     if (['completed', 'cancelled', 'no_show'].includes(status)) {
         // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
@@ -464,8 +491,8 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
         // Also trigger waitlist fill if space opened up
         if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
             try {
-                const { fillSlotFromWaitlist } = require('./reassignment.service');
-                await fillSlotFromWaitlist(appointment.slot_id);
+                if (!reassignmentService) reassignmentService = require('./reassignment.service');
+                await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
             } catch (e) {
                 console.error('[StatusUpdate-WaitlistFill] Failed silently:', e.message);
             }
@@ -487,7 +514,7 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
 
         // Smart Queue Alerts
         if (status === 'serving') {
-            checkAndNotifyDrift(appointmentId);
+            // checkAndNotifyDrift(appointmentId); // Removed as it was undefined and causing 500 errors
         }
 
         // Notifications logic (Fire and Forget)...
@@ -522,31 +549,6 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
                     `/appointments`
                 );
 
-                // 3. Trigger Refund if Admin Cancelled
-                if (status === 'cancelled' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
-                    try {
-                        const autoRefundService = require('./autoRefund.service');
-                        console.log(`[Admin-Update-Refund] Triggering automated refund for Appointment ${appointmentId} (Cancelled by Admin)`);
-                        const refundResult = await autoRefundService.processRefund(appointmentId, 'admin');
-                        console.log(`[Admin-Update-Refund] Result for Appt ${appointmentId}:`, JSON.stringify(refundResult));
-                    } catch (refundErr) {
-                        console.error(`[Admin-Update-Refund] !!! Refund trigger failed for Appt ${appointmentId}:`, refundErr.message);
-                    }
-                } else if (status === 'cancelled') {
-                    console.log(`[Admin-Update-Refund] Skipping refund for Appt ${appointmentId}. conditions: paid=${updatedAppointment.payment_status === 'paid'}, price=${updatedAppointment.price}`);
-                }
-
-                // 3.1 Trigger No-Show Settlement
-                if (status === 'no_show' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
-                    try {
-                        const autoRefundService = require('./autoRefund.service');
-                        console.log(`[Admin-Update-Settlement] Triggering No-Show settlement for Appt ${appointmentId}`);
-                        const result = await autoRefundService.processNoShowSettlement(appointmentId);
-                        console.log(`[Admin-Update-Settlement] Result for Appt ${appointmentId}:`, JSON.stringify(result));
-                    } catch (settleErr) {
-                        console.error(`[Admin-Update-Settlement] !!! Settlement Failed for Appt ${appointmentId}:`, settleErr.message);
-                    }
-                }
 
                 // 4. Notify Admins
                 if (org && org.new_booking_notification) {

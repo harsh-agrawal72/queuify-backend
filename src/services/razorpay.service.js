@@ -80,6 +80,13 @@ const refundPayment = async (paymentId, amount, notes = {}) => {
         
         console.log(`[RazorpayService] Initiating refund: paymentId=${paymentId}, amount=${amount} (₹)`);
         
+        // Handle Mock Payments
+        if (paymentId && (paymentId.startsWith('pay_mock_') || paymentId.startsWith('order_mock_') || paymentId.startsWith('rfnd_mock_'))) {
+            const mockPaymentService = require('./mockPayment.service');
+            console.log(`[RazorpayService] Mock Payment Detected. Using mockPaymentService for refund.`);
+            return await mockPaymentService.initiateRefund(paymentId, amountInPaise);
+        }
+
         const refund = await rzp.payments.refund(paymentId, {
             amount: amountInPaise,
             speed: 'normal',
