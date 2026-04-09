@@ -23,6 +23,9 @@ const getPlans = async (role = null) => {
         params.push(role);
     }
 
+    // Exclude test plans (specifically the 10 Rs one)
+    query += ' AND price_monthly != 10';
+
     query += ' ORDER BY price_monthly ASC';
     const res = await pool.query(query, params);
     return res.rows;
