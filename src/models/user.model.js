@@ -5,6 +5,7 @@ const DEFAULT_ADMIN_FEATURES = {
     max_resources: 1,
     max_admins: 1,
     analytics: 'basic',
+    has_basic_features: true,
     has_custom_branding: false,
     has_top_position: false,
     has_one_on_one_support: false,

@@ -16,7 +16,7 @@ const createResource = async (orgId, resourceBody) => {
 
     if (orgRes.rows.length > 0) {
         const features = orgRes.rows[0].features || {};
-        const maxResources = features.resources || 2; // Default to Starter limit
+        const maxResources = features.max_resources || 1; // Default to Free limit
 
         const countRes = await pool.query(
             'SELECT COUNT(*) FROM resources WHERE org_id = $1 AND is_active = TRUE',

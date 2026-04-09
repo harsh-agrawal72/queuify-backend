@@ -1379,7 +1379,7 @@ const inviteAdmin = async (adminBody, currentAdminId, orgId) => {
 
     if (orgRes.rows.length > 0) {
         const features = orgRes.rows[0].features || {};
-        const maxAdmins = features.staff || 1; // Default to Starter limit
+        const maxAdmins = features.max_admins || 1; // Default to Free limit
 
         const countRes = await pool.query(
             "SELECT COUNT(*) FROM users WHERE org_id = $1 AND role = 'admin' AND is_suspended = FALSE",
