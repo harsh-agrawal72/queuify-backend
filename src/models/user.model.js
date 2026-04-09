@@ -1,5 +1,49 @@
 const { pool } = require('../config/db');
 
+// --- Helpers ---
+const DEFAULT_ADMIN_FEATURES = {
+    max_resources: 1,
+    max_admins: 1,
+    analytics: 'basic',
+    has_custom_branding: false,
+    has_top_position: false,
+    has_one_on_one_support: false,
+    has_customer_insight: false,
+    has_premium_features: false
+};
+
+const DEFAULT_USER_FEATURES = {
+    max_active_appointments: 2,
+    notifications: ['email'],
+    priority: false,
+    reschedule_limit: 0
+};
+
+const formatUserWithPlan = (user) => {
+    if (!user) return null;
+    
+    // Set default plan name if missing
+    if (!user.plan_name) user.plan_name = 'Free';
+    
+    // Parse plan_features if it's a string, or set defaults if missing
+    try {
+        if (typeof user.plan_features === 'string') {
+            user.plan_features = JSON.parse(user.plan_features);
+        }
+    } catch (e) {
+        console.warn('[USER-MODEL] Failed to parse plan_features:', e.message);
+        user.plan_features = null;
+    }
+
+    if (!user.plan_features) {
+        user.plan_features = (user.role === 'admin' || user.role === 'staff') 
+            ? { ...DEFAULT_ADMIN_FEATURES } 
+            : { ...DEFAULT_USER_FEATURES };
+    }
+
+    return user;
+};
+
 /**
  * Create a new user
  */
@@ -60,8 +104,7 @@ const getUserByEmail = async (email) => {
                 o.is_onboarded as org_is_onboarded,
                 o.status as org_status,
                 o.subscription_expiry,
-                COALESCE(p.name, 'Free') as plan_name, 
-                COALESCE(p.features, '{"max_resources":1,"max_admins":1,"analytics":"basic","has_custom_branding":false,"has_top_position":false,"has_one_on_one_support":false,"has_customer_insight":false,"has_premium_features":false}'::jsonb) as plan_features,
+                p.name as plan_name, p.features as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
@@ -73,7 +116,7 @@ const getUserByEmail = async (email) => {
          ) = p.id
          WHERE u.email = $1`, [email]
     );
-    return result.rows[0];
+    return formatUserWithPlan(result.rows[0]);
 };
 
 /**
@@ -86,8 +129,7 @@ const getUserById = async (id) => {
                 o.is_onboarded as org_is_onboarded,
                 o.status as org_status,
                 o.subscription_expiry,
-                COALESCE(p.name, 'Free') as plan_name, 
-                COALESCE(p.features, '{"max_resources":1,"max_admins":1,"analytics":"basic","has_custom_branding":false,"has_top_position":false,"has_one_on_one_support":false,"has_customer_insight":false,"has_premium_features":false}'::jsonb) as plan_features,
+                p.name as plan_name, p.features as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
@@ -99,7 +141,7 @@ const getUserById = async (id) => {
          ) = p.id
          WHERE u.id = $1`, [id]
     );
-    return result.rows[0];
+    return formatUserWithPlan(result.rows[0]);
 };
 
 /**
