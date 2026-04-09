@@ -4,9 +4,11 @@ const catchAsync = require('../utils/catchAsync');
 const razorpayService = require('../services/razorpay.service');
 const walletService = require('../services/wallet.service');
 const planService = require('../services/plan.service');
+const couponService = require('../services/coupon.service');
 const appointmentModel = require('../models/appointment.model');
 const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
+const { GST_RATE } = require('../utils/paymentHelper');
 
 const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
 
@@ -139,7 +141,7 @@ const verifyPayment = catchAsync(async (req, res) => {
  * Step 1: Create Plan Payment Order
  */
 const createPlanOrder = catchAsync(async (req, res) => {
-    const { planId } = req.body;
+    const { planId, couponCode } = req.body;
     
     const plan = await planService.getPlanById(planId);
     if (!plan) {
@@ -157,12 +159,53 @@ const createPlanOrder = catchAsync(async (req, res) => {
         // For now, let's just make sure the plan exists.
     }
 
-    const price = parseFloat(plan.price_monthly);
+    let price = parseFloat(plan.price_monthly);
     if (price <= 0) {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Free plans do not require payment');
     }
 
-    const amountInPaise = Math.round(price * 100);
+    // --- COUPON LOGIC ---
+    let discountInfo = null;
+    let finalBasePrice = price;
+
+    if (couponCode) {
+        try {
+            const coupon = await couponService.validateCoupon(couponCode, plan.target_role);
+            const breakdown = couponService.calculateDiscount(price, coupon);
+            finalBasePrice = breakdown.finalAmount;
+            discountInfo = {
+                code: coupon.code,
+                discount: breakdown.discount,
+                type: breakdown.discountType,
+                value: breakdown.discountValue
+            };
+        } catch (e) {
+            console.warn(`[PlanOrder] Coupon validation failed for ${couponCode}: ${e.message}`);
+            // If coupon fails, we just proceed without discount (or we could throw error)
+            // throwing error is better for UX so they don't accidentally pay full price
+            throw e;
+        }
+    }
+
+    // --- TAX CALCULATION (GST 18%) ---
+    const gstAmount = parseFloat((finalBasePrice * GST_RATE).toFixed(2));
+    const totalPayable = parseFloat((finalBasePrice + gstAmount).toFixed(2));
+
+    // --- CHECK FOR 100% DISCOUNT (FREE) ---
+    if (totalPayable <= 0) {
+        return res.status(httpStatus.OK).send({
+            isFree: true,
+            message: 'Plan is free with this coupon',
+            breakdown: {
+                basePrice: price,
+                discount: price,
+                gst: 0,
+                total: 0
+            }
+        });
+    }
+
+    const amountInPaise = Math.round(totalPayable * 100);
     const receiptId = `p_${String(planId).substring(0, 8)}_${Date.now()}`;
     
     const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId);
@@ -176,9 +219,84 @@ const createPlanOrder = catchAsync(async (req, res) => {
         plan: {
             id: plan.id,
             name: plan.name,
-            price: price
-        }
+            originalPrice: price,
+            finalBasePrice,
+            gst: gstAmount,
+            totalPayable
+        },
+        discount: discountInfo
     });
+});
+
+/**
+ * Step 1.5: Verify Coupon (For display in UI)
+ */
+const validateCoupon = catchAsync(async (req, res) => {
+    const { code, planId } = req.body;
+    const plan = await planService.getPlanById(planId);
+    if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Plan not found');
+
+    const coupon = await couponService.validateCoupon(code, plan.target_role);
+    const originalPrice = parseFloat(plan.price_monthly);
+    const breakdown = couponService.calculateDiscount(originalPrice, coupon);
+    
+    // Calculate GST on discounted price
+    const gst = parseFloat((breakdown.finalAmount * GST_RATE).toFixed(2));
+    const total = parseFloat((breakdown.finalAmount + gst).toFixed(2));
+
+    res.send({
+        isValid: true,
+        couponCode: coupon.code,
+        discountAmount: breakdown.discount,
+        finalPrice: breakdown.finalAmount,
+        gst,
+        total,
+        discountValue: coupon.discount_value,
+        discountType: coupon.discount_type
+    });
+});
+
+/**
+ * Handle 100% Free Plan Purchase (Bypass Razorpay)
+ */
+const claimFreePlan = catchAsync(async (req, res) => {
+    const { planId, couponCode } = req.body;
+    
+    // 1. Fetch Plan
+    const plan = await planService.getPlanById(planId);
+    if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Plan not found');
+
+    const originalPrice = parseFloat(plan.price_monthly);
+    let finalAmount = originalPrice;
+
+    // 2. Validate Coupon if provided
+    if (couponCode) {
+        const coupon = await couponService.validateCoupon(couponCode, plan.target_role);
+        const breakdown = couponService.calculateDiscount(originalPrice, coupon);
+        finalAmount = breakdown.finalAmount;
+    }
+
+    // 3. Verify it's actually free (either natively or via coupon)
+    if (finalAmount > 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'This plan is not free. Payment required.');
+    }
+
+    // 4. Upgrade/Downgrade
+    if (plan.target_role === 'admin') {
+        if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+            throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
+        }
+        await planService.assignPlanToOrg(req.user.org_id, planId);
+    } else {
+        await planService.assignPlanToUser(req.user.id, planId);
+    }
+
+    // 5. Mark coupon as used if applied
+    if (couponCode) {
+        await pool.query('UPDATE coupons SET used_count = used_count + 1 WHERE code = $1', [couponCode]);
+    }
+
+    res.send({ success: true, message: 'Plan assigned successfully!' });
 });
 
 /**
@@ -229,5 +347,7 @@ module.exports = {
     createOrder,
     verifyPayment,
     createPlanOrder,
-    verifyPlanPayment
+    verifyPlanPayment,
+    validateCoupon,
+    claimFreePlan
 };

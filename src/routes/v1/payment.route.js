@@ -38,6 +38,8 @@ router.post('/verify-payment', auth('user'), paymentController.verifyPayment);
 // Membership Plan Payments
 router.post('/create-plan-order', auth('user', 'admin'), paymentController.createPlanOrder);
 router.post('/verify-plan-payment', auth('user', 'admin'), paymentController.verifyPlanPayment);
+router.post('/validate-coupon', auth('user', 'admin'), paymentController.validateCoupon);
+router.post('/claim-free-plan', auth('user', 'admin'), paymentController.claimFreePlan);
 
 // ─── Refund Preview ───
 const autoRefundService = require('../../services/autoRefund.service');
