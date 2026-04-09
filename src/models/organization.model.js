@@ -101,7 +101,7 @@ const queryOrganizations = async (filter = {}) => {
         )`;
     }
 
-    let orderBy = 'o.created_at DESC';
+    let orderBy = 'has_top_priority DESC, o.created_at DESC';
     if (filter.userCity || filter.userPincode || filter.userState) {
         const cityParam = filter.userCity || '';
         const stateParam = filter.userState || '';
@@ -119,16 +119,26 @@ const queryOrganizations = async (filter = {}) => {
                 CASE WHEN p.state ILIKE $${sIdx} THEN 2 ELSE 0 END
             ) as proximity_score
         `;
-        orderBy = `proximity_score DESC, o.created_at DESC`;
+        orderBy = `has_top_priority DESC, proximity_score DESC, o.created_at DESC`;
     }
 
     const query = `
-        SELECT ${selectFields}
-        ${fromClause}
+        SELECT ${selectFields}, 
+               COALESCE((plans.features->>'has_top_position')::boolean, false) as has_top_priority
+        FROM organizations o
+        LEFT JOIN plans ON o.plan_id = plans.id
+        LEFT JOIN organization_profiles p ON o.id = p.org_id
+        LEFT JOIN reviews r ON o.id = r.org_id
+        LEFT JOIN (
+            SELECT org_id, image_url, id 
+            FROM organization_images 
+            WHERE image_type = 'logo'
+        ) logo ON o.id = logo.org_id
+        LEFT JOIN user_favorites fav ON o.id = fav.org_id AND fav.user_id = $1
         ${whereClause}
         GROUP BY 
             o.id, p.id, p.description, p.verified, p.address, p.images, p.city, p.state, p.pincode,
-            logo.image_url, logo.id, fav.user_id
+            logo.image_url, logo.id, fav.user_id, plans.features
         ORDER BY ${orderBy}
     `;
     const result = await pool.query(query, params);

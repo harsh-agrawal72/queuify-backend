@@ -143,14 +143,15 @@ const getUserByEmail = async (email) => {
 
     // 3. Safe Hydration: Fetch Plan details
     try {
-        const planIdToFetch = (user.role === 'admin' || user.role === 'staff') ? (user.plan_id || user.plan_id) : user.plan_id; 
-        // Note: For admins, we usually check the org plan, but here we check whatever ID is available safely
-        const planRes = await pool.query(
-            'SELECT name as plan_name, features as plan_features FROM plans WHERE id = $1',
-            [user.plan_id]
-        );
-        if (planRes.rows[0]) {
-            user = { ...user, ...planRes.rows[0] };
+        const planIdToFetch = (user.role === 'admin' || user.role === 'staff') ? (user.plan_id || user.org_plan_id) : user.plan_id; 
+        if (planIdToFetch) {
+            const planRes = await pool.query(
+                'SELECT name as plan_name, features as plan_features FROM plans WHERE id = $1',
+                [planIdToFetch]
+            );
+            if (planRes.rows[0]) {
+                user = { ...user, ...planRes.rows[0] };
+            }
         }
     } catch (e) {
         console.warn('[USER-MODEL] Failed to fetch safe plan details:', e.message);
@@ -203,12 +204,15 @@ const getUserById = async (id) => {
 
     // 3. Safe Hydration: Fetch Plan details
     try {
-        const planRes = await pool.query(
-            'SELECT name as plan_name, features as plan_features FROM plans WHERE id = $1',
-            [user.plan_id]
-        );
-        if (planRes.rows[0]) {
-            user = { ...user, ...planRes.rows[0] };
+        const planIdToFetch = (user.role === 'admin' || user.role === 'staff') ? (user.plan_id || user.org_plan_id) : user.plan_id; 
+        if (planIdToFetch) {
+            const planRes = await pool.query(
+                'SELECT name as plan_name, features as plan_features FROM plans WHERE id = $1',
+                [planIdToFetch]
+            );
+            if (planRes.rows[0]) {
+                user = { ...user, ...planRes.rows[0] };
+            }
         }
     } catch (e) {
         console.warn('[USER-MODEL] Failed to fetch safe plan details:', e.message);

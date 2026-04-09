@@ -438,23 +438,56 @@ const getAppointmentsByOrgId = async (orgId) => {
 };
 
 const updateAppointmentStatus = async (id, status, admin_remarks = null) => {
-    let query = 'UPDATE appointments SET status = $1';
-    const params = [status, id];
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
 
-    if (status === 'serving') {
-        query += ', serving_started_at = NOW()';
-    } else if (status === 'completed') {
-        query += ', completed_at = NOW()';
-        if (admin_remarks) {
-            params.push(admin_remarks);
-            query += `, admin_remarks = $${params.length}`;
+        // 1. Fetch current state for capacity management
+        const apptRes = await client.query('SELECT slot_id, status FROM appointments WHERE id = $1 FOR UPDATE', [id]);
+        if (apptRes.rows.length === 0) throw new Error('Appointment not found');
+        const oldAppt = apptRes.rows[0];
+
+        let query = 'UPDATE appointments SET status = $1, updated_at = NOW()';
+        const params = [status, id]; // status is $1, id is $2
+
+        if (status === 'serving') {
+            query += ', serving_started_at = NOW()';
+        } else if (status === 'completed') {
+            query += ', completed_at = NOW()';
+            if (admin_remarks) {
+                params.push(admin_remarks);
+                query += `, admin_remarks = $${params.length}`;
+            }
+        } else if (status === 'cancelled') {
+            query += ", cancelled_by = 'admin'";
+            if (admin_remarks) {
+                params.push(admin_remarks);
+                query += `, cancellation_reason = $${params.length}`;
+            }
         }
+
+        query += ' WHERE id = $2 RETURNING *';
+        const result = await client.query(query, params);
+        const updatedAppt = result.rows[0];
+
+        // 2. Handle capacity decrement if cancelling from an active state
+        if (status === 'cancelled' && oldAppt.status !== 'cancelled' && oldAppt.slot_id) {
+            await client.query(
+                'UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE id = $1',
+                [oldAppt.slot_id]
+            );
+            console.log(`[Model-StatusUpdate] Decremented booked_count for slot ${oldAppt.slot_id} due to ADMIN cancellation.`);
+        }
+
+        await client.query('COMMIT');
+        return updatedAppt;
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error(`[Model-StatusUpdate] Error updating appointment ${id}:`, e.message);
+        throw e;
+    } finally {
+        client.release();
     }
-
-    query += ' WHERE id = $2 RETURNING *';
-
-    const result = await pool.query(query, params);
-    return result.rows[0];
 };
 
 const cancelAppointment = async (id, userId, reason = null) => {

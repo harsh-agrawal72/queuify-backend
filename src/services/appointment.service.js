@@ -523,17 +523,29 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
                 );
 
                 // 3. Trigger Refund if Admin Cancelled
-                if (status === 'cancelled' && appointment.payment_status === 'paid' && parseFloat(appointment.price) > 0) {
+                if (status === 'cancelled' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
                     try {
                         const autoRefundService = require('./autoRefund.service');
-                        console.log(`[Admin-Update-Refund] Triggering actual refund for Appointment ${appointmentId}`);
+                        console.log(`[Admin-Update-Refund] Triggering automated refund for Appointment ${appointmentId} (Cancelled by Admin)`);
                         const refundResult = await autoRefundService.processRefund(appointmentId, 'admin');
-                        console.log(`[Admin-Update-Refund] Process Result:`, JSON.stringify(refundResult));
+                        console.log(`[Admin-Update-Refund] Result for Appt ${appointmentId}:`, JSON.stringify(refundResult));
                     } catch (refundErr) {
-                        console.error(`[Admin-Update-Refund] Refund trigger failed:`, refundErr.message);
+                        console.error(`[Admin-Update-Refund] !!! Refund trigger failed for Appt ${appointmentId}:`, refundErr.message);
                     }
                 } else if (status === 'cancelled') {
-                    console.log(`[Admin-Update-Refund] Skipping refund for Appointment ${appointmentId}. payment_status: ${appointment.payment_status}, price: ${appointment.price}`);
+                    console.log(`[Admin-Update-Refund] Skipping refund for Appt ${appointmentId}. conditions: paid=${updatedAppointment.payment_status === 'paid'}, price=${updatedAppointment.price}`);
+                }
+
+                // 3.1 Trigger No-Show Settlement
+                if (status === 'no_show' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
+                    try {
+                        const autoRefundService = require('./autoRefund.service');
+                        console.log(`[Admin-Update-Settlement] Triggering No-Show settlement for Appt ${appointmentId}`);
+                        const result = await autoRefundService.processNoShowSettlement(appointmentId);
+                        console.log(`[Admin-Update-Settlement] Result for Appt ${appointmentId}:`, JSON.stringify(result));
+                    } catch (settleErr) {
+                        console.error(`[Admin-Update-Settlement] !!! Settlement Failed for Appt ${appointmentId}:`, settleErr.message);
+                    }
                 }
 
                 // 4. Notify Admins

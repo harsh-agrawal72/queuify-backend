@@ -533,11 +533,12 @@ const getAnalytics = async (orgId, filters = {}) => {
             utilization: safeNum(utilization - prevUtilization),
         },
         // Charts
+        // Charts (Gated)
         dailyBookings: dailyStats || [],
-        bookingsByService: (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })),
-        bookingsByResource: (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })),
+        bookingsByService: hasAdvancedAnalytics ? (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })) : [],
+        bookingsByResource: hasAdvancedAnalytics ? (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })) : [],
         statusDistribution: statusDistribution || [],
-        peakHoursHeatmap: (heatmapRes.rows || []).map(r => {
+        peakHoursHeatmap: hasAdvancedAnalytics ? (heatmapRes.rows || []).map(r => {
             const d = parseInt(r.day);
             const h = parseInt(r.hour);
             const c = parseInt(r.count);
@@ -546,8 +547,8 @@ const getAnalytics = async (orgId, filters = {}) => {
                 hour: isFinite(h) ? h : 0,
                 count: isFinite(c) ? c : 0
             };
-        }),
-        // Insights
+        }) : [],
+        // Insights (Gated)
         insights: hasAdvancedAnalytics ? (insights || []) : [],
         // Meta
         dateRange: {
@@ -1452,6 +1453,16 @@ const deleteAdmin = async (adminIdToDelete, currentAdminId, orgId) => {
 
 
 const getPredictiveInsights = async (orgId) => {
+    // Check plan limits
+    const orgRes = await query(
+        `SELECT p.features FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
+        [orgId]
+    );
+    const features = orgRes.rows[0]?.features || {};
+    if (!features.has_premium_features) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Predictive insights are only available in Professional and Enterprise plans.');
+    }
+
     try {
         // 1. Calculate Average Service Duration (last 30 days)
         const avgDurationRes = await query(`
@@ -1603,6 +1614,26 @@ const deleteOrganization = async (orgId) => {
 const getUserLoyalty = async (orgId, userId) => {
     if (!userId) return null;
 
+    // Check plan limits
+    const orgRes = await query(
+        `SELECT p.features FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
+        [orgId]
+    );
+    const features = orgRes.rows[0]?.features || {};
+    if (!features.has_customer_insight) {
+        // Silently return limited data or throw? 
+        // For loyalty, it's safer to return basic Tier 'None' to avoid UI breaking if it's integrated.
+        // But the user asked for full enforcement.
+        return {
+            visitCount: 0,
+            lastVisit: null,
+            userCancellationCount: 0,
+            isFrequentVisitor: false,
+            loyaltyTier: 'None',
+            isLocked: true
+        };
+    }
+
     const res = await query(`
         SELECT 
             COUNT(*) FILTER (WHERE status = 'completed') as completed_count,
@@ -1629,6 +1660,16 @@ const getUserLoyalty = async (orgId, userId) => {
  */
 const getUserHistory = async (orgId, userId) => {
     if (!userId) return [];
+
+    // Check plan limits
+    const orgRes = await query(
+        `SELECT p.features FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
+        [orgId]
+    );
+    const features = orgRes.rows[0]?.features || {};
+    if (!features.has_customer_insight) {
+        return []; // Restricted
+    }
 
     const res = await query(`
         SELECT 
@@ -1672,6 +1713,16 @@ const retryRefund = async (orgId, appointmentId) => {
 };
 
 const getResourcePerformance = async (orgId, resourceId) => {
+    // Check plan limits
+    const orgRes = await query(
+        `SELECT p.features FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
+        [orgId]
+    );
+    const features = orgRes.rows[0]?.features || {};
+    if (!features.has_premium_features) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Resource performance analytics are only available in Professional and Enterprise plans.');
+    }
+
     // Calculate average service time (in minutes) for this resource over last 30 days
     // Duration is time between 'serving' status (serving_started_at) and 'completed' (completed_at)
     const res = await query(`

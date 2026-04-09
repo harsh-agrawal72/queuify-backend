@@ -103,6 +103,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
         );
 
         if (lockedTxRes.rows.length === 0) {
+            console.log(`[AutoRefund] No 'locked' transaction found for Appt ${appointmentId}. Checking 'available' status...`);
             // Check if funds were already released (completed case) — refund from available
             const availableTxRes = await client.query(
                 `SELECT id, amount FROM wallet_transactions
@@ -111,10 +112,11 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 [appointmentId]
             );
             if (availableTxRes.rows.length === 0) {
-                console.log(`[AutoRefund] !!! CRITICAL: No locked or available funds for Appointment ${appointmentId} found in wallet_transactions.`);
+                console.warn(`[AutoRefund] !!! CRITICAL: No locked OR available funds for Appointment ${appointmentId} found in wallet_transactions. This appointment cannot be auto-refunded.`);
                 await client.query('ROLLBACK');
-                return { refunded: false, reason: 'No locked or available funds found for this appointment' };
+                return { refunded: false, reason: 'No locked or available funds found in wallet ledger' };
             }
+            console.log(`[AutoRefund] Found 'available' transaction. Proceeding with refund from released funds.`);
         }
 
         // 4. Calculate refund amount with plan consideration
@@ -360,14 +362,16 @@ const processNoShowSettlement = async (appointmentId) => {
         const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
         if (walletRes.rows.length > 0) {
             const walletId = walletRes.rows[0].id;
-            // 70% goes to available (as no-show fee)
+            // 70% goes to available (as no-show fee). 
+            // We must also deduct the 30% commission from total_earned because the full 100% was credited as 'locked' initially.
             await client.query(
                 `UPDATE wallets SET 
                     locked_funds = GREATEST(locked_funds - $1, 0), 
                     available_balance = available_balance + $2,
-                    total_earned = total_earned + $2
-                 WHERE id = $3`,
-                [originalAmount, adminPayout, walletId]
+                    total_earned = GREATEST(total_earned - $3, 0),
+                    lifetime_earned = GREATEST(lifetime_earned - $3, 0)
+                 WHERE id = $4`,
+                [originalAmount, adminPayout, platformProfit, walletId]
             );
 
             // Update original locked transaction
