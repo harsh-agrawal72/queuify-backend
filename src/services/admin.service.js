@@ -193,8 +193,8 @@ const getAnalytics = async (orgId, filters = {}) => {
     // ── Pre-process dates to standardized strings ──
     const dStart = startDate.toISOString().split('T')[0];
     const dEnd = endDateEnd.toISOString().split('T')[0];
-    const dPrevStart = prevStart.toISOString().split('T')[0];
-    const dPrevEnd = prevEnd.toISOString().split('T')[0];
+    const dPrevStart = prevStartDate.toISOString().split('T')[0];
+    const dPrevEnd = prevEndDate.toISOString().split('T')[0];
 
     // ── Dynamic WHERE fragments for optional service/resource filters ──
     let extraWhere = '';
