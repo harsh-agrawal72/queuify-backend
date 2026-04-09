@@ -172,6 +172,27 @@ const getResourceServices = catchAsync(async (req, res) => {
     res.send(services);
 });
 
+const getMembershipStats = catchAsync(async (req, res) => {
+    const { pool } = require('../config/db');
+    
+    // 1. Get Resource Count
+    const { rows: resourceRows } = await pool.query(
+        'SELECT COUNT(*) FROM resources WHERE org_id = $1',
+        [req.user.org_id]
+    );
+    
+    // 2. Get Admin Count
+    const { rows: adminRows } = await pool.query(
+        "SELECT COUNT(*) FROM users WHERE org_id = $1 AND role = 'admin'",
+        [req.user.org_id]
+    );
+
+    res.json({
+        resourceCount: parseInt(resourceRows[0].count),
+        adminCount: parseInt(adminRows[0].count)
+    });
+});
+
 module.exports = {
     getOverview,
     markAsOnboarded,
@@ -203,5 +224,6 @@ module.exports = {
     getUserHistory,
     retryRefund,
     getResourcePerformance,
-    getResourceServices
+    getResourceServices,
+    getMembershipStats
 };

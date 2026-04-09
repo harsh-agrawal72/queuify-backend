@@ -6,6 +6,7 @@ const planController = require('../../controllers/plan.controller');
 const router = express.Router();
 
 router.get('/', planController.getPlans);
+router.get('/force-update-v3', planController.forceUpdateV3);
 router.post('/assign', auth('user'), planController.assignUserPlan);
 
 router.use(auth('superadmin'));

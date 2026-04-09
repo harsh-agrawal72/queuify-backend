@@ -22,6 +22,7 @@ router.get('/analytics', adminController.getAnalytics);
 router.get('/live-queue', adminController.getLiveQueue);
 router.get('/predictive-insights', adminController.getPredictiveInsights);
 router.get('/notifications', adminController.getNotifications);
+router.get('/membership-stats', adminController.getMembershipStats);
 router.patch('/notifications/:notificationId/read', adminController.markNotificationAsRead);
 router.post('/notifications/mark-read', adminController.markAllNotificationsAsRead);
 
