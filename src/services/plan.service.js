@@ -148,5 +148,6 @@ module.exports = {
     getPlanByName,
     updatePlan,
     deletePlan,
-    assignPlanToUser
+    assignPlanToUser,
+    assignPlanToOrg
 };

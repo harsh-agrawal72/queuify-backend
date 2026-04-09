@@ -1,6 +1,7 @@
 const organizationProfileModel = require('../models/organization_profile.model');
 const organizationImageModel = require('../models/organization_image.model');
 const organizationModel = require('../models/organization.model');
+const { pool } = require('../config/db');
 
 /**
  * Calculate profile completion percentage (Trust Score)
@@ -107,6 +108,12 @@ const syncSetupStatus = async (orgId) => {
     );
 
     await organizationModel.updateSetupStatus(orgId, isComplete);
+    
+    // Auto-onboard if setup is finished
+    if (isComplete) {
+        await pool.query('UPDATE organizations SET is_onboarded = TRUE WHERE id = $1', [orgId]);
+    }
+
     return isComplete;
 };
 
