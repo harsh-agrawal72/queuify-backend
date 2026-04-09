@@ -1,10 +1,15 @@
 const httpStatus = require('../utils/httpStatus');
 const catchAsync = require('../utils/catchAsync');
-const { adminService, reassignmentService } = require('../services');
+const { adminService, reassignmentService, organizationService } = require('../services');
 
 const getOverview = catchAsync(async (req, res) => {
     const stats = await adminService.getOverview(req.user.org_id);
     res.send(stats);
+});
+
+const markAsOnboarded = catchAsync(async (req, res) => {
+    const result = await organizationService.markAsOnboarded(req.user.org_id);
+    res.json({ success: true, data: result });
 });
 
 const getOrgDetails = catchAsync(async (req, res) => {
@@ -169,6 +174,7 @@ const getResourceServices = catchAsync(async (req, res) => {
 
 module.exports = {
     getOverview,
+    markAsOnboarded,
     getOrgDetails,
     updateOrgDetails,
     getTodayQueue,

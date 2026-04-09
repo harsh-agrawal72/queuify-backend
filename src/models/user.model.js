@@ -55,7 +55,10 @@ const updateUserByType = async (userId, updateBody) => {
  */
 const getUserByEmail = async (email) => {
     const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed,
+        `SELECT u.*, o.type as org_type, o.name as org_name, 
+                o.is_setup_completed as org_is_setup_completed,
+                o.is_onboarded as org_is_onboarded,
+                o.status as org_status,
                 p.name as plan_name, p.features as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
@@ -72,7 +75,10 @@ const getUserByEmail = async (email) => {
  */
 const getUserById = async (id) => {
     const result = await pool.query(
-        `SELECT u.*, o.type as org_type, o.name as org_name, o.is_setup_completed as org_is_setup_completed,
+        `SELECT u.*, o.type as org_type, o.name as org_name, 
+                o.is_setup_completed as org_is_setup_completed,
+                o.is_onboarded as org_is_onboarded,
+                o.status as org_status,
                 p.name as plan_name, p.features as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 

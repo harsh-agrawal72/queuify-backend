@@ -175,6 +175,17 @@ const getPublicProfileBySlug = async (slug, userId = null) => {
     };
 };
 
+const markAsOnboarded = async (orgId) => {
+    const res = await pool.query(
+        'UPDATE organizations SET is_onboarded = TRUE WHERE id = $1 RETURNING id, is_onboarded',
+        [orgId]
+    );
+    if (res.rows.length === 0) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
+    }
+    return res.rows[0];
+};
+
 module.exports = {
     createOrganization,
     queryOrganizations,
@@ -183,5 +194,6 @@ module.exports = {
     updateOrganizationStatus,
     requestEmailVerification,
     verifyEmail,
-    getPublicProfileBySlug
+    getPublicProfileBySlug,
+    markAsOnboarded
 };

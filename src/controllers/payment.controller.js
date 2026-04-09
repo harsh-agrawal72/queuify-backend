@@ -142,8 +142,19 @@ const createPlanOrder = catchAsync(async (req, res) => {
     const { planId } = req.body;
     
     const plan = await planService.getPlanById(planId);
-    if (!plan || plan.target_role !== 'user') {
-        throw new ApiError(httpStatus.NOT_FOUND, 'Invalid plan');
+    if (!plan) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'Plan not found');
+    }
+
+    // Role check: Only allow users to buy 'user' plans and admins to buy 'admin' plans
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
+    if (!isAdmin && plan.target_role !== 'user') {
+        throw new ApiError(httpStatus.FORBIDDEN, 'You cannot subscribe to an organization plan');
+    }
+    if (isAdmin && plan.target_role === 'user') {
+        // Allow admins to buy user plans for themselves if they want, 
+        // but usually they care about the org plan.
+        // For now, let's just make sure the plan exists.
     }
 
     const price = parseFloat(plan.price_monthly);
@@ -192,8 +203,18 @@ const verifyPlanPayment = catchAsync(async (req, res) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid payment signature');
     }
 
-    // 2. Upgrade User Plan
-    await planService.assignPlanToUser(req.user.id, planId);
+    // 2. Upgrade Plan based on target_role
+    const plan = await planService.getPlanById(planId);
+    
+    if (plan.target_role === 'admin') {
+        // Ensure user is an admin of their org
+        if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+            throw new ApiError(httpStatus.FORBIDDEN, 'Only organization admins can upgrade company plans');
+        }
+        await planService.assignPlanToOrg(req.user.org_id, planId);
+    } else {
+        await planService.assignPlanToUser(req.user.id, planId);
+    }
 
     // 3. Log transaction or handle any additional logic here if needed
 
