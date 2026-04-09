@@ -92,11 +92,14 @@ const getOverview = async (orgId) => {
 
 const getOrgDetails = async (orgId) => {
     const res = await query(`
-        SELECT id, name, slug, contact_email, org_code, industry_type, status, 
-               open_time, close_time, phone, address, 
-               email_notification, new_booking_notification, queue_mode_default,
-               payout_bank_name, payout_account_holder, payout_account_number, payout_ifsc, payout_upi_id
-        FROM organizations WHERE id = $1`, [orgId]);
+        SELECT o.id, o.name, o.slug, o.contact_email, o.org_code, o.industry_type, o.status, 
+               o.open_time, o.close_time, o.phone, o.address, 
+               o.email_notification, o.new_booking_notification, o.queue_mode_default,
+               o.payout_bank_name, o.payout_account_holder, o.payout_account_number, o.payout_ifsc, o.payout_upi_id,
+               p.name as plan_name, p.features as plan_features
+        FROM organizations o
+        LEFT JOIN plans p ON o.plan_id = p.id
+        WHERE o.id = $1`, [orgId]);
     if (res.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
     return res.rows[0];
 };
@@ -165,22 +168,27 @@ const getTodayQueue = async (orgId) => {
 };
 
 const getAnalytics = async (orgId, filters = {}) => {
-    // ── Resolve date range ──
-    const endDate = filters.endDate ? new Date(filters.endDate) : new Date();
-    const startDate = filters.startDate
-        ? new Date(filters.startDate)
-        : new Date(new Date().setDate(endDate.getDate() - 6)); // default last 7 days
-    startDate.setHours(0, 0, 0, 0);
-    const endDateEnd = new Date(endDate);
-    endDateEnd.setHours(23, 59, 59, 999);
+    const { startDate: sd, endDate: ed, serviceId, resourceId } = filters;
 
-    // ── Previous period (same length) ──
-    const rangeDays = Math.ceil((endDateEnd - startDate) / (1000 * 60 * 60 * 24));
-    const prevEnd = new Date(startDate);
-    prevEnd.setMilliseconds(prevEnd.getMilliseconds() - 1);
-    const prevStart = new Date(prevEnd);
-    prevStart.setDate(prevStart.getDate() - rangeDays + 1);
-    prevStart.setHours(0, 0, 0, 0);
+    // Fetch plan features for gating
+    const orgRes = await query(
+        `SELECT p.features 
+         FROM organizations o 
+         JOIN plans p ON o.plan_id = p.id 
+         WHERE o.id = $1`, 
+        [orgId]
+    );
+    const planFeatures = orgRes.rows[0]?.features || {};
+    const hasAdvancedAnalytics = planFeatures.analytics === 'advanced' || planFeatures.analytics === 'enterprise';
+
+    const startDate = sd ? new Date(sd) : new Date(new Date().setDate(new Date().getDate() - 7));
+    const endDateEnd = ed ? new Date(ed) : new Date();
+    endDateEnd.setHours(23, 59, 59, 999);
+    
+    // Previous period for growth comparison
+    const diff = endDateEnd - startDate;
+    const prevStartDate = new Date(startDate.getTime() - diff - 86400000);
+    const prevEndDate = new Date(startDate.getTime() - 86400000);
 
     // ── Pre-process dates to standardized strings ──
     const dStart = startDate.toISOString().split('T')[0];
@@ -540,7 +548,7 @@ const getAnalytics = async (orgId, filters = {}) => {
             };
         }),
         // Insights
-        insights: insights || [],
+        insights: hasAdvancedAnalytics ? (insights || []) : [],
         // Meta
         dateRange: {
             start: startStr,
@@ -1359,6 +1367,30 @@ const getAdmins = async (orgId) => {
 
 const inviteAdmin = async (adminBody, currentAdminId, orgId) => {
     const { email, name } = adminBody;
+
+    // Check plan limits
+    const orgRes = await pool.query(
+        `SELECT o.plan_id, p.features 
+         FROM organizations o 
+         JOIN plans p ON o.plan_id = p.id 
+         WHERE o.id = $1`, 
+        [orgId]
+    );
+
+    if (orgRes.rows.length > 0) {
+        const features = orgRes.rows[0].features || {};
+        const maxAdmins = features.staff || 1; // Default to Starter limit
+
+        const countRes = await pool.query(
+            "SELECT COUNT(*) FROM users WHERE org_id = $1 AND role = 'admin' AND is_suspended = FALSE",
+            [orgId]
+        );
+        const currentCount = parseInt(countRes.rows[0].count);
+
+        if (currentCount >= maxAdmins) {
+            throw new ApiError(httpStatus.FORBIDDEN, `Your current plan allows only ${maxAdmins} team members. Please upgrade for more.`);
+        }
+    }
 
     // Check if email taken
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);

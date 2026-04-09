@@ -5,6 +5,30 @@ const ApiError = require('../utils/ApiError');
 const createResource = async (orgId, resourceBody) => {
     const { name, type, description, concurrent_capacity, is_active, serviceIds } = resourceBody;
 
+    // Check plan limits
+    const orgRes = await pool.query(
+        `SELECT o.plan_id, p.features 
+         FROM organizations o 
+         JOIN plans p ON o.plan_id = p.id 
+         WHERE o.id = $1`, 
+        [orgId]
+    );
+
+    if (orgRes.rows.length > 0) {
+        const features = orgRes.rows[0].features || {};
+        const maxResources = features.resources || 2; // Default to Starter limit
+
+        const countRes = await pool.query(
+            'SELECT COUNT(*) FROM resources WHERE org_id = $1 AND is_active = TRUE',
+            [orgId]
+        );
+        const currentCount = parseInt(countRes.rows[0].count);
+
+        if (currentCount >= maxResources) {
+            throw new ApiError(httpStatus.FORBIDDEN, `Your current plan allows only ${maxResources} resources. Please upgrade for more.`);
+        }
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');

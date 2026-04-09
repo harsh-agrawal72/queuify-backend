@@ -104,6 +104,10 @@ const registerOrganization = async (orgBody, adminBody) => {
         slug = `${baseSlug}-${randomString}`;
     }
 
+    // Fetch the default 'Free' plan for admins
+    const freePlanRes = await query("SELECT id FROM plans WHERE name = 'Free' AND target_role = 'admin' LIMIT 1");
+    const freePlanId = freePlanRes.rows[0]?.id;
+
     // 1. Create Org
     const org = await organizationModel.createOrganization({
         name: orgName,
@@ -111,7 +115,8 @@ const registerOrganization = async (orgBody, adminBody) => {
         contactEmail: orgEmail,
         phone: orgPhone,
         address: orgAddress,
-        plan: 'basic',
+        plan: 'Free',
+        plan_id: freePlanId,
         orgCode,
         type: type || 'Clinic'
     });

@@ -4,10 +4,10 @@ const { pool } = require('../config/db');
  * Create a new organization
  */
 const createOrganization = async (orgBody) => {
-    const { name, slug, contactEmail, orgCode, type = 'Clinic', status = 'active' } = orgBody;
+    const { name, slug, contactEmail, orgCode, type = 'Clinic', status = 'active', plan_id = null } = orgBody;
     const result = await pool.query(
-        'INSERT INTO organizations (name, slug, contact_email, org_code, status, phone, address, plan, type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-        [name, slug, contactEmail, orgCode, status, orgBody.phone || null, orgBody.address || null, orgBody.plan || 'basic', type]
+        'INSERT INTO organizations (name, slug, contact_email, org_code, status, phone, address, plan, type, plan_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+        [name, slug, contactEmail, orgCode, status, orgBody.phone || null, orgBody.address || null, orgBody.plan || 'Free', type, plan_id]
     );
     return result.rows[0];
 };
@@ -16,7 +16,11 @@ const createOrganization = async (orgBody) => {
  * Get organization by slug
  */
 const getOrganizationBySlug = async (slug) => {
-    const result = await pool.query('SELECT * FROM organizations WHERE slug ILIKE $1', [slug]);
+    const result = await pool.query(`
+        SELECT o.*, p.name as plan_name, p.features as plan_features 
+        FROM organizations o
+        LEFT JOIN plans p ON o.plan_id = p.id
+        WHERE o.slug ILIKE $1`, [slug]);
     return result.rows[0];
 };
 
@@ -24,7 +28,11 @@ const getOrganizationBySlug = async (slug) => {
  * Get organization by ID
  */
 const getOrganizationById = async (id) => {
-    const result = await pool.query('SELECT * FROM organizations WHERE id = $1', [id]);
+    const result = await pool.query(`
+        SELECT o.*, p.name as plan_name, p.features as plan_features 
+        FROM organizations o
+        LEFT JOIN plans p ON o.plan_id = p.id
+        WHERE o.id = $1`, [id]);
     return result.rows[0];
 };
 
@@ -142,7 +150,11 @@ const updateOrganizationStatus = async (id, status) => {
  * Get organization by email
  */
 const getOrganizationByEmail = async (email) => {
-    const result = await pool.query('SELECT * FROM organizations WHERE contact_email = $1', [email]);
+    const result = await pool.query(`
+        SELECT o.*, p.name as plan_name, p.features as plan_features 
+        FROM organizations o
+        LEFT JOIN plans p ON o.plan_id = p.id
+        WHERE o.contact_email = $1`, [email]);
     return result.rows[0];
 };
 

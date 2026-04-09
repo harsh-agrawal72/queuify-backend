@@ -9,41 +9,54 @@ const { pool } = require('../config/db');
 const runSubscriptionCleanup = async () => {
     console.log('[SubscriptionCleanup] Checking for expired memberships...');
     try {
-        // 1. Get the 'Free' plan ID for users
-        const freePlanRes = await pool.query(
+        // 1. Handle Users Downgrade
+        const freeUserPlanRes = await pool.query(
             "SELECT id FROM plans WHERE name = 'Free' AND target_role = 'user' AND is_active = true LIMIT 1"
         );
         
-        if (freePlanRes.rows.length === 0) {
-            console.error('[SubscriptionCleanup] FAIL: Free user plan not found in database.');
-            return;
+        if (freeUserPlanRes.rows.length > 0) {
+            const freeUserPlanId = freeUserPlanRes.rows[0].id;
+            const userResult = await pool.query(
+                `UPDATE users 
+                 SET plan_id = $1, 
+                     subscription_expiry = NULL,
+                     updated_at = NOW()
+                 WHERE plan_id != $1 
+                   AND subscription_expiry IS NOT NULL 
+                   AND subscription_expiry < NOW()
+                 RETURNING id, name`,
+                [freeUserPlanId]
+            );
+            if (userResult.rows.length > 0) {
+                console.log(`[SubscriptionCleanup] Successfully downgraded ${userResult.rows.length} expired users.`);
+            }
         }
-        
-        const freePlanId = freePlanRes.rows[0].id;
 
-        // 2. Perform the downgrade for all expired users
-        // This query:
-        // - Selects users on paid plans (expiry not null)
-        // - Checks if current date > expiry
-        // - Updates their plan to Free and clears expiry
-        const result = await pool.query(
-            `UPDATE users 
-             SET plan_id = $1, 
-                 subscription_expiry = NULL,
-                 updated_at = NOW()
-             WHERE plan_id != $1 
-               AND subscription_expiry IS NOT NULL 
-               AND subscription_expiry < NOW()
-             RETURNING id, name`,
-            [freePlanId]
+        // 2. Handle Organizations Downgrade
+        const freeOrgPlanRes = await pool.query(
+            "SELECT id FROM plans WHERE name = 'Free' AND target_role = 'admin' AND is_active = true LIMIT 1"
         );
-
-        if (result.rows.length > 0) {
-            console.log(`[SubscriptionCleanup] Successfully downgraded ${result.rows.length} expired accounts:`);
-            result.rows.forEach(user => console.log(` - ${user.name} (${user.id})`));
-        } else {
-            console.log('[SubscriptionCleanup] No expired accounts to downgrade.');
+        
+        if (freeOrgPlanRes.rows.length > 0) {
+            const freeOrgPlanId = freeOrgPlanRes.rows[0].id;
+            const orgResult = await pool.query(
+                `UPDATE organizations 
+                 SET plan_id = $1, 
+                     subscription_expiry = NULL,
+                     updated_at = NOW()
+                 WHERE plan_id != $1 
+                   AND subscription_expiry IS NOT NULL 
+                   AND subscription_expiry < NOW()
+                 RETURNING id, name`,
+                [freeOrgPlanId]
+            );
+            if (orgResult.rows.length > 0) {
+                console.log(`[SubscriptionCleanup] Successfully downgraded ${orgResult.rows.length} expired organizations.`);
+                orgResult.rows.forEach(org => console.log(` - Org: ${org.name} (${org.id})`));
+            }
         }
+
+        console.log('[SubscriptionCleanup] Cleanup cycle completed.');
     } catch (err) {
         console.error('[SubscriptionCleanup] ERROR during execution:', err.message);
     }

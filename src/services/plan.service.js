@@ -101,17 +101,18 @@ const assignPlanToOrg = async (orgId, planId) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid organization plan');
     }
 
-    // 2. Calculate Expiry (30 days for paid, though orgs might be different - following 30 day convention)
+    // 2. Calculate Expiry (30 days for paid plans, NULL for free)
     const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? 'NOW() + INTERVAL \'30 days\'' : 'NULL';
+    const expiryDate = isPaid ? "NOW() + INTERVAL '30 days'" : 'NULL';
 
     // 3. Update organization
     const res = await pool.query(
         `UPDATE organizations 
          SET plan_id = $1, 
+             subscription_expiry = ${expiryDate},
              updated_at = NOW() 
          WHERE id = $2 
-         RETURNING plan_id`,
+         RETURNING plan_id, subscription_expiry`,
         [planId, orgId]
     );
 

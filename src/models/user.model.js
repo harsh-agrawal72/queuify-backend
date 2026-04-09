@@ -59,13 +59,18 @@ const getUserByEmail = async (email) => {
                 o.is_setup_completed as org_is_setup_completed,
                 o.is_onboarded as org_is_onboarded,
                 o.status as org_status,
+                o.subscription_expiry,
                 p.name as plan_name, p.features as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
-         LEFT JOIN plans p ON u.plan_id = p.id
-         WHERE u.email = $1`,
-        [email]
+         LEFT JOIN plans p ON (
+            CASE 
+                WHEN u.role IN ('admin', 'staff') THEN o.plan_id 
+                ELSE u.plan_id 
+            END
+         ) = p.id
+         WHERE u.email = $1`, [email]
     );
     return result.rows[0];
 };
@@ -79,13 +84,18 @@ const getUserById = async (id) => {
                 o.is_setup_completed as org_is_setup_completed,
                 o.is_onboarded as org_is_onboarded,
                 o.status as org_status,
+                o.subscription_expiry,
                 p.name as plan_name, p.features as plan_features,
                 (SELECT COUNT(*)::int FROM appointments a WHERE a.user_id = u.id AND a.status IN ('pending', 'confirmed', 'serving')) as active_bookings_count
          FROM users u 
          LEFT JOIN organizations o ON u.org_id = o.id 
-         LEFT JOIN plans p ON u.plan_id = p.id
-         WHERE u.id = $1`,
-        [id]
+         LEFT JOIN plans p ON (
+            CASE 
+                WHEN u.role IN ('admin', 'staff') THEN o.plan_id 
+                ELSE u.plan_id 
+            END
+         ) = p.id
+         WHERE u.id = $1`, [id]
     );
     return result.rows[0];
 };

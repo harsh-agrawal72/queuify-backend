@@ -19,11 +19,11 @@ SELECT 'Free', 0, 0, 0, '{"max_active_appointments": 2, "notifications": ["email
 WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Free' AND target_role = 'user');
 
 INSERT INTO plans (name, price_monthly, price_yearly, commission_rate, features, target_role)
-SELECT 'Standard', 99, 990, 0, '{"max_active_appointments": 5, "notifications": ["email", "push"], "priority": false, "reschedule_limit": 1}', 'user'
+SELECT 'Standard', 49, 490, 0, '{"max_active_appointments": 5, "notifications": ["email", "push"], "priority": false, "reschedule_limit": 1}', 'user'
 WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Standard' AND target_role = 'user');
 
 INSERT INTO plans (name, price_monthly, price_yearly, commission_rate, features, target_role)
-SELECT 'Premium', 249, 2490, 0, '{"max_active_appointments": 999, "notifications": ["email", "push", "sms"], "priority": true, "reschedule_limit": 999}', 'user'
+SELECT 'Premium', 149, 1490, 0, '{"max_active_appointments": 999, "notifications": ["email", "push", "sms"], "priority": true, "reschedule_limit": 999}', 'user'
 WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Premium' AND target_role = 'user');
 
 -- 4. Assign the 'Free' plan to all existing users who don't have one

@@ -128,7 +128,8 @@ const connectDB = async () => {
             '20260403_add_payment_breakdown_columns.sql',
             '20260404_add_reviews_table.sql',
             '20260408_add_3h_reminder_column.sql',
-            '20260409_add_org_onboarding_flag.sql'
+            '20260409_add_org_onboarding_flag.sql',
+            '20260409_add_org_subscription_expiry.sql'
         ];
         
         for (const migration of migrations) {
