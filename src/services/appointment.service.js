@@ -8,8 +8,21 @@ const socket = require('../socket/index');
 const emailService = require('./email.service');
 const notificationService = require('./notification.service');
 // Delayed require for circular dependencies
+const getAutoRefundService = () => {
+    if (!autoRefundService) autoRefundService = require('./autoRefund.service');
+    return autoRefundService;
+};
+const getReassignmentService = () => {
+    if (!reassignmentService) reassignmentService = require('./reassignment.service');
+    return reassignmentService;
+};
+const getWalletService = () => {
+    if (!walletService) walletService = require('./wallet.service');
+    return walletService;
+};
 let autoRefundService;
 let reassignmentService;
+let walletService;
 
 /**
  * Book an appointment
@@ -463,9 +476,9 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
     // --- CRITICAL FINANCIAL TRIGGER: Admin-Initiated Cancellation Refund ---
     if (status === 'cancelled' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
         try {
-            if (!autoRefundService) autoRefundService = require('./autoRefund.service');
+            const svc = getAutoRefundService();
             console.log(`[Admin-Update-Sync] ADMIN CANCELLED: Triggering immediate 100% refund for Appt ${appointmentId}`);
-            const refundResult = await autoRefundService.processRefund(appointmentId, 'admin');
+            const refundResult = await svc.processRefund(appointmentId, 'admin');
             console.log(`[Admin-Update-Sync] Refund Result for Appt ${appointmentId}:`, JSON.stringify(refundResult));
         } catch (refundErr) {
             console.error(`[Admin-Update-Sync] !!! Critical: Synchronous Administrative Refund Failed for Appt ${appointmentId}:`, refundErr.message);
@@ -475,12 +488,26 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
     // --- CRITICAL FINANCIAL TRIGGER: No-Show Settlement ---
     if (status === 'no_show' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
         try {
-            if (!autoRefundService) autoRefundService = require('./autoRefund.service');
+            const svc = getAutoRefundService();
             console.log(`[Admin-Update-Sync] NO-SHOW: Triggering 70/30 settlement for Appt ${appointmentId}`);
-            const result = await autoRefundService.processNoShowSettlement(appointmentId);
+            const result = await svc.processNoShowSettlement(appointmentId);
             console.log(`[Admin-Update-Sync] Settlement Result for Appt ${appointmentId}:`, JSON.stringify(result));
         } catch (settleErr) {
             console.error(`[Admin-Update-Sync] !!! Critical: Synchronous No-Show Settlement Failed for Appt ${appointmentId}:`, settleErr.message);
+        }
+    }
+
+    // --- CRITICAL FINANCIAL TRIGGER: Completion Fund Release ---
+    if (status === 'completed' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
+        try {
+            const svc = getWalletService();
+            console.log(`[Admin-Update-Sync] COMPLETED: Triggering immediate fund release for Appt ${appointmentId}`);
+            await svc.releaseFunds(orgId, appointmentId);
+            console.log(`[Admin-Update-Sync] Funds released successfully for Appt ${appointmentId}`);
+        } catch (releaseErr) {
+            // Note: We don't throw here to ensure the status update succeeds; 
+            // the midnight cron job acts as a fallback for fund release.
+            console.error(`[Admin-Update-Sync] !!! Warning: Synchronous Fund Release Failed for Appt ${appointmentId}:`, releaseErr.message);
         }
     }
 
@@ -491,8 +518,8 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
         // Also trigger waitlist fill if space opened up
         if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
             try {
-                if (!reassignmentService) reassignmentService = require('./reassignment.service');
-                await reassignmentService.fillSlotFromWaitlist(appointment.slot_id);
+                const svc = getReassignmentService();
+                await svc.fillSlotFromWaitlist(appointment.slot_id);
             } catch (e) {
                 console.error('[StatusUpdate-WaitlistFill] Failed silently:', e.message);
             }

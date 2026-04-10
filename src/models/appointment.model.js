@@ -447,7 +447,7 @@ const updateAppointmentStatus = async (id, status, admin_remarks = null) => {
         if (apptRes.rows.length === 0) throw new Error('Appointment not found');
         const oldAppt = apptRes.rows[0];
 
-        let query = 'UPDATE appointments SET status = $1, updated_at = NOW()';
+        let query = 'UPDATE appointments SET status = $1::appointment_status, updated_at = NOW()';
         const params = [status, id]; // status is $1, id is $2
 
         if (status === 'serving') {

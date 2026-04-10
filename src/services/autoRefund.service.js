@@ -154,6 +154,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
         // 6. Trigger External Razorpay Refund
         let razorpayRefundId = null;
         let refundSuccessful = true;
+        let failureReason = null;
 
         if (refundAmount > 0 && appt.payment_id) {
             try {
@@ -166,15 +167,17 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 razorpayRefundId = rzpRefund.id;
                 console.log(`[AutoRefund] Razorpay API success: ${razorpayRefundId}`);
             } catch (rzpErr) {
-                console.error(`[AutoRefund] !!! RAZORPAY ERROR appt=${appointmentId}:`, rzpErr.status, rzpErr.message);
+                console.error(`[AutoRefund] !!! RAZORPAY ERROR appt=${appointmentId}: Status: ${rzpErr.statusCode || rzpErr.status}, Msg: ${rzpErr.message}`);
                 if (rzpErr.response) {
                     console.error(`[AutoRefund] Razorpay Response Data:`, JSON.stringify(rzpErr.response.data));
                 }
                 refundSuccessful = false;
+                failureReason = rzpErr.message;
             }
         } else {
             console.warn(`[AutoRefund] Skipping Razorpay API call: refundAmount=${refundAmount}, payment_id=${appt.payment_id}`);
             refundSuccessful = false;
+            failureReason = !appt.payment_id ? 'Missing payment_id' : 'Zero refund amount';
         }
 
         // 7. Finalize status based on refund success
@@ -191,11 +194,11 @@ const processRefund = async (appointmentId, cancelledBy) => {
             [finalPaymentStatus, refundAmount, razorpayRefundId, appointmentId]
         );
 
-        console.log(`[AutoRefund] Appointment status updated to: cancelled, payment_status to: ${finalPaymentStatus}`);
+        console.log(`[AutoRefund] Appointment ${appointmentId} status updated to: cancelled, payment_status: ${finalPaymentStatus}`);
 
         // 8. Wallet finalize
-        if (refundSuccessful) {
-            console.log(`[AutoRefund] Finalizing internal wallet ledger for successfully refunded appt ${appointmentId}`);
+        if (refundSuccessful || cancelledBy === 'admin') {
+            console.log(`[AutoRefund] Adjusting internal wallet ledger for appt ${appointmentId} (Status: ${refundSuccessful ? 'Gateway Success' : 'Admin Forced'})`);
             const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
             if (walletRes.rows.length > 0) {
                 const walletId = walletRes.rows[0].id;
@@ -211,7 +214,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                     [refundAmount, walletId]
                 );
 
-                // If partial refund, the remainder becomes available to organization
+                // If partial refund (user cancellation), the remainder becomes available to organization
                 const remainder = originalAmount - refundAmount;
                 if (remainder > 0) {
                     await client.query(
@@ -224,23 +227,23 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 await client.query(
                     `UPDATE wallet_transactions SET status = 'cancelled', description = description || $1
                      WHERE reference_id = $2::uuid AND type = 'credit' AND (status = 'locked' OR status = 'available')`,
-                    [` — ${policy.label}`, appointmentId]
+                    [` — ${policy.label}${!refundSuccessful ? ' (GATEWAY FAILED: Manual refund req)' : ''}`, appointmentId]
                 );
 
                 // Log the refund transaction as a negative amount in the ledger
                 await client.query(
                     `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
                      VALUES ($1, $2, 'refund', 'completed', $3, $4)`,
-                    [walletId, -refundAmount, appointmentId, `Refund: ${policy.label} for appointment ${appointmentId}`]
+                    [walletId, -refundAmount, appointmentId, `Refund: ${policy.label} for appt ${appointmentId}${!refundSuccessful ? ' (Gateway Error: ' + failureReason + ')' : ''}`]
                 );
             }
         } else {
-            // Handle failed external refund internal state (Keep funds locked or mark as problem)
+            // Handle failed user-initiated refund (Admin action usually required)
             await client.query(
                 `UPDATE wallet_transactions 
-                 SET description = description || ' (Auto-refund failed: Manual action required)'
-                 WHERE reference_id = $1::uuid AND type = 'credit' AND (status = 'locked' OR status = 'available')`,
-                [appointmentId]
+                 SET description = description || $1
+                 WHERE reference_id = $2::uuid AND type = 'credit' AND (status = 'locked' OR status = 'available')`,
+                [` (Auto-refund failed: ${failureReason})`, appointmentId]
             );
         }
 
@@ -332,7 +335,7 @@ const processNoShowSettlement = async (appointmentId) => {
         const apptRes = await client.query(
             `SELECT a.id, a.org_id, a.user_id, a.price, a.payment_status, a.status, a.payment_id
              FROM appointments a
-             WHERE a.id = $1`,
+             WHERE a.id = $1::uuid`,
             [appointmentId]
         );
 
@@ -360,12 +363,12 @@ const processNoShowSettlement = async (appointmentId) => {
              SET payment_status = $1, 
                  refund_amount = 0, 
                  updated_at = NOW() 
-             WHERE id = $2`,
+             WHERE id = $2::uuid`,
             ['no_show_settled', appointmentId]
         );
 
         // 4. Release 70% to Organization Wallet
-        const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
+        const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1::uuid', [appt.org_id]);
         if (walletRes.rows.length > 0) {
             const walletId = walletRes.rows[0].id;
             // 70% goes to available (as no-show fee). 
@@ -383,21 +386,21 @@ const processNoShowSettlement = async (appointmentId) => {
             // Update original locked transaction
             await client.query(
                 `UPDATE wallet_transactions SET status = 'cancelled', description = description || ' (No-Show: 70/30 split)'
-                 WHERE reference_id = $1 AND type = 'credit' AND status = 'locked'`,
+                 WHERE reference_id = $1::uuid AND type = 'credit' AND status = 'locked'`,
                 [appointmentId]
             );
 
             // Log the payout portion (70%)
             await client.query(
                 `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                 VALUES ($1, $2, 'available', 'completed', $3, $4)`,
+                 VALUES ($1, $2, 'available', 'completed', $3::uuid, $4)`,
                 [walletId, adminPayout, appointmentId, `No-Show fee (70%): ${appointmentId}`]
             );
 
             // Log the platform profit (30%) as a separate commission entry
             await client.query(
                 `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                 VALUES ($1, $2, 'commission', 'completed', $3, $4)`,
+                 VALUES ($1, $2, 'commission', 'completed', $3::uuid, $4)`,
                 [walletId, platformProfit, appointmentId, `Platform Commission (30%): ${appointmentId}`]
             );
         }
