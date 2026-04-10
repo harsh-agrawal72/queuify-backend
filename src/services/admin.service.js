@@ -1056,6 +1056,17 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
             }
         }
 
+        // 13.5 Async Fund Release on Completion
+        if (status === 'completed' && appointment.status !== 'completed') {
+            const apptPrice = parseFloat(updatedAppointment.price || appointment.price || 0);
+            if (appointment.payment_status === 'paid' && apptPrice > 0) {
+                console.log(`[Admin-Completion-Release] Triggering fund release for Appt ${appointmentId}, Price: ₹${apptPrice}`);
+                walletService.releaseFunds(orgId, appointmentId)
+                    .then(() => console.log(`[Admin-Completion-Release] Success: Appt ${appointmentId}`))
+                    .catch(err => console.error(`[Admin-Completion-Release] FAILED:`, err.message));
+            }
+        }
+
         // --- POST-COMMIT ACTIONS ---
         // Real-time update
         try {
