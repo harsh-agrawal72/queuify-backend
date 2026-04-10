@@ -960,7 +960,10 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
     try {
         await client.query('BEGIN');
 
-        const check = await client.query('SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status, check_in_method FROM appointments WHERE id = $1 AND org_id = $2', [appointmentId, orgId]);
+        const check = await client.query(
+            'SELECT id, slot_id, status, user_id, service_id, resource_id, payment_status, check_in_method, price FROM appointments WHERE id = $1::uuid AND org_id = $2::uuid',
+            [appointmentId, orgId]
+        );
         if (check.rows.length === 0) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
         const appointment = check.rows[0];
@@ -1017,23 +1020,27 @@ const updateAppointmentStatus = async (orgId, appointmentId, status, reason = nu
         // --- POST-COMMIT ACTIONS ---
         // 12. Async/Tolerant Refund logic
         if (status === 'cancelled' && appointment.status !== 'cancelled') {
-            if (appointment.payment_status === 'paid' && price > 0) {
-                console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appointment ${appointmentId}, Price: ${price}`);
-                // Use autoRefundService to handle both Razorpay and Wallet
-                // Calling AFTER commit to ensure processRefund (new connection) can see the changes and avoid deadlocks
+            const apptPrice = parseFloat(updatedAppointment.price || appointment.price || 0);
+            if (appointment.payment_status === 'paid' && apptPrice > 0) {
+                console.log(`[Admin-Cancel-Refund] Triggering 100% refund for Appt ${appointmentId}, Price: ₹${apptPrice}`);
                 autoRefundService.processRefund(appointmentId, 'admin')
                     .then(result => console.log(`[Admin-Cancel-Refund] Success:`, result))
                     .catch(err => console.error(`[Admin-Cancel-Refund] FAILED:`, err.message));
+            } else {
+                console.log(`[Admin-Cancel-Refund] Skipped — payment_status=${appointment.payment_status}, price=${apptPrice}`);
             }
         }
 
         // 13. Async No-Show Settlement
         if (status === 'no_show' && appointment.status !== 'no_show') {
-            if (appointment.payment_status === 'paid' && price > 0) {
-                console.log(`[Admin-NoShow-Settlement] Triggering 50/50 split for Appointment ${appointmentId}`);
+            const apptPrice = parseFloat(updatedAppointment.price || appointment.price || 0);
+            if (appointment.payment_status === 'paid' && apptPrice > 0) {
+                console.log(`[Admin-NoShow-Settlement] Triggering 70/30 split for Appt ${appointmentId}, Price: ₹${apptPrice}`);
                 autoRefundService.processNoShowSettlement(appointmentId)
                     .then(result => console.log(`[Admin-NoShow-Settlement] Success:`, result))
                     .catch(err => console.error(`[Admin-NoShow-Settlement] FAILED:`, err.message));
+            } else {
+                console.log(`[Admin-NoShow-Settlement] Skipped — payment_status=${appointment.payment_status}, price=${parseFloat(appointment.price || 0)}`);
             }
         }
 
