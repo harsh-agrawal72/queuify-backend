@@ -11,7 +11,6 @@ const ApiError = require('../utils/ApiError');
 const { GST_RATE } = require('../utils/paymentHelper');
 
 const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
-const appointmentService = require('../services/appointment.service');
 
 /**
  * Step 1: Create Order
@@ -128,18 +127,22 @@ const verifyPayment = catchAsync(async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        console.log(`[PaymentController] verifyPayment init: appt=${appointmentId}, order=${razorpay_order_id}`);
+
         // Lock the row — concurrent calls block here until first completes
         const { rows } = await client.query(
-            'SELECT id, status, payment_status, price, org_id, service_name FROM appointments WHERE id = $1::uuid FOR UPDATE',
+            "SELECT * FROM appointments WHERE id = $1::uuid FOR UPDATE",
             [appointmentId]
         );
 
         if (rows.length === 0) {
+            console.error(`[PaymentController] Appt ${appointmentId} NOT FOUND`);
             await client.query('ROLLBACK');
             throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
         }
 
         const appointment = rows[0];
+        console.log(`[PaymentController] Appt record lock acquired. Status: ${appointment.status}, PaymentStatus: ${appointment.payment_status}`);
 
         // ── IDEMPOTENCY: Already paid (second verify call) ──
         if (appointment.payment_status === 'paid') {
@@ -162,6 +165,7 @@ const verifyPayment = catchAsync(async (req, res) => {
         const finalPaymentId = razorpay_payment_id || `pay_mock_${Math.random().toString(36).substring(2, 10)}`;
 
         // ── STEP 3: Confirm payment atomically ──
+        console.log(`[PaymentController] Updating status to confirmed (enum cast)`);
         await client.query(
             "UPDATE appointments SET payment_status = 'paid', payment_id = $1, status = 'confirmed'::appointment_status, updated_at = NOW() WHERE id = $2::uuid",
             [finalPaymentId, appointmentId]
@@ -170,9 +174,11 @@ const verifyPayment = catchAsync(async (req, res) => {
         // ── STEP 3.5: Calculate Queue Rank (Ticket Number) ──
         let queueNumber = 0;
         try {
+            console.log(`[PaymentController] Calculating live rank...`);
             queueNumber = await appointmentModel.getAppointmentRank(appointmentId, client);
+            console.log(`[PaymentController] Rank calculated: ${queueNumber}`);
         } catch (rankErr) {
-            console.error(`[PaymentController] Failed to calculate rank:`, rankErr.message);
+            console.error(`[PaymentController] Failed to calculate rank:`, rankErr.stack || rankErr.message);
         }
 
         // ── STEP 4: Credit locked funds to Org Wallet (base price only) ──
@@ -193,13 +199,16 @@ const verifyPayment = catchAsync(async (req, res) => {
         }
 
         await client.query('COMMIT');
+        console.log(`[PaymentController] Transaction committed for Appt ${appointmentId}`);
 
         // ── STEP 6: Post-Payment Logic (Notifications & Real-time Broadcast) ──
         try {
-            console.log(`[PaymentController] Triggering post-payment notifications for Appt ${appointmentId}`);
+            console.log(`[PaymentController] Triggering post-payment notifications...`);
+            const appointmentService = require('../services/appointment.service');
             appointmentService.finalizeBookingNotifications(appointmentId, queueNumber);
+            console.log(`[PaymentController] Notifications trigger called successfully`);
         } catch (notifyErr) {
-            console.error(`[PaymentController] Notification trigger failed:`, notifyErr.message);
+            console.error(`[PaymentController] Notification trigger failed:`, notifyErr.stack || notifyErr.message);
         }
 
         res.status(httpStatus.OK).send({

@@ -28,6 +28,7 @@ let walletService;
  * Finalize notifications and real-time updates for a confirmed booking
  */
 const finalizeBookingNotifications = (appointmentId, queueNumber) => {
+    console.log(`[AppointmentService] finalizeBookingNotifications: id=${appointmentId}, rank=${queueNumber}`);
     (async () => {
         try {
             console.log(`[Booking-Async] Starting notification process for Appointment: ${appointmentId}`);

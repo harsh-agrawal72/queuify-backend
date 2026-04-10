@@ -7,6 +7,7 @@ const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
  * Calculate the rank (queue number) for a specific appointment
  */
 const getAppointmentRank = async (appointmentId, client = pool) => {
+    console.log(`[AppointmentModel] getAppointmentRank: id=${appointmentId}`);
     // 1. Fetch vital scoping details
     const res = await client.query(
         `SELECT a.resource_id, a.service_id, a.preferred_date, a.slot_id, s.queue_scope
@@ -16,8 +17,12 @@ const getAppointmentRank = async (appointmentId, client = pool) => {
         [appointmentId]
     );
 
-    if (res.rows.length === 0) return 0;
+    if (res.rows.length === 0) {
+        console.warn(`[AppointmentModel] getAppointmentRank: No record found for ${appointmentId}`);
+        return 0;
+    }
     const { resource_id, service_id, preferred_date, slot_id, queue_scope } = res.rows[0];
+    console.log(`[AppointmentModel] getAppointmentRank: scope=${queue_scope}, date=${preferred_date}, slot=${slot_id}`);
 
     // 2. Resolve Partition Logic
     let partitionBy, filterClause, filterParams;
