@@ -1,6 +1,7 @@
 const httpStatus = require('../utils/httpStatus');
 const catchAsync = require('../utils/catchAsync');
 const { adminService, reassignmentService, organizationService } = require('../services');
+const userModel = require('../models/user.model');
 
 const getOverview = catchAsync(async (req, res) => {
     const stats = await adminService.getOverview(req.user.org_id);
@@ -14,6 +15,16 @@ const markAsOnboarded = catchAsync(async (req, res) => {
 
 const getOrgDetails = catchAsync(async (req, res) => {
     const org = await adminService.getOrgDetails(req.user.org_id);
+    
+    // Apply Defensive Hydration for features
+    const dbFeatures = typeof org.plan_features === 'string' ? JSON.parse(org.plan_features) : (org.plan_features || {});
+    const planHardDefaults = userModel.getPlanHardDefaults(org.plan_name);
+    
+    org.plan_features = {
+        ...(dbFeatures || {}),
+        ...planHardDefaults
+    };
+
     res.send(org);
 });
 
