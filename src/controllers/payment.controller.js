@@ -11,6 +11,7 @@ const ApiError = require('../utils/ApiError');
 const { GST_RATE } = require('../utils/paymentHelper');
 
 const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
+const appointmentService = require('../services/appointment.service');
 
 /**
  * Step 1: Create Order
@@ -162,9 +163,17 @@ const verifyPayment = catchAsync(async (req, res) => {
 
         // ── STEP 3: Confirm payment atomically ──
         await client.query(
-            "UPDATE appointments SET payment_status = 'paid', payment_id = $1, status = 'confirmed', updated_at = NOW() WHERE id = $2::uuid",
+            "UPDATE appointments SET payment_status = 'paid', payment_id = $1, status = 'confirmed'::appointment_status, updated_at = NOW() WHERE id = $2::uuid",
             [finalPaymentId, appointmentId]
         );
+
+        // ── STEP 3.5: Calculate Queue Rank (Ticket Number) ──
+        let queueNumber = 0;
+        try {
+            queueNumber = await appointmentModel.getAppointmentRank(appointmentId, client);
+        } catch (rankErr) {
+            console.error(`[PaymentController] Failed to calculate rank:`, rankErr.message);
+        }
 
         // ── STEP 4: Credit locked funds to Org Wallet (base price only) ──
         const basePrice = parseFloat(appointment.price);
@@ -185,10 +194,19 @@ const verifyPayment = catchAsync(async (req, res) => {
 
         await client.query('COMMIT');
 
+        // ── STEP 6: Post-Payment Logic (Notifications & Real-time Broadcast) ──
+        try {
+            console.log(`[PaymentController] Triggering post-payment notifications for Appt ${appointmentId}`);
+            appointmentService.finalizeBookingNotifications(appointmentId, queueNumber);
+        } catch (notifyErr) {
+            console.error(`[PaymentController] Notification trigger failed:`, notifyErr.message);
+        }
+
         res.status(httpStatus.OK).send({
             success: true,
             message: 'Payment verified and appointment confirmed',
-            appointment_id: appointmentId
+            appointment_id: appointmentId,
+            queue_number: queueNumber
         });
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});

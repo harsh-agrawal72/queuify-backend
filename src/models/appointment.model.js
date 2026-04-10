@@ -3,6 +3,50 @@ const httpStatus = require('../utils/httpStatus');
 const ApiError = require('../utils/ApiError');
 const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
 
+/**
+ * Calculate the rank (queue number) for a specific appointment
+ */
+const getAppointmentRank = async (appointmentId, client = pool) => {
+    // 1. Fetch vital scoping details
+    const res = await client.query(
+        `SELECT a.resource_id, a.service_id, a.preferred_date, a.slot_id, s.queue_scope
+         FROM appointments a
+         JOIN services s ON a.service_id = s.id
+         WHERE a.id = $1::uuid`,
+        [appointmentId]
+    );
+
+    if (res.rows.length === 0) return 0;
+    const { resource_id, service_id, preferred_date, slot_id, queue_scope } = res.rows[0];
+
+    // 2. Resolve Partition Logic
+    let partitionBy, filterClause, filterParams;
+    const preferredDate = preferred_date; // use stored date
+
+    if (queue_scope === 'PER_RESOURCE') {
+        partitionBy = 'resource_id, preferred_date, slot_id';
+        filterClause = 'resource_id = $1 AND preferred_date = $2 AND (slot_id = $3 OR ($3::uuid IS NULL AND slot_id IS NULL))';
+        filterParams = [resource_id, preferredDate, slot_id || null];
+    } else {
+        partitionBy = 'preferred_date, slot_id';
+        filterClause = 'preferred_date = $1 AND (slot_id = $2 OR ($2::uuid IS NULL AND slot_id IS NULL))';
+        filterParams = [preferredDate, slot_id || null];
+    }
+
+    const queueRes = await client.query(
+        `WITH RankedQueue AS (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY (CASE WHEN is_priority = TRUE THEN 0 ELSE 1 END), created_at ASC) as q_rank
+            FROM appointments
+            WHERE status IN ('pending', 'confirmed', 'serving', 'completed', 'pending_payment')
+            AND ${filterClause}
+         )
+         SELECT q_rank FROM RankedQueue WHERE id = $${filterParams.length + 1}`,
+        [...filterParams, appointmentId]
+    );
+
+    return queueRes.rows.length > 0 ? parseInt(queueRes.rows[0].q_rank) : 0;
+};
+
 const createAppointment = async (appointmentBody) => {
     const { orgId, userId, serviceId, resourceId, slotId, pref_resource, pref_time, bypassDuplicate = false, customer_name, customer_phone, is_priority } = appointmentBody;
 
@@ -257,33 +301,8 @@ const createAppointment = async (appointmentBody) => {
             }
         }
 
-        // 5. Calculate Dynamic Rank (Queue Number)
-        // Partition logic depends on queue_scope and preferred_date
-        let partitionBy, filterClause, filterParams;
-
-        if (service.queue_scope === 'PER_RESOURCE') {
-            partitionBy = 'resource_id, preferred_date, slot_id';
-            filterClause = 'resource_id = $1 AND preferred_date = $2 AND (slot_id = $3 OR ($3::uuid IS NULL AND slot_id IS NULL))';
-            filterParams = [resourceId, preferredDate, slotId || null];
-        } else {
-            // CENTRAL Queue: Shared across resources for the same intended date, but still partitioned by slot
-            partitionBy = 'preferred_date, slot_id';
-            filterClause = 'preferred_date = $1 AND (slot_id = $2 OR ($2::uuid IS NULL AND slot_id IS NULL))';
-            filterParams = [preferredDate, slotId || null];
-        }
-
-        const queueRes = await client.query(
-            `WITH RankedQueue AS (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY (CASE WHEN is_priority = TRUE THEN 0 ELSE 1 END), created_at ASC) as q_rank
-                FROM appointments
-                WHERE status IN ('pending', 'confirmed', 'serving', 'completed')
-                AND ${filterClause}
-             )
-             SELECT q_rank FROM RankedQueue WHERE id = $${filterParams.length + 1}`,
-            [...filterParams, appointmentId]
-        );
-
-        const rank = queueRes.rows.length > 0 ? parseInt(queueRes.rows[0].q_rank) : 0;
+        // 5. Calculate Dynamic Rank (Queue Number) after commit (or within transaction with client)
+        const rank = await getAppointmentRank(appointmentId, client);
 
         await client.query('COMMIT');
 
@@ -787,6 +806,7 @@ const respondToReschedule = async (appointmentId, userId, action) => {
 
 module.exports = {
     createAppointment,
+    getAppointmentRank,
     getAppointmentById,
     getAppointmentsByUserId,
     getAppointmentsByOrgId,

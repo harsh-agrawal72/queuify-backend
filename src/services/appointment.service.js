@@ -25,6 +25,105 @@ let reassignmentService;
 let walletService;
 
 /**
+ * Finalize notifications and real-time updates for a confirmed booking
+ */
+const finalizeBookingNotifications = (appointmentId, queueNumber) => {
+    (async () => {
+        try {
+            console.log(`[Booking-Async] Starting notification process for Appointment: ${appointmentId}`);
+            const appointmentWithDetails = await appointmentModel.getAppointmentById(appointmentId);
+            if (!appointmentWithDetails) {
+                console.error(`[Booking-Async] Could not fetch appointment details for ID: ${appointmentId}`);
+                return;
+            }
+
+            const user = await userModel.getUserById(appointmentWithDetails.user_id);
+            const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointmentWithDetails.org_id]);
+            const org = orgRes.rows[0];
+
+            // 1. Notify User (respecting org-wide toggle AND user preference)
+            const userEmailEnabled = user && user.email_notification_enabled !== false;
+            const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
+
+            try {
+                if (userEmailEnabled && user && user.email) {
+                    console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
+                    await emailService.sendBookingConfirmation(user.email, {
+                        ...appointmentWithDetails,
+                        token_number: queueNumber
+                    });
+                }
+            } catch (emailErr) {
+                console.error(`[Booking-Async] User email failed:`, emailErr.message);
+            }
+
+            if (org && (org.new_booking_notification === true || org.new_booking_notification === null)) {
+                await notificationService.sendNotification(
+                    appointmentWithDetails.user_id,
+                    'Booking Confirmed',
+                    `Your appointment for ${appointmentWithDetails.service_name} at ${appointmentWithDetails.org_name} is confirmed. Your Token is #${queueNumber}.`,
+                    'appointment',
+                    `/appointments`
+                );
+            }
+
+            // 2. Notify Admins
+            const orgBookingNotify = org && (org.new_booking_notification === true || org.new_booking_notification === null);
+            if (orgBookingNotify) {
+                const admins = await userModel.getAdminsByOrg(appointmentWithDetails.org_id);
+                const adminMessage = `New booking from ${user?.name || 'Customer'} for ${appointmentWithDetails.service_name}. Token assigned: #${queueNumber}`;
+
+                console.log(`[Booking-Async] Notifying ${admins.length} admins.`);
+                // In-App Notifications to all admins
+                for (const admin of admins) {
+                    await notificationService.sendNotification(
+                        admin.id,
+                        'New Appointment Booking',
+                        adminMessage,
+                        'appointment',
+                        `/admin/appointments?search=${appointmentId}`
+                    );
+                }
+
+                // Email Notification to Org Contact
+                try {
+                    if (orgEmailEnabled) {
+                        console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
+                        await emailService.sendAdminBookingNotification(org.contact_email, {
+                            ...appointmentWithDetails,
+                            token_number: queueNumber
+                        });
+                    }
+                } catch (emailErr) {
+                    console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
+                }
+            }
+
+            // 3. Emit Queue Update for real-time dashboard refresh
+            try {
+                socket.emitQueueUpdate({
+                    orgId: appointmentWithDetails.org_id,
+                    serviceId: appointmentWithDetails.service_id,
+                    resourceId: appointmentWithDetails.resource_id
+                }, {
+                    type: 'new_booking',
+                    appointmentId: appointmentId,
+                    slotId: appointmentWithDetails.slot_id
+                });
+            } catch (socketErr) {
+                console.error('[Booking-Async] Socket update failed:', socketErr.message);
+            }
+
+            if (appointmentWithDetails.slot_id) {
+                await checkAndNotifySlotWaiters(appointmentWithDetails.slot_id);
+            }
+        } catch (e) {
+            console.error('[Booking-Async] FAILURE:', e);
+        }
+    })();
+};
+
+/**
  * Book an appointment
  * @param {Object} appointmentBody
  * @returns {Promise<Object>}
@@ -60,99 +159,7 @@ const bookAppointment = async (appointmentBody) => {
 
         // Send Notifications & Emails Asynchronously only if confirmed/paid
         if (appointment.status !== 'pending_payment') {
-            (async () => {
-                try {
-                    console.log(`[Booking-Async] Starting notification process for Appointment: ${appointment.id}`);
-                    const appointmentWithDetails = await appointmentModel.getAppointmentById(appointment.id);
-                    const user = await userModel.getUserById(appointment.user_id);
-                    const orgRes = await pool.query('SELECT name, contact_email, email_notification, new_booking_notification FROM organizations WHERE id = $1', [appointment.org_id]);
-                    const org = orgRes.rows[0];
-
-                    if (!appointmentWithDetails) {
-                        console.error(`[Booking-Async] Could not fetch appointment details for ID: ${appointment.id}`);
-                        return;
-                    }
-
-                    // 1. Notify User (respecting org-wide toggle AND user preference)
-                    const userEmailEnabled = user && user.email_notification_enabled !== false;
-                    const orgEmailEnabled = org && (org.email_notification === true || org.email_notification === null);
-
-                    try {
-                        if (userEmailEnabled && user && user.email) {
-                            console.log(`[Booking-Async] Sending booking confirmation email to ${user.email}`);
-                            await emailService.sendBookingConfirmation(user.email, {
-                                ...appointmentWithDetails,
-                                token_number: queue_number
-                            });
-                        }
-                    } catch (emailErr) {
-                        console.error(`[Booking-Async] User email failed:`, emailErr.message);
-                    }
-
-                    if (org && (org.new_booking_notification === true || org.new_booking_notification === null)) {
-                        await notificationService.sendNotification(
-                            appointment.user_id,
-                            'Booking Confirmed',
-                            `Your appointment for ${appointmentWithDetails.service_name} at ${appointmentWithDetails.org_name} is confirmed. Your Token is #${queue_number}.`,
-                            'appointment',
-                            `/appointments`
-                        );
-                    }
-
-                    // 2. Notify Admins
-                    const orgBookingNotify = org && (org.new_booking_notification === true || org.new_booking_notification === null);
-                    if (orgBookingNotify) {
-                        const admins = await userModel.getAdminsByOrg(appointment.org_id);
-                        const adminMessage = `New booking from ${user?.name || 'Customer'} for ${appointmentWithDetails.service_name}. Token assigned: #${queue_number}`;
-
-                        console.log(`[Booking-Async] Notifying ${admins.length} admins.`);
-                        // In-App Notifications to all admins
-                        for (const admin of admins) {
-                            await notificationService.sendNotification(
-                                admin.id,
-                                'New Appointment Booking',
-                                adminMessage,
-                                'appointment',
-                                `/admin/appointments?search=${appointment.id}`
-                            );
-                        }
-
-                        // Email Notification to Org Contact
-                        try {
-                            if (orgEmailEnabled) {
-                                console.log(`[Booking-Async] Sending admin notification email to ${org.contact_email}`);
-                                await emailService.sendAdminBookingNotification(org.contact_email, {
-                                    ...appointmentWithDetails,
-                                    token_number: queue_number
-                                });
-                            }
-                        } catch (emailErr) {
-                            console.error(`[Booking-Async] Admin email failed:`, emailErr.message);
-                        }
-                    }
-
-                    // 3. Emit Queue Update for real-time dashboard refresh
-                    try {
-                        socket.emitQueueUpdate({
-                            orgId: appointment.org_id,
-                            serviceId: appointment.service_id,
-                            resourceId: appointment.resource_id
-                        }, {
-                            type: 'new_booking',
-                            appointmentId: appointment.id,
-                            slotId: appointment.slot_id
-                        });
-                    } catch (socketErr) {
-                        console.error('[Booking-Async] Socket update failed:', socketErr.message);
-                    }
-
-                    if (appointment.slot_id) {
-                        await checkAndNotifySlotWaiters(appointment.slot_id);
-                    }
-                } catch (e) {
-                    console.error('[Booking-Async] FAILURE:', e);
-                }
-            })();
+            finalizeBookingNotifications(appointment.id, queue_number);
         }
 
         return { ...result, appointment };
@@ -1344,6 +1351,7 @@ const cancelPendingPayment = async (appointmentId, userId) => {
 };
 
 module.exports = {
+    finalizeBookingNotifications,
     bookAppointment,
     cancelAppointment,
     updateAppointmentStatus,
