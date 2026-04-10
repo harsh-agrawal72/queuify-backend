@@ -307,6 +307,29 @@ const deleteNotification = async (notificationId, userId) => {
 };
 
 const bulkCopySlots = async (orgId, { sourceDate, targetDates, resourceId, overwrite }) => {
+    // 0. Security Gating (Backend)
+    const orgRes = await pool.query(
+        `SELECT p.name as plan_name, p.features 
+         FROM organizations o 
+         JOIN plans p ON o.plan_id = p.id 
+         WHERE o.id = $1`, 
+        [orgId]
+    );
+    const plan = orgRes.rows[0];
+    if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Organization plan not found');
+
+    // Use Defensive Hydration to check feature
+    const userModel = require('../models/user.model');
+    const hardDefaults = userModel.getPlanHardDefaults(plan.plan_name);
+    const hydratedFeatures = {
+        ...(typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features),
+        ...hardDefaults
+    };
+
+    if (!hydratedFeatures.has_slot_copy) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Bulk slot copy requires a Professional or Enterprise plan');
+    }
+
     // 1. Fetch source slots
     const filters = { orgId, date: sourceDate, isActive: true };
     if (resourceId) filters.resourceId = resourceId;

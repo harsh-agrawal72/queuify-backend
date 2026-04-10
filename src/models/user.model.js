@@ -37,10 +37,13 @@ const getPlanHardDefaults = (planName) => {
         features.has_custom_branding = true;
     }
 
-    // 2. Gallery & History (Professional and above)
+    // 2. Gallery, History & Slot Copy (Professional and above)
     if (['professional', 'enterprise'].includes(pName)) {
         features.has_gallery_upload = true;
         features.has_patient_history = true;
+        features.has_slot_copy = true;
+    } else {
+        features.has_slot_copy = false;
     }
 
     // 3. Hierarchical Analytics Gating

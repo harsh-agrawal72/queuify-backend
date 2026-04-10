@@ -76,13 +76,27 @@ const assignPlanToUser = async (userId, planId, months = 1) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid user plan');
     }
 
-    // 2. Calculate Expiry (Monthly: Dynamic, Free: 365 days)
-    const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? `NOW() + INTERVAL '${parseInt(months)} months'` : "NOW() + INTERVAL '365 days'";
+    // 2. Fetch current user state to check for stacking
+    const currentRes = await pool.query('SELECT plan_id, subscription_expiry FROM users WHERE id = $1', [userId]);
+    const current = currentRes.rows[0];
 
-    // 3. Update user
+    const isPaid = parseFloat(plan.price_monthly) > 0;
+    const isStacking = isPaid && current && current.plan_id === planId && current.subscription_expiry && new Date(current.subscription_expiry) > new Date();
+
+    // 3. Calculate Expiry (Monthly: Dynamic, Free: 365 days)
+    // If stacking, add interval to existing expiry. Otherwise, set from NOW().
+    let expiryBase = 'NOW()';
+    if (isStacking) {
+        expiryBase = '$3'; // Will pass current.subscription_expiry
+    }
+
+    const interval = isPaid ? `INTERVAL '${parseInt(months)} months'` : "INTERVAL '365 days'";
+    const expiryDate = `${expiryBase} + ${interval}`;
+
+    // 4. Update user
     let updateQuery = `UPDATE users SET plan_id = $1, subscription_expiry = ${expiryDate}, updated_at = NOW()`;
     const updateParams = [planId, userId];
+    if (isStacking) updateParams.push(current.subscription_expiry);
 
     if (isPaid) {
         updateQuery = `UPDATE users SET plan_id = $1, subscription_expiry = ${expiryDate}, last_paid_plan_id = $1, last_paid_plan_expiry = ${expiryDate}, updated_at = NOW()`;
@@ -104,13 +118,26 @@ const assignPlanToOrg = async (orgId, planId, months = 1) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid organization plan');
     }
 
-    // 2. Calculate Expiry (Monthly: Dynamic, Free: 365 days)
-    const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? `NOW() + INTERVAL '${parseInt(months)} months'` : "NOW() + INTERVAL '365 days'";
+    // 2. Fetch current org state to check for stacking
+    const currentRes = await pool.query('SELECT plan_id, subscription_expiry FROM organizations WHERE id = $1', [orgId]);
+    const current = currentRes.rows[0];
 
-    // 3. Update organization
+    const isPaid = parseFloat(plan.price_monthly) > 0;
+    const isStacking = isPaid && current && current.plan_id === planId && current.subscription_expiry && new Date(current.subscription_expiry) > new Date();
+
+    // 3. Calculate Expiry (Monthly: Dynamic, Free: 365 days)
+    let expiryBase = 'NOW()';
+    if (isStacking) {
+        expiryBase = '$3'; // Will pass current.subscription_expiry
+    }
+
+    const interval = isPaid ? `INTERVAL '${parseInt(months)} months'` : "INTERVAL '365 days'";
+    const expiryDate = `${expiryBase} + ${interval}`;
+
+    // 4. Update organization
     let updateQuery = `UPDATE organizations SET plan_id = $1, subscription_expiry = ${expiryDate}, updated_at = NOW()`;
     const updateParams = [planId, orgId];
+    if (isStacking) updateParams.push(current.subscription_expiry);
 
     if (isPaid) {
         updateQuery = `UPDATE organizations SET plan_id = $1, subscription_expiry = ${expiryDate}, last_paid_plan_id = $1, last_paid_plan_expiry = ${expiryDate}, updated_at = NOW()`;

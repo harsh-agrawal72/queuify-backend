@@ -184,7 +184,7 @@ const createPlanOrder = catchAsync(async (req, res) => {
 
     // --- COUPON LOGIC ---
     let discountInfo = null;
-    let finalBasePrice = price;
+    let finalBasePrice = discountedPrice;
 
     if (couponCode) {
         try {
@@ -217,8 +217,8 @@ const createPlanOrder = catchAsync(async (req, res) => {
             isFree: true,
             message: 'Plan is free with this coupon',
             breakdown: {
-                basePrice: price,
-                discount: price,
+                basePrice: baseAggregatePrice,
+                discount: baseAggregatePrice,
                 gst: 0,
                 total: 0
             }
@@ -244,7 +244,7 @@ const createPlanOrder = catchAsync(async (req, res) => {
         plan: {
             id: plan.id,
             name: plan.name,
-            originalPrice: price,
+            originalPrice: baseAggregatePrice,
             finalBasePrice,
             gst: gstAmount,
             totalPayable

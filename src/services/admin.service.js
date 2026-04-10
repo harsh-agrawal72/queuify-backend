@@ -634,8 +634,8 @@ const createSlot = async (orgId, slotBody) => {
 
     // Fetch resource capacity if not explicitly provided
     let finalCapacity = max_capacity;
-    if (targetResourceId && (!finalCapacity || finalCapacity <= 0)) {
-        const resCap = await query('SELECT concurrent_capacity FROM resources WHERE id = $1', [targetResourceId]);
+    if (resource_id && (!finalCapacity || finalCapacity <= 0)) {
+        const resCap = await query('SELECT concurrent_capacity FROM resources WHERE id = $1', [resource_id]);
         if (resCap.rows.length > 0) {
             finalCapacity = resCap.rows[0].concurrent_capacity;
         }
@@ -646,7 +646,7 @@ const createSlot = async (orgId, slotBody) => {
         `INSERT INTO slots (org_id, start_time, end_time, max_capacity, booked_count, resource_id, is_active)
         VALUES ($1, $2::timestamptz, $3::timestamptz, $4, 0, $5, TRUE)
         RETURNING *`,
-        [orgId, start_time, end_time, finalCapacity, targetResourceId]
+        [orgId, start_time, end_time, finalCapacity, resource_id]
     );
     const newSlot = res.rows[0];
 
@@ -1762,43 +1762,66 @@ const retryRefund = async (orgId, appointmentId) => {
 };
 
 const getResourcePerformance = async (orgId, resourceId) => {
-    // Check plan limits
+    // 1. Check plan features
     const orgRes = await query(
-        `SELECT p.features FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
+        `SELECT p.features, p.name as plan_name FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
         [orgId]
     );
     const features = orgRes.rows[0]?.features || {};
-    if (features.analytics !== 'premium' && !features.has_resource_ranking) {
-        throw new ApiError(httpStatus.FORBIDDEN, 'Resource performance stats require an Enterprise plan');
+    const planName = orgRes.rows[0]?.plan_name || 'Free';
+    
+    // We only perform the expensive historical calculation for premium plans
+    const hasPremiumAnalytics = (features.analytics === 'premium' || features.has_resource_ranking);
+
+    let avgSpeed = NaN;
+    let isHistorical = false;
+    let completedCount = 0;
+
+    if (hasPremiumAnalytics) {
+        // Calculate average service time (in minutes) for this resource over last 30 days
+        const res = await query(`
+            SELECT 
+                AVG(EXTRACT(EPOCH FROM (completed_at - serving_started_at))/60) as avg_speed,
+                COUNT(*) as completed_count
+            FROM appointments
+            WHERE resource_id = $1 
+            AND org_id = $2 
+            AND status = 'completed'
+            AND serving_started_at IS NOT NULL 
+            AND completed_at IS NOT NULL
+            AND completed_at >= NOW() - INTERVAL '30 days'
+        `, [resourceId, orgId]);
+
+        avgSpeed = parseFloat(res.rows[0].avg_speed);
+        completedCount = parseInt(res.rows[0].completed_count) || 0;
+        
+        if (!isNaN(avgSpeed)) {
+            isHistorical = true;
+        }
     }
 
-    // Calculate average service time (in minutes) for this resource over last 30 days
-    // Duration is time between 'serving' status (serving_started_at) and 'completed' (completed_at)
-    const res = await query(`
-        SELECT 
-            AVG(EXTRACT(EPOCH FROM (completed_at - serving_started_at))/60) as avg_speed,
-            COUNT(*) as completed_count
-        FROM appointments
-        WHERE resource_id = $1 
-        AND org_id = $2 
-        AND status = 'completed'
-        AND serving_started_at IS NOT NULL 
-        AND completed_at IS NOT NULL
-        AND completed_at >= NOW() - INTERVAL '30 days'
-    `, [resourceId, orgId]);
-
-    const stats = res.rows[0];
-    let avgSpeed = parseFloat(stats.avg_speed);
-    let isHistorical = true;
+    // Fallback: If not premium OR no historical data found
+    if (isNaN(avgSpeed)) {
+        // Calculate average estimated service time from all services linked to this resource
+        const estRes = await query(`
+            SELECT COALESCE(AVG(s.estimated_service_time), 20) as est_avg
+            FROM services s
+            JOIN resource_services rs ON s.id = rs.service_id
+            WHERE rs.resource_id = $1 AND s.is_active = TRUE
+        `, [resourceId]);
+        
+        avgSpeed = parseFloat(estRes.rows[0]?.est_avg) || 20;
+        isHistorical = false;
+    }
 
     const resourceInfoRes = await query('SELECT concurrent_capacity FROM resources WHERE id = $1', [resourceId]);
     const concurrent_capacity = resourceInfoRes.rows[0]?.concurrent_capacity || 1;
 
     return {
         resourceId,
-        avg_service_time: !isNaN(avgSpeed) ? Math.round(avgSpeed) : 15,
+        avg_service_time: Math.max(1, Math.round(avgSpeed || 20)),
         concurrent_capacity,
-        completed_count: parseInt(stats.completed_count) || 0,
+        completed_count: completedCount,
         isHistorical
     };
 };
