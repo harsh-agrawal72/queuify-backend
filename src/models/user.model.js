@@ -22,14 +22,38 @@ const DEFAULT_USER_FEATURES = {
     reschedule_limit: 0
 };
 
+/**
+ * Defensive Hydration: Returns hardcoded feature defaults based on Plan Name
+ * This ensures features are unlocked even if DB JSON is outdated.
+ */
+const getPlanHardDefaults = (planName) => {
+    const pName = (planName || 'Free').toLowerCase();
+    
+    // Default empty set
+    const features = {};
+
+    // 1. Branding (Starter and above)
+    if (['starter', 'professional', 'enterprise'].includes(pName)) {
+        features.has_custom_branding = true;
+    }
+
+    // 2. Gallery & History (Professional and above)
+    if (['professional', 'enterprise'].includes(pName)) {
+        features.has_gallery_upload = true;
+        features.has_patient_history = true;
+    }
+
+    return features;
+};
+
 const formatUserWithPlan = (user) => {
     if (!user) return null;
     
     // Set default plan name if missing
     if (!user.plan_name) user.plan_name = 'Free';
     
-    // Parse plan_features if it's a string
-    let dbFeatures = null;
+    // Parse plan_features from DB if it exists
+    let dbFeatures = {};
     try {
         if (user.plan_features) {
             dbFeatures = typeof user.plan_features === 'string' 
@@ -40,13 +64,21 @@ const formatUserWithPlan = (user) => {
         console.warn('[USER-MODEL] Failed to parse plan_features:', e.message);
     }
 
-    // Merge with defaults based on role
-    const defaults = (user.role === 'admin' || user.role === 'staff') 
+    // 1. Base Role Defaults
+    const roleDefaults = (user.role === 'admin' || user.role === 'staff') 
         ? DEFAULT_ADMIN_FEATURES 
         : DEFAULT_USER_FEATURES;
 
-    // We merge database features OVER defaults so new system features work correctly even for old records
-    user.plan_features = { ...defaults, ...(dbFeatures || {}) };
+    // 2. Hardcoded Plan Logic (Defensive Hydration) - Overrides DB for key features
+    const planHardDefaults = getPlanHardDefaults(user.plan_name);
+
+    // Order of Merge: 
+    // Role Defaults -> DB Features -> Hardcoded Plan Defaults (to ensure they are unlocked)
+    user.plan_features = { 
+        ...roleDefaults, 
+        ...(dbFeatures || {}),
+        ...planHardDefaults 
+    };
 
     return user;
 };

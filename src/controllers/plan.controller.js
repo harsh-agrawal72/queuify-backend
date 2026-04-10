@@ -7,21 +7,68 @@ const createPlan = catchAsync(async (req, res) => {
     res.status(httpStatus.CREATED).send(plan);
 });
 
+/**
+ * Defensive Hydration: Returns hardcoded feature defaults based on Plan Name
+ * This ensures frontend cards show the correct features even if DB is outdated.
+ */
+const getPlanHardDefaults = (planName) => {
+    const pName = (planName || 'Free').toLowerCase();
+    
+    // Default empty set
+    const features = {};
+
+    // 1. Branding (Starter and above)
+    if (['starter', 'professional', 'enterprise'].includes(pName)) {
+        features.has_custom_branding = true;
+    }
+
+    // 2. Gallery & History (Professional and above)
+    if (['professional', 'enterprise'].includes(pName)) {
+        features.has_gallery_upload = true;
+        features.has_patient_history = true;
+    }
+
+    return features;
+};
+
 const getPlans = catchAsync(async (req, res) => {
     const { target_role } = req.query;
     // Superadmins can see all plans (including inactive ones)
     const includeInactive = req.user && req.user.role === 'superadmin';
     const plans = await planService.getPlans(target_role, includeInactive);
-    res.send(plans);
+    
+    // Defensive Hydration for the list
+    const hydratedPlans = plans.map(p => {
+        const dbFeatures = typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || {});
+        const hardDefaults = getPlanHardDefaults(p.name);
+        
+        return {
+            ...p,
+            features: {
+                ...dbFeatures,
+                ...hardDefaults
+            }
+        };
+    });
+    
+    res.send(hydratedPlans);
 });
 
 const getPlan = catchAsync(async (req, res) => {
     const plan = await planService.getPlanById(req.params.planId);
     if (!plan) {
-        res.status(httpStatus.NOT_FOUND).send({ message: 'Plan not found' });
-    } else {
-        res.send(plan);
+        return res.status(httpStatus.NOT_FOUND).send({ message: 'Plan not found' });
     }
+
+    const dbFeatures = typeof plan.features === 'string' ? JSON.parse(plan.features) : (plan.features || {});
+    const hardDefaults = getPlanHardDefaults(plan.name);
+    
+    plan.features = {
+        ...dbFeatures,
+        ...hardDefaults
+    };
+
+    res.send(plan);
 });
 
 const updatePlan = catchAsync(async (req, res) => {
