@@ -473,57 +473,59 @@ const updateAppointmentStatus = async (appointmentId, status, orgId, admin_remar
 
     const updatedAppointment = await appointmentModel.updateAppointmentStatus(appointmentId, status, admin_remarks);
 
-    // --- CRITICAL FINANCIAL TRIGGER: Admin-Initiated Cancellation Refund ---
+    // --- FINANCIAL TRIGGERS: Fire-and-Forget (don't block the HTTP response) ---
+    // These run in background. Errors are logged but don't affect the status update response.
+
     if (status === 'cancelled' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
-        try {
-            const svc = getAutoRefundService();
-            console.log(`[Admin-Update-Sync] ADMIN CANCELLED: Triggering immediate 100% refund for Appt ${appointmentId}`);
-            const refundResult = await svc.processRefund(appointmentId, 'admin');
-            console.log(`[Admin-Update-Sync] Refund Result for Appt ${appointmentId}:`, JSON.stringify(refundResult));
-        } catch (refundErr) {
-            console.error(`[Admin-Update-Sync] !!! Critical: Synchronous Administrative Refund Failed for Appt ${appointmentId}:`, refundErr.message);
-        }
+        (async () => {
+            try {
+                const svc = getAutoRefundService();
+                console.log(`[Admin-Finance-Async] CANCELLED: Triggering 100% refund for Appt ${appointmentId}`);
+                const refundResult = await svc.processRefund(appointmentId, 'admin');
+                console.log(`[Admin-Finance-Async] Refund done for Appt ${appointmentId}:`, JSON.stringify(refundResult));
+            } catch (refundErr) {
+                console.error(`[Admin-Finance-Async] Refund Failed for Appt ${appointmentId}:`, refundErr.message);
+            }
+        })();
     }
 
-    // --- CRITICAL FINANCIAL TRIGGER: No-Show Settlement ---
     if (status === 'no_show' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
-        try {
-            const svc = getAutoRefundService();
-            console.log(`[Admin-Update-Sync] NO-SHOW: Triggering 70/30 settlement for Appt ${appointmentId}`);
-            const result = await svc.processNoShowSettlement(appointmentId);
-            console.log(`[Admin-Update-Sync] Settlement Result for Appt ${appointmentId}:`, JSON.stringify(result));
-        } catch (settleErr) {
-            console.error(`[Admin-Update-Sync] !!! Critical: Synchronous No-Show Settlement Failed for Appt ${appointmentId}:`, settleErr.message);
-        }
+        (async () => {
+            try {
+                const svc = getAutoRefundService();
+                console.log(`[Admin-Finance-Async] NO-SHOW: Triggering 70/30 settlement for Appt ${appointmentId}`);
+                const result = await svc.processNoShowSettlement(appointmentId);
+                console.log(`[Admin-Finance-Async] Settlement done for Appt ${appointmentId}:`, JSON.stringify(result));
+            } catch (settleErr) {
+                console.error(`[Admin-Finance-Async] No-Show Settlement Failed for Appt ${appointmentId}:`, settleErr.message);
+            }
+        })();
     }
 
-    // --- CRITICAL FINANCIAL TRIGGER: Completion Fund Release ---
     if (status === 'completed' && updatedAppointment.payment_status === 'paid' && parseFloat(updatedAppointment.price) > 0) {
-        try {
-            const svc = getWalletService();
-            console.log(`[Admin-Update-Sync] COMPLETED: Triggering immediate fund release for Appt ${appointmentId}`);
-            await svc.releaseFunds(orgId, appointmentId);
-            console.log(`[Admin-Update-Sync] Funds released successfully for Appt ${appointmentId}`);
-        } catch (releaseErr) {
-            // Note: We don't throw here to ensure the status update succeeds; 
-            // the midnight cron job acts as a fallback for fund release.
-            console.error(`[Admin-Update-Sync] !!! Warning: Synchronous Fund Release Failed for Appt ${appointmentId}:`, releaseErr.message);
-        }
+        (async () => {
+            try {
+                const svc = getWalletService();
+                console.log(`[Admin-Finance-Async] COMPLETED: Releasing funds for Appt ${appointmentId}`);
+                await svc.releaseFunds(orgId, appointmentId);
+                console.log(`[Admin-Finance-Async] Funds released for Appt ${appointmentId}`);
+            } catch (releaseErr) {
+                // Cron job will catch missed releases as a fallback
+                console.error(`[Admin-Finance-Async] Fund Release Failed for Appt ${appointmentId}:`, releaseErr.message);
+            }
+        })();
     }
 
-    // If status changed to completed, cancelled, or no_show, trigger auto-advancement
-    if (['completed', 'cancelled', 'no_show'].includes(status)) {
-        // await advanceQueueAutomatically(appointment.service_id, appointment.resource_id, appointment.slot_id);
-
-        // Also trigger waitlist fill if space opened up
-        if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
+    // Fill waitlist from freed slot - also fire-and-forget
+    if (['cancelled', 'no_show'].includes(status) && appointment.slot_id) {
+        (async () => {
             try {
                 const svc = getReassignmentService();
                 await svc.fillSlotFromWaitlist(appointment.slot_id);
             } catch (e) {
                 console.error('[StatusUpdate-WaitlistFill] Failed silently:', e.message);
             }
-        }
+        })();
     }
 
     try {

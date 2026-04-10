@@ -199,7 +199,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
         // 8. Wallet finalize
         if (refundSuccessful || cancelledBy === 'admin') {
             console.log(`[AutoRefund] Adjusting internal wallet ledger for appt ${appointmentId} (Status: ${refundSuccessful ? 'Gateway Success' : 'Admin Forced'})`);
-            const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1', [appt.org_id]);
+            const walletRes = await client.query('SELECT id FROM wallets WHERE org_id = $1::uuid', [appt.org_id]);
             if (walletRes.rows.length > 0) {
                 const walletId = walletRes.rows[0].id;
                 
@@ -233,7 +233,7 @@ const processRefund = async (appointmentId, cancelledBy) => {
                 // Log the refund transaction as a negative amount in the ledger
                 await client.query(
                     `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                     VALUES ($1, $2, 'refund', 'completed', $3, $4)`,
+                     VALUES ($1, $2, 'refund', 'completed', $3::uuid, $4)`,
                     [walletId, -refundAmount, appointmentId, `Refund: ${policy.label} for appt ${appointmentId}${!refundSuccessful ? ' (Gateway Error: ' + failureReason + ')' : ''}`]
                 );
             }
@@ -383,25 +383,25 @@ const processNoShowSettlement = async (appointmentId) => {
                 [originalAmount, adminPayout, platformProfit, walletId]
             );
 
-            // Update original locked transaction
+            // Update original locked transaction to 'cancelled' (it's being split)
             await client.query(
                 `UPDATE wallet_transactions SET status = 'cancelled', description = description || ' (No-Show: 70/30 split)'
                  WHERE reference_id = $1::uuid AND type = 'credit' AND status = 'locked'`,
                 [appointmentId]
             );
 
-            // Log the payout portion (70%)
+            // Log the 70% admin payout as a new 'credit' entry in available state
             await client.query(
                 `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                 VALUES ($1, $2, 'available', 'completed', $3::uuid, $4)`,
-                [walletId, adminPayout, appointmentId, `No-Show fee (70%): ${appointmentId}`]
+                 VALUES ($1, $2, 'credit', 'available', $3::uuid, $4)`,
+                [walletId, adminPayout, appointmentId, `No-Show fee (70% of ₹${originalAmount}): Appt ${appointmentId}`]
             );
 
-            // Log the platform profit (30%) as a separate commission entry
+            // Log the 30% platform commission as a 'penalty' (deduction from earned)
             await client.query(
                 `INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description)
-                 VALUES ($1, $2, 'commission', 'completed', $3::uuid, $4)`,
-                [walletId, platformProfit, appointmentId, `Platform Commission (30%): ${appointmentId}`]
+                 VALUES ($1, $2, 'penalty', 'completed', $3::uuid, $4)`,
+                [walletId, -platformProfit, appointmentId, `Platform Commission (30% of ₹${originalAmount}): Appt ${appointmentId}`]
             );
         }
 
