@@ -9,6 +9,7 @@ const emailService = require('./email.service');
 const userModel = require('../models/user.model');
 const pkg = require('../../package.json');
 const cacheService = require('./cache.service');
+const config = require('../config/config');
 
 const getGlobalOverview = async () => {
     return cacheService.getOrSet('global_overview', async () => {
@@ -439,7 +440,7 @@ const inviteAdmin = async (adminBody, superadminId) => {
     }
 
     const tempPassword = Math.random().toString(36).slice(-10);
-    const hashedPassword = await require('bcryptjs').hash(tempPassword, 8);
+    const hashedPassword = await bcrypt.hash(tempPassword, 8);
 
     const res = await pool.query(
         `INSERT INTO users (name, email, password_hash, role, org_id, is_password_set, invited_at) 

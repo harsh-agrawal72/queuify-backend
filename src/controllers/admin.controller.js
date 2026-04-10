@@ -186,9 +186,9 @@ const getResourceServices = catchAsync(async (req, res) => {
 const getMembershipStats = catchAsync(async (req, res) => {
     const { pool } = require('../config/db');
     
-    // 1. Get Resource Count
+    // 1. Get Resource Count (Only Active)
     const { rows: resourceRows } = await pool.query(
-        'SELECT COUNT(*) FROM resources WHERE org_id = $1',
+        'SELECT COUNT(*) FROM resources WHERE org_id = $1 AND is_active = TRUE',
         [req.user.org_id]
     );
     

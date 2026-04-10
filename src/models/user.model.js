@@ -242,7 +242,22 @@ const getUserById = async (id) => {
                 [user.org_id]
             );
             if (orgRes.rows[0]) {
-                user = { ...user, ...orgRes.rows[0] };
+                const org = orgRes.rows[0];
+                
+                // Defensive Hydration: If org has resources/services, it's basically set up.
+                // This fix ensures invited admins skip onboarding for active organizations.
+                if (!org.org_is_setup_completed) {
+                    try {
+                        const resourceCount = await pool.query('SELECT COUNT(*) FROM resources WHERE org_id = $1 AND is_active = TRUE', [user.org_id]);
+                        if (parseInt(resourceCount.rows[0].count) > 0) {
+                            org.org_is_setup_completed = true;
+                            // Update DB for future optimization
+                            pool.query('UPDATE organizations SET is_setup_completed = TRUE WHERE id = $1', [user.org_id]).catch(() => {});
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                user = { ...user, ...org };
             }
         } catch (e) {
             console.warn('[USER-MODEL] Failed to fetch safe org details:', e.message);

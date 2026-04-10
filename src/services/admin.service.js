@@ -172,14 +172,24 @@ const getAnalytics = async (orgId, filters = {}) => {
 
     // Fetch plan features for gating
     const orgRes = await query(
-        `SELECT p.features 
+        `SELECT p.features, p.name as plan_name 
          FROM organizations o 
          JOIN plans p ON o.plan_id = p.id 
          WHERE o.id = $1`, 
         [orgId]
     );
     const planFeatures = orgRes.rows[0]?.features || {};
-    const analyticsLevel = planFeatures.analytics || 'basic';
+    const planName = orgRes.rows[0]?.plan_name || 'Free';
+    
+    // Apply Defensive Hydration
+    const userModel = require('../models/user.model');
+    const hardDefaults = userModel.getPlanHardDefaults(planName);
+    const hydratedFeatures = {
+        ...(typeof planFeatures === 'string' ? JSON.parse(planFeatures) : planFeatures),
+        ...hardDefaults
+    };
+
+    const analyticsLevel = hydratedFeatures.analytics || 'basic';
     const hasStandardAnalytics = ['standard', 'premium'].includes(analyticsLevel);
     const hasPremiumAnalytics = analyticsLevel === 'premium';
 
@@ -1457,11 +1467,21 @@ const deleteAdmin = async (adminIdToDelete, currentAdminId, orgId) => {
 const getPredictiveInsights = async (orgId) => {
     // Check plan limits
     const orgRes = await query(
-        `SELECT p.features FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
+        `SELECT p.features, p.name as plan_name FROM organizations o JOIN plans p ON o.plan_id = p.id WHERE o.id = $1`, 
         [orgId]
     );
-    const features = orgRes.rows[0]?.features || {};
-    if (features.analytics !== 'premium') {
+    const planFeatures = orgRes.rows[0]?.features || {};
+    const planName = orgRes.rows[0]?.plan_name || 'Free';
+
+    // Apply Defensive Hydration
+    const userModel = require('../models/user.model');
+    const hardDefaults = userModel.getPlanHardDefaults(planName);
+    const hydratedFeatures = {
+        ...(typeof planFeatures === 'string' ? JSON.parse(planFeatures) : planFeatures),
+        ...hardDefaults
+    };
+
+    if (hydratedFeatures.analytics !== 'premium') {
         throw new ApiError(httpStatus.FORBIDDEN, 'Predictive insights require an Enterprise plan');
     }
 
