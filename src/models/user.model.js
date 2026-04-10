@@ -44,9 +44,7 @@ const getPlanHardDefaults = (planName) => {
     }
 
     // 3. Hierarchical Analytics Gating
-    if (pName === 'free') {
-        features.analytics = 'locked';
-    } else if (pName === 'starter') {
+    if (['free', 'starter'].includes(pName)) {
         features.analytics = 'basic';
     } else if (pName === 'professional') {
         features.analytics = 'standard';
