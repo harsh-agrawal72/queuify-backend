@@ -19,6 +19,8 @@ const seedAdminPlans = async () => {
                     max_admins: 1,
                     analytics: 'locked',
                     has_custom_branding: false,
+                    has_gallery_upload: false,
+                    has_patient_history: false,
                     has_top_position: false,
                     has_one_on_one_support: true,
                     has_customer_insight: true,
@@ -36,6 +38,8 @@ const seedAdminPlans = async () => {
                     max_admins: 1,
                     analytics: 'locked',
                     has_custom_branding: true,
+                    has_gallery_upload: false,
+                    has_patient_history: false,
                     has_top_position: false,
                     has_one_on_one_support: true,
                     has_customer_insight: true,
@@ -53,11 +57,12 @@ const seedAdminPlans = async () => {
                     max_admins: 2,
                     analytics: 'basic',
                     has_custom_branding: true,
+                    has_gallery_upload: true,
+                    has_patient_history: true,
                     has_top_position: false,
                     has_one_on_one_support: true,
                     has_customer_insight: true,
                     has_slot_copy: true,
-                    has_patient_history: true,
                     has_premium_features: true
                 }
             },
@@ -71,11 +76,12 @@ const seedAdminPlans = async () => {
                     max_admins: 5,
                     analytics: 'advanced',
                     has_custom_branding: true,
+                    has_gallery_upload: true,
+                    has_patient_history: true,
                     has_top_position: true,
                     has_one_on_one_support: true,
                     has_customer_insight: true,
                     has_slot_copy: true,
-                    has_patient_history: true,
                     has_premium_features: true
                 }
             }

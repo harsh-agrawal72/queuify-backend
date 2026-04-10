@@ -7,6 +7,8 @@ const DEFAULT_ADMIN_FEATURES = {
     analytics: 'locked',
     has_basic_features: true,
     has_custom_branding: false,
+    has_gallery_upload: false,
+    has_patient_history: false,
     has_top_position: false,
     has_one_on_one_support: false,
     has_customer_insight: false,
@@ -26,22 +28,25 @@ const formatUserWithPlan = (user) => {
     // Set default plan name if missing
     if (!user.plan_name) user.plan_name = 'Free';
     
-    // Parse plan_features if it's a string, or set defaults if missing
+    // Parse plan_features if it's a string
+    let dbFeatures = null;
     try {
-        if (user.plan_features && typeof user.plan_features === 'string') {
-            user.plan_features = JSON.parse(user.plan_features);
+        if (user.plan_features) {
+            dbFeatures = typeof user.plan_features === 'string' 
+                ? JSON.parse(user.plan_features) 
+                : user.plan_features;
         }
     } catch (e) {
         console.warn('[USER-MODEL] Failed to parse plan_features:', e.message);
-        user.plan_features = null;
     }
 
-    // Safety: ensure plan_features is an object
-    if (!user.plan_features || typeof user.plan_features !== 'object') {
-        user.plan_features = (user.role === 'admin' || user.role === 'staff') 
-            ? { ...DEFAULT_ADMIN_FEATURES } 
-            : { ...DEFAULT_USER_FEATURES };
-    }
+    // Merge with defaults based on role
+    const defaults = (user.role === 'admin' || user.role === 'staff') 
+        ? DEFAULT_ADMIN_FEATURES 
+        : DEFAULT_USER_FEATURES;
+
+    // We merge database features OVER defaults so new system features work correctly even for old records
+    user.plan_features = { ...defaults, ...(dbFeatures || {}) };
 
     return user;
 };
