@@ -19,11 +19,18 @@ const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
 const createOrder = catchAsync(async (req, res) => {
     const { appointmentId } = req.body;
 
-    // 1. Fetch appointment details (must be paid)
+    // 1. Fetch appointment details with concurrency guard
     const appointment = await appointmentModel.getAppointmentById(appointmentId);
     if (!appointment) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
 
-    if (appointment.status === 'cancelled') throw new ApiError(httpStatus.BAD_REQUEST, 'Appointment is cancelled');
+    // Guard: Reject order creation if already paid (idempotency) or cancelled
+    if (appointment.payment_status === 'paid') {
+        console.warn(`[PaymentController] Duplicate createOrder blocked — Appt ${appointmentId} already paid.`);
+        throw new ApiError(httpStatus.CONFLICT, 'This appointment has already been paid for.', true);
+    }
+    if (appointment.status === 'cancelled') {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Appointment has been cancelled and cannot be paid for.', true);
+    }
 
     const appointmentAmount = parseFloat(appointment.price);
     console.log(`[PaymentController] Appointment ${appointmentId} price: ${appointment.price} -> parsed: ${appointmentAmount}`);
@@ -53,7 +60,7 @@ const createOrder = catchAsync(async (req, res) => {
         };
     }
 
-    // 3. Create Real Razorpay Order using TOTAL PAYABLE (including fees and GST)
+    // 3. Create Razorpay Order using TOTAL PAYABLE (base + platform fees + GST)
     const totalAmount = parseFloat(finalBreakdown.totalPayable);
 
     if (isNaN(totalAmount) || totalAmount <= 0) {
@@ -80,7 +87,6 @@ const createOrder = catchAsync(async (req, res) => {
         });
     } catch (razorpayError) {
         console.error('[PaymentController] Razorpay order creation failed. Error:', razorpayError);
-        // Force isOperational = true to ensure message reaches frontend in production
         throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Razorpay Order Error: ${razorpayError.message}`, true);
     }
 });
@@ -97,12 +103,12 @@ const verifyPayment = catchAsync(async (req, res) => {
         razorpay_signature
     } = req.body;
 
-    // Detect mock payment (auto-approved for test mode)
+    // ── STEP 1: Verify signature BEFORE acquiring the DB lock ──
+    // This prevents a slow Razorpay API call from holding the row lock.
     const isMockOrder = razorpay_order_id && razorpay_order_id.startsWith('order_mock_');
     const isMockPayment = razorpay_payment_id && razorpay_payment_id.startsWith('pay_mock_');
 
     if (!isMockOrder && !isMockPayment) {
-        // 1. Verify Real Signature
         const isValid = razorpayService.verifySignature(
             razorpay_order_id,
             razorpay_payment_id,
@@ -113,37 +119,83 @@ const verifyPayment = catchAsync(async (req, res) => {
         console.log(`[PaymentController] Mock payment detected for appt ${appointmentId}. Skipping signature verification.`);
     }
 
-    // 2. Update Appointment Status
-    const appointment = await appointmentModel.getAppointmentById(appointmentId);
-    if (!appointment) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
-
-    const finalPaymentId = razorpay_payment_id || `pay_mock_${Math.random().toString(36).substring(2, 10)}`;
-
-    await pool.query(
-        "UPDATE appointments SET payment_status = 'paid', payment_id = $1, status = 'confirmed' WHERE id = $2",
-        [finalPaymentId, appointmentId]
-    );
-
-    // 3. Credit Locked Funds to Org Wallet (ONLY BASE PRICE)
+    // ── STEP 2: Acquire a row-level lock (FOR UPDATE) ──
+    // This serializes concurrent verify calls for the same appointment.
+    // If two requests arrive simultaneously, the second waits until the
+    // first commits, then reads the updated state and exits idempotently.
+    const client = await pool.connect();
     try {
-        const basePrice = parseFloat(appointment.price);
-        console.log(`[PaymentController] Crediting wallet for Appointment ${appointmentId}: Base Price = ${basePrice}`);
-        await walletService.creditLockedFunds(
-            appointment.org_id,
-            basePrice,
-            appointmentId,
-            `Payment for ${appointment.service_name}`
-        );
-    } catch (err) {
-        console.error('[PaymentController] Wallet credit failed:', err.message);
-        // We still return success to the user as the payment is confirmed
-    }
+        await client.query('BEGIN');
 
-    res.status(httpStatus.OK).send({
-        success: true,
-        message: 'Payment verified and appointment confirmed',
-        appointment_id: appointmentId
-    });
+        // Lock the row — concurrent calls block here until first completes
+        const { rows } = await client.query(
+            'SELECT id, status, payment_status, price, org_id, service_name FROM appointments WHERE id = $1::uuid FOR UPDATE',
+            [appointmentId]
+        );
+
+        if (rows.length === 0) {
+            await client.query('ROLLBACK');
+            throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
+        }
+
+        const appointment = rows[0];
+
+        // ── IDEMPOTENCY: Already paid (second verify call) ──
+        if (appointment.payment_status === 'paid') {
+            await client.query('ROLLBACK');
+            console.log(`[PaymentController] Idempotent verify: Appt ${appointmentId} already confirmed. Returning success.`);
+            return res.status(httpStatus.OK).send({
+                success: true,
+                message: 'Payment already confirmed',
+                appointment_id: appointmentId
+            });
+        }
+
+        // ── CANCEL RACE GUARD: Admin cancelled after order was created ──
+        if (appointment.status === 'cancelled') {
+            await client.query('ROLLBACK');
+            console.warn(`[PaymentController] Payment verify rejected — Appt ${appointmentId} was cancelled by admin.`);
+            throw new ApiError(httpStatus.CONFLICT, 'This appointment was cancelled. Your payment will be refunded if charged.', true);
+        }
+
+        const finalPaymentId = razorpay_payment_id || `pay_mock_${Math.random().toString(36).substring(2, 10)}`;
+
+        // ── STEP 3: Confirm payment atomically ──
+        await client.query(
+            "UPDATE appointments SET payment_status = 'paid', payment_id = $1, status = 'confirmed', updated_at = NOW() WHERE id = $2::uuid",
+            [finalPaymentId, appointmentId]
+        );
+
+        // ── STEP 4: Credit locked funds to Org Wallet (base price only) ──
+        const basePrice = parseFloat(appointment.price);
+        try {
+            console.log(`[PaymentController] Crediting wallet for Appointment ${appointmentId}: Base Price = ₹${basePrice}`);
+            await walletService.creditLockedFunds(
+                appointment.org_id,
+                basePrice,
+                appointmentId,
+                `Payment for ${appointment.service_name || 'Service'}`,
+                client  // pass the same client so wallet credit is in the same transaction
+            );
+        } catch (walletErr) {
+            // Wallet credit failure should NOT block payment confirmation
+            // Log it — the settlement cron will catch any missed credits
+            console.error(`[PaymentController] Wallet credit failed for Appt ${appointmentId}:`, walletErr.message);
+        }
+
+        await client.query('COMMIT');
+
+        res.status(httpStatus.OK).send({
+            success: true,
+            message: 'Payment verified and appointment confirmed',
+            appointment_id: appointmentId
+        });
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
 });
 
 /**

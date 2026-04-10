@@ -10,6 +10,7 @@ let reminderCron;
 let settlementCron;
 let paymentCleanupCron;
 let subscriptionCleanupService;
+let keepAliveCron;
 
 try {
     socket = require('./socket/index');
@@ -46,6 +47,13 @@ try {
     subscriptionCleanupService = { initSubscriptionCleanup: () => { } };
 }
 
+try {
+    keepAliveCron = require('./cron/keepAlive');
+} catch (e) {
+    console.warn('KeepAlive cron module not loaded:', e.message);
+    keepAliveCron = { init: () => { } };
+}
+
 let server;
 
 const startServer = () => {
@@ -79,6 +87,12 @@ const startServer = () => {
         subscriptionCleanupService.initSubscriptionCleanup();
     } catch (e) {
         console.warn('Subscription Cleanup service init failed:', e.message);
+    }
+
+    try {
+        keepAliveCron.init();
+    } catch (e) {
+        console.warn('KeepAlive cron init failed:', e.message);
     }
 
     // ── Manual Test Trigger for Settlement (DEV only) ──

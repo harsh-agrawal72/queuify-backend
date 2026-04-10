@@ -29,10 +29,11 @@ const getWalletByOrgId = async (orgId) => {
  * Credit funds to a wallet (Locked state)
  * Used when a user pays for an appointment
  */
-const creditLockedFunds = async (orgId, amount, appointmentId, description = 'Appointment Booking') => {
-    const client = await pool.connect();
+const creditLockedFunds = async (orgId, amount, appointmentId, description = 'Appointment Booking', externalClient = null) => {
+    const client = externalClient || await pool.connect();
+    const manageTransaction = !externalClient;
     try {
-        await client.query('BEGIN');
+        if (manageTransaction) await client.query('BEGIN');
         
         const wallet = await getWalletByOrgId(orgId);
         
@@ -44,18 +45,18 @@ const creditLockedFunds = async (orgId, amount, appointmentId, description = 'Ap
 
         // 2. Create ledger entry
         await client.query(
-            'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5, $6)',
+            'INSERT INTO wallet_transactions (wallet_id, amount, type, status, reference_id, description) VALUES ($1, $2, $3, $4, $5::uuid, $6)',
             [wallet.id, amount, 'credit', 'locked', appointmentId, description]
         );
 
-        await client.query('COMMIT');
+        if (manageTransaction) await client.query('COMMIT');
         return true;
     } catch (e) {
-        await client.query('ROLLBACK');
+        if (manageTransaction) await client.query('ROLLBACK');
         console.error('[WalletService] Credit failed:', e.message);
         throw e;
     } finally {
-        client.release();
+        if (manageTransaction) client.release();
     }
 };
 

@@ -7,10 +7,13 @@ const poolConfig = {
     user: config.postgres.user,
     password: config.postgres.password,
     database: config.postgres.database,
+    ssl: { rejectUnauthorized: false }, // Required for Render PostgreSQL
+    // Pool tuning — prevents connection starvation under concurrent load
+    max: 10,                        // max 10 concurrent DB connections
+    idleTimeoutMillis: 30000,       // release idle connections after 30s
+    connectionTimeoutMillis: 5000,  // fail fast if no connection available in 5s
+    statement_timeout: 30000,       // kill runaway queries after 30s
 };
-
-// Enable SSL for Render database connections
-poolConfig.ssl = { rejectUnauthorized: false };
 
 const pool = new Pool(poolConfig);
 
