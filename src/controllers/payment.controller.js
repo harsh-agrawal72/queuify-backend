@@ -443,5 +443,6 @@ module.exports = {
     createPlanOrder,
     verifyPlanPayment,
     validateCoupon,
-    claimFreePlan
+    claimFreePlan,
+    claimRestoration
 };
