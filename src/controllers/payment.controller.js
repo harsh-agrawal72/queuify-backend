@@ -18,16 +18,16 @@ const { calculatePaymentBreakdown } = require('../utils/paymentHelper');
  */
 const createOrder = catchAsync(async (req, res) => {
     const { appointmentId } = req.body;
-    
+
     // 1. Fetch appointment details (must be paid)
     const appointment = await appointmentModel.getAppointmentById(appointmentId);
     if (!appointment) throw new ApiError(httpStatus.NOT_FOUND, 'Appointment not found');
-    
+
     if (appointment.status === 'cancelled') throw new ApiError(httpStatus.BAD_REQUEST, 'Appointment is cancelled');
 
     const appointmentAmount = parseFloat(appointment.price);
     console.log(`[PaymentController] Appointment ${appointmentId} price: ${appointment.price} -> parsed: ${appointmentAmount}`);
-    
+
     if (isNaN(appointmentAmount) || appointmentAmount <= 0) {
         throw new ApiError(httpStatus.BAD_REQUEST, `Invalid appointment price: ${appointment.price}`);
     }
@@ -55,7 +55,7 @@ const createOrder = catchAsync(async (req, res) => {
 
     // 3. Create Real Razorpay Order using TOTAL PAYABLE (including fees and GST)
     const totalAmount = parseFloat(finalBreakdown.totalPayable);
-    
+
     if (isNaN(totalAmount) || totalAmount <= 0) {
         console.error(`[PaymentController] Invalid total amount for appointment ${appointmentId}: ${finalBreakdown.totalPayable}`);
         throw new ApiError(httpStatus.BAD_REQUEST, `Invalid total payable amount: ${finalBreakdown.totalPayable}`);
@@ -63,11 +63,11 @@ const createOrder = catchAsync(async (req, res) => {
 
     const amountInPaise = Math.round(totalAmount * 100);
     console.log(`[PaymentController] Creating order for Appointment ${appointmentId}: Base=${appointmentAmount}, Total=${totalAmount} (${amountInPaise} paise)`);
-    
+
     try {
         const receiptId = `a_${String(appointmentId).substring(0, 30)}`;
         const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId);
-        
+
         console.log(`[PaymentController] Razorpay Order Created: ${order.id} for appt ${appointmentId}`);
         res.status(httpStatus.OK).send({
             order: {
@@ -90,17 +90,17 @@ const createOrder = catchAsync(async (req, res) => {
  * This happens after user 'pays' in the checkout modal
  */
 const verifyPayment = catchAsync(async (req, res) => {
-    const { 
-        appointmentId, 
-        razorpay_order_id, 
-        razorpay_payment_id, 
-        razorpay_signature 
+    const {
+        appointmentId,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature
     } = req.body;
 
     // 1. Verify Real Signature
     const isValid = razorpayService.verifySignature(
-        razorpay_order_id, 
-        razorpay_payment_id, 
+        razorpay_order_id,
+        razorpay_payment_id,
         razorpay_signature
     );
 
@@ -120,9 +120,9 @@ const verifyPayment = catchAsync(async (req, res) => {
         const basePrice = parseFloat(appointment.price);
         console.log(`[PaymentController] Crediting wallet for Appointment ${appointmentId}: Base Price = ${basePrice}`);
         await walletService.creditLockedFunds(
-            appointment.org_id, 
-            basePrice, 
-            appointmentId, 
+            appointment.org_id,
+            basePrice,
+            appointmentId,
             `Payment for ${appointment.service_name}`
         );
     } catch (err) {
@@ -143,7 +143,7 @@ const verifyPayment = catchAsync(async (req, res) => {
 const createPlanOrder = catchAsync(async (req, res) => {
     const { planId, couponCode, duration = 1 } = req.body;
     const months = parseInt(duration) || 1;
-    
+
     const plan = await planService.getPlanById(planId);
     if (!plan) {
         throw new ApiError(httpStatus.NOT_FOUND, 'Plan not found');
@@ -227,7 +227,7 @@ const createPlanOrder = catchAsync(async (req, res) => {
 
     const amountInPaise = Math.round(totalPayable * 100);
     const receiptId = `p_${String(planId).substring(0, 8)}_${Date.now()}`;
-    
+
     // Store duration in notes so we can retrieve it during verification
     const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId, {
         plan_id: planId,
@@ -276,7 +276,7 @@ const validateCoupon = catchAsync(async (req, res) => {
 
     // Then apply coupon discount
     const breakdown = couponService.calculateDiscount(aggregateAfterMultiMonth, coupon);
-    
+
     // Calculate GST on discounted price
     const gst = parseFloat((breakdown.finalAmount * GST_RATE).toFixed(2));
     const total = parseFloat((breakdown.finalAmount + gst).toFixed(2));
@@ -299,7 +299,7 @@ const validateCoupon = catchAsync(async (req, res) => {
 const claimFreePlan = catchAsync(async (req, res) => {
     const { planId, couponCode, duration = 1 } = req.body;
     const months = parseInt(duration) || 1;
-    
+
     // 1. Fetch Plan
     const plan = await planService.getPlanById(planId);
     if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Plan not found');
@@ -341,17 +341,17 @@ const claimFreePlan = catchAsync(async (req, res) => {
  * Step 2: Verify Plan Payment & Upgrade
  */
 const verifyPlanPayment = catchAsync(async (req, res) => {
-    const { 
-        planId, 
-        razorpay_order_id, 
-        razorpay_payment_id, 
-        razorpay_signature 
+    const {
+        planId,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature
     } = req.body;
 
     // 1. Verify Signature
     const isValid = razorpayService.verifySignature(
-        razorpay_order_id, 
-        razorpay_payment_id, 
+        razorpay_order_id,
+        razorpay_payment_id,
         razorpay_signature
     );
 
@@ -368,7 +368,7 @@ const verifyPlanPayment = catchAsync(async (req, res) => {
 
     // 3. Upgrade Plan based on target_role
     const plan = await planService.getPlanById(planId);
-    
+
     if (plan.target_role === 'admin') {
         // Ensure user is an admin of their org
         if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
@@ -394,7 +394,7 @@ const verifyPlanPayment = catchAsync(async (req, res) => {
 const claimRestoration = catchAsync(async (req, res) => {
     const { planId } = req.body;
     const userModel = require('../models/user.model');
-    
+
     // 1. Fetch current profile state
     const profile = await userModel.getUserById(req.user.id);
     if (!profile) throw new ApiError(httpStatus.NOT_FOUND, 'User not found');

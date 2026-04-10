@@ -15,10 +15,43 @@ const { authLimiter, apiLimiter } = require('./middlewares/rateLimiter');
 
 const app = express();
 
-// Trust proxy - Required for Render/Cloud environments
+// 1. Trust proxy - Required for Render/Cloud environments
 app.set('trust proxy', 1);
 
-// Explicit Global Logger
+// 2. CORS - VERY IMPORTANT: Must be FIRST to handle preflights during cold starts
+const allowedOrigins = [
+    "https://queuify.onrender.com",
+    "https://queuify.in",
+    "https://www.queuify.in",
+    "https://queuify-backend.onrender.com",
+    "http://localhost:5173",
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        // check if origin is allowed
+        const isAllowed = allowedOrigins.some(base => origin.startsWith(base));
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            console.warn(`[CORS] Rejected origin: ${origin}`);
+            callback(null, false);
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// 3. Explicit Global Logger
 app.use((req, res, next) => {
     console.log(`[Global Request] ${req.method} ${req.originalUrl}`);
     next();
@@ -42,42 +75,7 @@ if (config.env !== 'test') {
 
 
 
-const allowedOrigins = [
-    "https://queuify.onrender.com",
-    "https://queuify.in",
-    "https://www.queuify.in",
-    "https://queuify-backend.onrender.com",
-    "http://localhost:5173",
-];
-
-// Production-ready CORS setup with prefix matching for subdomains
-const corsOptions = {
-    origin: function (origin, callback) {
-        // allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) {
-            return callback(null, true);
-        }
-
-        const isAllowed = allowedOrigins.some(base => origin.startsWith(base));
-        if (isAllowed) {
-            callback(null, true);
-        } else {
-            console.warn(`[CORS] Rejected origin: ${origin}`);
-            // Do not pass an Error to the callback, as it results in a 500 error for preflight
-            callback(null, false);
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Origin'],
-    optionsSuccessStatus: 200 // Some legacy browsers choke on 204
-};
-
-app.use(cors(corsOptions));
-// Handle OPTIONS preflight for all routes
-app.options('*', cors(corsOptions));
-
-// Security headers
+// Security headers (moved after CORS)
 app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }

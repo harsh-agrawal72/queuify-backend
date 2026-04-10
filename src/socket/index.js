@@ -7,7 +7,10 @@ const init = (httpServer) => {
         cors: {
             origin: '*',
             methods: ['GET', 'POST']
-        }
+        },
+        pingTimeout: 60000,
+        pingInterval: 25000,
+        connectTimeout: 45000
     });
 
     io.on('connection', (socket) => {

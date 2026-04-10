@@ -13,7 +13,7 @@ const getRazorpayInstance = () => {
 
     const keyId = config.razorpay.keyId;
     const keySecret = config.razorpay.keySecret;
-    
+
     console.log(`[RazorpayService] Initializing instance with Key ID: ${keyId ? keyId.substring(0, 10) + '...' : 'MISSING'}`);
 
     if (!keyId || !keySecret) {
@@ -31,13 +31,13 @@ const createOrder = async (amount, currency = 'INR', receipt) => {
     try {
         const rzp = getRazorpayInstance();
         console.log(`[RazorpayService] Creating order: amount=${amount}, currency=${currency}, receipt=${receipt}`);
-        
+
         const options = {
             amount: Math.round(amount), // must be an integer (paise)
             currency,
-            receipt: receipt || `r_${Math.floor(Date.now()/1000)}`
+            receipt: receipt || `r_${Math.floor(Date.now() / 1000)}`
         };
-        
+
         console.log(`[RazorpayService] Executing rzp.orders.create with options:`, JSON.stringify(options));
         const order = await rzp.orders.create(options);
         return order;
@@ -61,7 +61,7 @@ const verifySignature = (orderId, paymentId, signature) => {
         .createHmac('sha256', config.razorpay.keySecret)
         .update(text)
         .digest('hex');
-    
+
     return generated_signature === signature;
 };
 
@@ -77,9 +77,9 @@ const refundPayment = async (paymentId, amount, notes = {}) => {
         const rzp = getRazorpayInstance();
         // Convert to paise and ensure it's an integer
         const amountInPaise = Math.round(amount * 100);
-        
+
         console.log(`[RazorpayService] Initiating refund: paymentId=${paymentId}, amount=${amount} (₹)`);
-        
+
         // Handle Mock Payments
         if (paymentId && (paymentId.startsWith('pay_mock_') || paymentId.startsWith('order_mock_') || paymentId.startsWith('rfnd_mock_'))) {
             const mockPaymentService = require('./mockPayment.service');
@@ -95,7 +95,7 @@ const refundPayment = async (paymentId, amount, notes = {}) => {
                 platform: 'queuify'
             }
         });
-        
+
         console.log(`[RazorpayService] Refund successful: refundId=${refund.id}`);
         return refund;
     } catch (error) {
@@ -169,39 +169,39 @@ const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
         } catch (err) {
             // Razorpay test mode requires account_number. If explicit account_number fails, try omitting it.
             if (err.response && err.response.data && err.response.data.error) {
-                 console.log(`[RazorpayX] First payout attempt failed: ${err.response.data.error.description}. Retrying without account_number...`);
-                 delete payoutPayload.account_number;
-                 const retryRes = await axios.post('https://api.razorpay.com/v1/payouts', payoutPayload, { headers });
-                 console.log(`[RazorpayX] Payout Successful on retry: ${retryRes.data.id}`);
-                 return retryRes.data;
+                console.log(`[RazorpayX] First payout attempt failed: ${err.response.data.error.description}. Retrying without account_number...`);
+                delete payoutPayload.account_number;
+                const retryRes = await axios.post('https://api.razorpay.com/v1/payouts', payoutPayload, { headers });
+                console.log(`[RazorpayX] Payout Successful on retry: ${retryRes.data.id}`);
+                return retryRes.data;
             }
             throw err;
         }
     } catch (error) {
         console.log(`[RazorpayX] Detection: env=${config.env}`);
         const errorMsg = error.response?.data?.error?.description || (typeof error.response?.data === 'string' ? error.response.data : null) || error.message;
-        
-        const isNotFoundError = error.response?.status === 404 || 
-                               (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('not found on the server')) ||
-                               (error.message && error.message.includes('404'));
-                               
+
+        const isNotFoundError = error.response?.status === 404 ||
+            (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('not found on the server')) ||
+            (error.message && error.message.includes('404'));
+
         const isNotProduction = config.env !== 'production';
         const isTestKey = config.razorpay.keyId && config.razorpay.keyId.startsWith('rzp_test_');
-        
+
         if (isNotFoundError && (isNotProduction || isTestKey)) {
-             console.log(`[RazorpayX] 404/Not Found Error detected in ${config.env} mode. This usually means RazorpayX is not enabled for your account.`);
-             console.log(`[RazorpayX] Error message caught: "${errorMsg}"`);
-             console.log(`[RazorpayX] Falling back to Mock Payout for development/testing...`);
-             return {
-                 id: `pout_mock_${Math.random().toString(36).substr(2, 9)}`,
-                 status: 'processed',
-                 amount: Math.round(amount * 100),
-                 currency: 'INR',
-                 reference_id: referenceId,
-                 mode: 'IMPS',
-                 purpose: 'payout',
-                 notes: { mock: true }
-             };
+            console.log(`[RazorpayX] 404/Not Found Error detected in ${config.env} mode. This usually means RazorpayX is not enabled for your account.`);
+            console.log(`[RazorpayX] Error message caught: "${errorMsg}"`);
+            console.log(`[RazorpayX] Falling back to Mock Payout for development/testing...`);
+            return {
+                id: `pout_mock_${Math.random().toString(36).substr(2, 9)}`,
+                status: 'processed',
+                amount: Math.round(amount * 100),
+                currency: 'INR',
+                reference_id: referenceId,
+                mode: 'IMPS',
+                purpose: 'payout',
+                notes: { mock: true }
+            };
         }
 
         console.error('[RazorpayX] Complete Payout Flow Error:', errorMsg);
