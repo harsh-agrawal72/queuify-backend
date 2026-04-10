@@ -69,16 +69,16 @@ const updatePlan = async (id, updateBody) => {
     return res.rows[0];
 };
 
-const assignPlanToUser = async (userId, planId) => {
+const assignPlanToUser = async (userId, planId, months = 1) => {
     // 1. Verify plan exists and is for users
     const plan = await getPlanById(planId);
     if (!plan || plan.target_role !== 'user') {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid user plan');
     }
 
-    // 2. Calculate Expiry (Monthly: 30 days, Free: 365 days)
+    // 2. Calculate Expiry (Monthly: Dynamic, Free: 365 days)
     const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? "NOW() + INTERVAL '30 days'" : "NOW() + INTERVAL '365 days'";
+    const expiryDate = isPaid ? `NOW() + INTERVAL '${parseInt(months)} months'` : "NOW() + INTERVAL '365 days'";
 
     // 3. Update user
     const res = await pool.query(
@@ -98,16 +98,16 @@ const assignPlanToUser = async (userId, planId) => {
     return res.rows[0];
 };
 
-const assignPlanToOrg = async (orgId, planId) => {
+const assignPlanToOrg = async (orgId, planId, months = 1) => {
     // 1. Verify plan exists and is for admins
     const plan = await getPlanById(planId);
     if (!plan || plan.target_role !== 'admin') {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid organization plan');
     }
 
-    // 2. Calculate Expiry (Monthly: 30 days, Free: 365 days)
+    // 2. Calculate Expiry (Monthly: Dynamic, Free: 365 days)
     const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? "NOW() + INTERVAL '30 days'" : "NOW() + INTERVAL '365 days'";
+    const expiryDate = isPaid ? `NOW() + INTERVAL '${parseInt(months)} months'` : "NOW() + INTERVAL '365 days'";
 
     // 3. Update organization
     const res = await pool.query(

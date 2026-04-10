@@ -43,6 +43,22 @@ const getPlanHardDefaults = (planName) => {
         features.has_patient_history = true;
     }
 
+    // 3. Hierarchical Analytics Gating
+    if (pName === 'free') {
+        features.analytics = 'locked';
+    } else if (pName === 'starter') {
+        features.analytics = 'basic';
+    } else if (pName === 'professional') {
+        features.analytics = 'standard';
+        features.has_report_download = true;
+    } else if (pName === 'enterprise') {
+        features.analytics = 'premium';
+        features.has_report_download = true;
+        features.has_customer_insight = true;
+        features.has_smart_insights = true;
+        features.has_resource_ranking = true;
+    }
+
     return features;
 };
 

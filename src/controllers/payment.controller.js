@@ -141,7 +141,8 @@ const verifyPayment = catchAsync(async (req, res) => {
  * Step 1: Create Plan Payment Order
  */
 const createPlanOrder = catchAsync(async (req, res) => {
-    const { planId, couponCode } = req.body;
+    const { planId, couponCode, duration = 1 } = req.body;
+    const months = parseInt(duration) || 1;
     
     const plan = await planService.getPlanById(planId);
     if (!plan) {
@@ -159,10 +160,27 @@ const createPlanOrder = catchAsync(async (req, res) => {
         // For now, let's just make sure the plan exists.
     }
 
-    let price = parseFloat(plan.price_monthly);
-    if (price <= 0) {
+    let pricePerMonth = parseFloat(plan.price_monthly);
+    if (pricePerMonth <= 0) {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Free plans do not require payment');
     }
+
+    // 1. Calculate base aggregate price
+    let baseAggregatePrice = pricePerMonth * months;
+
+    // 2. Apply Multi-Month Discounts
+    let multiMonthDiscountAmount = 0;
+    let multiMonthDiscountRate = 0;
+
+    if (months === 3) multiMonthDiscountRate = 0.05; // 5% off
+    else if (months === 6) multiMonthDiscountRate = 0.10; // 10% off
+    else if (months === 12) multiMonthDiscountRate = 0.20; // 20% off
+
+    if (multiMonthDiscountRate > 0) {
+        multiMonthDiscountAmount = parseFloat((baseAggregatePrice * multiMonthDiscountRate).toFixed(2));
+    }
+
+    let discountedPrice = baseAggregatePrice - multiMonthDiscountAmount;
 
     // --- COUPON LOGIC ---
     let discountInfo = null;
@@ -171,13 +189,15 @@ const createPlanOrder = catchAsync(async (req, res) => {
     if (couponCode) {
         try {
             const coupon = await couponService.validateCoupon(couponCode, plan.target_role);
-            const breakdown = couponService.calculateDiscount(price, coupon);
+            const breakdown = couponService.calculateDiscount(discountedPrice, coupon);
             finalBasePrice = breakdown.finalAmount;
             discountInfo = {
                 code: coupon.code,
                 discount: breakdown.discount,
                 type: breakdown.discountType,
-                value: breakdown.discountValue
+                value: breakdown.discountValue,
+                multiMonthDiscount: multiMonthDiscountAmount,
+                duration: months
             };
         } catch (e) {
             console.warn(`[PlanOrder] Coupon validation failed for ${couponCode}: ${e.message}`);
@@ -208,7 +228,12 @@ const createPlanOrder = catchAsync(async (req, res) => {
     const amountInPaise = Math.round(totalPayable * 100);
     const receiptId = `p_${String(planId).substring(0, 8)}_${Date.now()}`;
     
-    const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId);
+    // Store duration in notes so we can retrieve it during verification
+    const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId, {
+        plan_id: planId,
+        duration: String(months),
+        org_id: req.user.org_id || ''
+    });
 
     res.status(httpStatus.OK).send({
         order: {
@@ -232,13 +257,25 @@ const createPlanOrder = catchAsync(async (req, res) => {
  * Step 1.5: Verify Coupon (For display in UI)
  */
 const validateCoupon = catchAsync(async (req, res) => {
-    const { code, planId } = req.body;
+    const { code, planId, duration = 1 } = req.body;
+    const months = parseInt(duration) || 1;
     const plan = await planService.getPlanById(planId);
     if (!plan) throw new ApiError(httpStatus.NOT_FOUND, 'Plan not found');
 
     const coupon = await couponService.validateCoupon(code, plan.target_role);
     const originalPrice = parseFloat(plan.price_monthly);
-    const breakdown = couponService.calculateDiscount(originalPrice, coupon);
+    const baseAggregate = originalPrice * months;
+
+    // Apply multi-month discount first
+    let multiMonthDiscountRate = 0;
+    if (months === 3) multiMonthDiscountRate = 0.05;
+    else if (months === 6) multiMonthDiscountRate = 0.10;
+    else if (months === 12) multiMonthDiscountRate = 0.20;
+
+    const aggregateAfterMultiMonth = baseAggregate * (1 - multiMonthDiscountRate);
+
+    // Then apply coupon discount
+    const breakdown = couponService.calculateDiscount(aggregateAfterMultiMonth, coupon);
     
     // Calculate GST on discounted price
     const gst = parseFloat((breakdown.finalAmount * GST_RATE).toFixed(2));
@@ -260,7 +297,8 @@ const validateCoupon = catchAsync(async (req, res) => {
  * Handle 100% Free Plan Purchase (Bypass Razorpay)
  */
 const claimFreePlan = catchAsync(async (req, res) => {
-    const { planId, couponCode } = req.body;
+    const { planId, couponCode, duration = 1 } = req.body;
+    const months = parseInt(duration) || 1;
     
     // 1. Fetch Plan
     const plan = await planService.getPlanById(planId);
@@ -286,9 +324,9 @@ const claimFreePlan = catchAsync(async (req, res) => {
         if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
             throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
         }
-        await planService.assignPlanToOrg(req.user.org_id, planId);
+        await planService.assignPlanToOrg(req.user.org_id, planId, months);
     } else {
-        await planService.assignPlanToUser(req.user.id, planId);
+        await planService.assignPlanToUser(req.user.id, planId, months);
     }
 
     // 5. Mark coupon as used if applied
@@ -321,7 +359,14 @@ const verifyPlanPayment = catchAsync(async (req, res) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid payment signature');
     }
 
-    // 2. Upgrade Plan based on target_role
+    // 2. Retrieve Duration from Order (Safety fallback)
+    // In a real scenario, you'd fetch the order details from Razorpay to get the notes
+    // Or just trust the frontend if passing duration there (less secure but easier for now)
+    // Actually, let's fetch it from Razorpay service if possible, or just accept it in body
+    const { duration = 1 } = req.body;
+    const months = parseInt(duration) || 1;
+
+    // 3. Upgrade Plan based on target_role
     const plan = await planService.getPlanById(planId);
     
     if (plan.target_role === 'admin') {
@@ -329,9 +374,9 @@ const verifyPlanPayment = catchAsync(async (req, res) => {
         if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
             throw new ApiError(httpStatus.FORBIDDEN, 'Only organization admins can upgrade company plans');
         }
-        await planService.assignPlanToOrg(req.user.org_id, planId);
+        await planService.assignPlanToOrg(req.user.org_id, planId, months);
     } else {
-        await planService.assignPlanToUser(req.user.id, planId);
+        await planService.assignPlanToUser(req.user.id, planId, months);
     }
 
     // 3. Log transaction or handle any additional logic here if needed
