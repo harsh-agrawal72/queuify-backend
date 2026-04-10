@@ -179,7 +179,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         [orgId]
     );
     const planFeatures = orgRes.rows[0]?.features || {};
-    const hasAdvancedAnalytics = planFeatures.analytics === 'advanced' || planFeatures.analytics === 'enterprise';
+    const analyticsLevel = planFeatures.analytics || 'basic';
+    const hasStandardAnalytics = ['standard', 'premium'].includes(analyticsLevel);
+    const hasPremiumAnalytics = analyticsLevel === 'premium';
 
     const startDate = sd ? new Date(sd) : new Date(new Date().setDate(new Date().getDate() - 7));
     const endDateEnd = ed ? new Date(ed) : new Date();
@@ -535,10 +537,10 @@ const getAnalytics = async (orgId, filters = {}) => {
         // Charts
         // Charts (Gated)
         dailyBookings: dailyStats || [],
-        bookingsByService: hasAdvancedAnalytics ? (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })) : [],
-        bookingsByResource: hasAdvancedAnalytics ? (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })) : [],
+        bookingsByService: hasStandardAnalytics ? (byServiceRes.rows || []).map(r => ({ name: r.service_name || 'Other', value: safeNum(parseInt(r.count)) })) : [],
+        bookingsByResource: hasStandardAnalytics ? (byResourceRes.rows || []).map(r => ({ name: r.resource_name || 'Unassigned', value: safeNum(parseInt(r.count)) })) : [],
         statusDistribution: statusDistribution || [],
-        peakHoursHeatmap: hasAdvancedAnalytics ? (heatmapRes.rows || []).map(r => {
+        peakHoursHeatmap: hasStandardAnalytics ? (heatmapRes.rows || []).map(r => {
             const d = parseInt(r.day);
             const h = parseInt(r.hour);
             const c = parseInt(r.count);
@@ -549,7 +551,7 @@ const getAnalytics = async (orgId, filters = {}) => {
             };
         }) : [],
         // Insights (Gated)
-        insights: hasAdvancedAnalytics ? (insights || []) : [],
+        insights: hasPremiumAnalytics ? (insights || []) : [],
         // Meta
         dateRange: {
             start: startStr,
@@ -1459,8 +1461,8 @@ const getPredictiveInsights = async (orgId) => {
         [orgId]
     );
     const features = orgRes.rows[0]?.features || {};
-    if (!features.has_premium_features) {
-        throw new ApiError(httpStatus.FORBIDDEN, 'Predictive insights are only available in Professional and Enterprise plans.');
+    if (features.analytics !== 'premium') {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Predictive insights require an Enterprise plan');
     }
 
     try {
@@ -1667,7 +1669,7 @@ const getUserHistory = async (orgId, userId) => {
         [orgId]
     );
     const features = orgRes.rows[0]?.features || {};
-    if (!features.has_customer_insight) {
+    if (features.analytics !== 'premium' && !features.has_customer_insight) {
         return []; // Restricted
     }
 
@@ -1719,8 +1721,8 @@ const getResourcePerformance = async (orgId, resourceId) => {
         [orgId]
     );
     const features = orgRes.rows[0]?.features || {};
-    if (!features.has_premium_features) {
-        throw new ApiError(httpStatus.FORBIDDEN, 'Resource performance analytics are only available in Professional and Enterprise plans.');
+    if (features.analytics !== 'premium' && !features.has_resource_ranking) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Resource performance stats require an Enterprise plan');
     }
 
     // Calculate average service time (in minutes) for this resource over last 30 days
