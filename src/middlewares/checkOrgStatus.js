@@ -1,8 +1,7 @@
-const httpStatus = require('../utils/httpStatus');
-const ApiError = require('../utils/ApiError');
 const { pool } = require('../config/db');
+const catchAsync = require('../utils/catchAsync');
 
-const checkOrgStatus = async (req, res, next) => {
+const checkOrgStatus = catchAsync(async (req, res, next) => {
     // Skip for superadmins
     if (req.user && req.user.role === 'superadmin') {
         return next();
@@ -26,6 +25,6 @@ const checkOrgStatus = async (req, res, next) => {
     }
 
     next();
-};
+});
 
 module.exports = checkOrgStatus;

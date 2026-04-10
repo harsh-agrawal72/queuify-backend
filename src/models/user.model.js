@@ -238,7 +238,7 @@ const getUserById = async (id) => {
     if (user.org_id) {
         try {
             const orgRes = await pool.query(
-                'SELECT type as org_type, name as org_name, is_setup_completed as org_is_setup_completed, is_onboarded as org_is_onboarded, status as org_status, plan_id as org_plan_id, subscription_expiry FROM organizations WHERE id = $1',
+                'SELECT type as org_type, name as org_name, is_setup_completed as org_is_setup_completed, is_onboarded as org_is_onboarded, status as org_status, plan_id as org_plan_id, subscription_expiry, last_paid_plan_id, last_paid_plan_expiry FROM organizations WHERE id = $1',
                 [user.org_id]
             );
             if (orgRes.rows[0]) {
@@ -370,6 +370,7 @@ module.exports = {
     updateUserLastLogin,
     updateUserStatus,
     updateUserByType,
+    getPlanHardDefaults,
     getAdminsByOrg: async (orgId) => {
         const result = await pool.query(
             'SELECT id, name, email FROM users WHERE org_id = $1 AND role = $2 AND is_suspended = FALSE',

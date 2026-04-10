@@ -19,6 +19,24 @@ const errorConverter = (err, req, res, next) => {
 
 // eslint-disable-next-line no-unused-vars
 const errorHandler = (err, req, res, next) => {
+    // CORS Safety Net: Manually set headers immediately in case of pre-middleware errors
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+        "https://queuify.onrender.com",
+        "https://queuify.in",
+        "https://www.queuify.in",
+        "https://queuify-backend.onrender.com",
+        "http://localhost:5173"
+    ];
+
+    if (origin) {
+        const isAllowed = allowedOrigins.some(base => origin.startsWith(base));
+        if (isAllowed) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+    }
+
     let { statusCode, message } = err;
 
     // Ensure statusCode is always a valid HTTP status
@@ -42,20 +60,6 @@ const errorHandler = (err, req, res, next) => {
 
     if (config.env === 'development') {
         console.error(err);
-    }
-
-    // CORS Safety Net: Manually set headers in case they were missed by the middleware
-    const origin = req.headers.origin;
-    const allowedOrigins = [
-        "https://queuify.onrender.com",
-        "https://queuify.in",
-        "https://www.queuify.in",
-        "http://localhost:5173"
-    ];
-
-    if (origin && allowedOrigins.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
 
     res.status(statusCode).json(response);

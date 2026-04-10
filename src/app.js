@@ -46,22 +46,31 @@ const allowedOrigins = [
     "https://queuify.onrender.com",
     "https://queuify.in",
     "https://www.queuify.in",
-    "http://localhost:5173", // optional for local dev
+    "https://queuify-backend.onrender.com",
+    "http://localhost:5173",
 ];
 
-// Production-ready CORS setup
+// Production-ready CORS setup with prefix matching for subdomains
 const corsOptions = {
     origin: function (origin, callback) {
         // allow requests with no origin (like mobile apps or curl requests)
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        const isAllowed = allowedOrigins.some(base => origin.startsWith(base));
+        if (isAllowed) {
             callback(null, true);
         } else {
-            callback(new Error("Not allowed by CORS: " + origin));
+            console.warn(`[CORS] Rejected origin: ${origin}`);
+            // Do not pass an Error to the callback, as it results in a 500 error for preflight
+            callback(null, false);
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Origin'],
+    optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 };
 
 app.use(cors(corsOptions));

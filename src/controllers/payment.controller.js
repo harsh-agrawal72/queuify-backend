@@ -388,6 +388,55 @@ const verifyPlanPayment = catchAsync(async (req, res) => {
     });
 });
 
+/**
+ * Handle Subscription Restoration (Restoring a previously paid plan)
+ */
+const claimRestoration = catchAsync(async (req, res) => {
+    const { planId } = req.body;
+    const userModel = require('../models/user.model');
+    
+    // 1. Fetch current profile state
+    const profile = await userModel.getUserById(req.user.id);
+    if (!profile) throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+
+    // 2. Determine if it's an Org or User restoration
+    const isOrg = req.user.role === 'admin' || req.user.role === 'superadmin';
+    const lastPaidPlanId = isOrg ? profile.last_paid_plan_id : profile.last_paid_plan_id; // Both populated in SELECT * or hydration
+    const expiry = isOrg ? profile.last_paid_plan_expiry : profile.last_paid_plan_expiry;
+
+    // 3. Validation
+    if (!lastPaidPlanId || lastPaidPlanId !== planId) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'No previous subscription found for this plan');
+    }
+
+    if (!expiry || new Date(expiry) < new Date()) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Your previous subscription for this plan has expired. Please buy a new one.');
+    }
+
+    // 4. Restore the plan (bypass payment)
+    if (isOrg) {
+        const orgRes = await pool.query(
+            'SELECT type as org_type, name as org_name, is_setup_completed as org_is_setup_completed, is_onboarded as org_is_onboarded, status as org_status, plan_id as org_plan_id, subscription_expiry, last_paid_plan_id, last_paid_plan_expiry FROM organizations WHERE id = $1',
+            [req.user.org_id]
+        );
+        await pool.query(
+            'UPDATE organizations SET plan_id = $1, subscription_expiry = $2, updated_at = NOW() WHERE id = $3',
+            [planId, expiry, req.user.org_id]
+        );
+    } else {
+        await pool.query(
+            'UPDATE users SET plan_id = $1, subscription_expiry = $2, updated_at = NOW() WHERE id = $3',
+            [planId, expiry, req.user.id]
+        );
+    }
+
+    res.status(httpStatus.OK).send({
+        success: true,
+        message: 'Subscription restored successfully!',
+        plan_id: planId
+    });
+});
+
 module.exports = {
     createOrder,
     verifyPayment,

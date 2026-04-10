@@ -149,7 +149,7 @@ const getTodayQueue = async (orgId) => {
                     ELSE (SELECT CONCAT(a.service_id, '_', COALESCE(sl.start_time::text, DATE(a.created_at)::text)))
                 END
             )
-            ORDER BY a.created_at ASC
+            ORDER BY (CASE WHEN a.is_priority = TRUE THEN 0 ELSE 1 END), a.created_at ASC
         ) as queue_number
         FROM appointments a
         JOIN services svc ON a.service_id = svc.id
@@ -162,7 +162,7 @@ const getTodayQueue = async (orgId) => {
             OR (a.slot_id IS NULL AND a.created_at >= CURRENT_DATE AND a.created_at < CURRENT_DATE + interval '1 day')
         )
         AND a.status NOT IN ('cancelled', 'pending_payment')
-        ORDER BY a.created_at ASC
+        ORDER BY (CASE WHEN a.is_priority = TRUE THEN 0 ELSE 1 END), a.created_at ASC
     `, [orgId]);
     return res.rows;
 };
@@ -363,7 +363,8 @@ const getAnalytics = async (orgId, filters = {}) => {
         byResourceRes,    // 8
         heatmapRes,       // 9
         dailyUtilRes,     // 10 (New)
-        dailyBookedRes    // 11 (New)
+        dailyBookedRes,    // 11 (New)
+        resourcePerfRes    // 12 (New)
     ] = await Promise.all([
         query(kpiQuery, baseParams),
         query(kpiQuery, prevParams),
@@ -376,7 +377,23 @@ const getAnalytics = async (orgId, filters = {}) => {
         query(byResourceQuery, baseParams),
         query(heatmapQuery, baseParams),
         query(dailyUtilQuery, baseParams),
-        query(dailyBookedQuery, baseParams)
+        query(dailyBookedQuery, baseParams),
+        // 12. Resource Performance (Premium Only)
+        hasPremiumAnalytics 
+            ? query(`
+                SELECT 
+                    r.id,
+                    r.name,
+                    COUNT(a.id) FILTER (WHERE a.status = 'completed') as completed_count,
+                    COUNT(a.id) as total_count,
+                    ROUND(AVG(EXTRACT(EPOCH FROM (a.updated_at - a.created_at))/60))::int as avg_service_time
+                FROM resources r
+                LEFT JOIN appointments a ON r.id = a.resource_id AND a.created_at::date >= $2::date AND a.created_at::date <= $3::date
+                WHERE r.org_id = $1 AND r.is_active = TRUE
+                GROUP BY r.id, r.name
+                ORDER BY completed_count DESC
+            `, baseParams)
+            : Promise.resolve({ rows: [] })
     ]);
 
     // ── KPI Processing ──
@@ -562,6 +579,15 @@ const getAnalytics = async (orgId, filters = {}) => {
         }) : [],
         // Insights (Gated)
         insights: hasPremiumAnalytics ? (insights || []) : [],
+        // Premium Resource Performance
+        resourcePerformance: hasPremiumAnalytics ? (resourcePerfRes?.rows || []).map(r => ({
+            id: r.id,
+            name: r.name,
+            completed: parseInt(r.completed_count) || 0,
+            total: parseInt(r.total_count) || 0,
+            efficiency: parseInt(r.avg_service_time) || 0,
+            rate: r.total_count > 0 ? Math.round((parseInt(r.completed_count) / parseInt(r.total_count)) * 100) : 0
+        })) : [],
         // Meta
         dateRange: {
             start: startStr,
@@ -606,20 +632,21 @@ const createSlot = async (orgId, slotBody) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'End time must be after start time');
     }
 
-    // Use default resource if not provided (for migration compatibility)
-    let targetResourceId = resource_id;
-    if (!targetResourceId) {
-        const defaultRes = await query('SELECT id FROM resources WHERE org_id = $1 AND name = $2', [orgId, 'General Staff']);
-        if (defaultRes.rows.length > 0) {
-            targetResourceId = defaultRes.rows[0].id;
+    // Fetch resource capacity if not explicitly provided
+    let finalCapacity = max_capacity;
+    if (targetResourceId && (!finalCapacity || finalCapacity <= 0)) {
+        const resCap = await query('SELECT concurrent_capacity FROM resources WHERE id = $1', [targetResourceId]);
+        if (resCap.rows.length > 0) {
+            finalCapacity = resCap.rows[0].concurrent_capacity;
         }
     }
+    if (!finalCapacity || finalCapacity <= 0) finalCapacity = 1;
 
     const res = await query(
         `INSERT INTO slots (org_id, start_time, end_time, max_capacity, booked_count, resource_id, is_active)
         VALUES ($1, $2::timestamptz, $3::timestamptz, $4, 0, $5, TRUE)
         RETURNING *`,
-        [orgId, start_time, end_time, max_capacity, targetResourceId]
+        [orgId, start_time, end_time, finalCapacity, targetResourceId]
     );
     const newSlot = res.rows[0];
 
@@ -1206,7 +1233,7 @@ const getLiveQueue = async (orgId, date) => {
                         ELSE CONCAT(a.service_id::text, '_', a.slot_id::text)
                     END
                 )
-                ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC
+                ORDER BY COALESCE(sl.start_time, a.created_at) ASC, (CASE WHEN a.is_priority = TRUE THEN 0 ELSE 1 END), a.created_at ASC
             ) as queue_number
          FROM appointments a
          LEFT JOIN users u ON a.user_id = u.id
@@ -1220,7 +1247,7 @@ const getLiveQueue = async (orgId, date) => {
              OR (a.slot_id IS NULL AND COALESCE(a.preferred_date, a.created_at::date) = $2::date)
          )
          AND a.status IN ('pending', 'confirmed', 'serving', 'completed', 'no_show', 'waitlisted_urgent')
-         ORDER BY COALESCE(sl.start_time, a.created_at) ASC, a.created_at ASC`,
+         ORDER BY COALESCE(sl.start_time, a.created_at) ASC, (CASE WHEN a.is_priority = TRUE THEN 0 ELSE 1 END), a.created_at ASC`,
         [orgId, queryDate]
     );
 
@@ -1764,21 +1791,13 @@ const getResourcePerformance = async (orgId, resourceId) => {
     let avgSpeed = parseFloat(stats.avg_speed);
     let isHistorical = true;
 
-    if (isNaN(avgSpeed)) {
-        // Fallback to average estimated service time from linked services
-        const servicesRes = await query(`
-            SELECT AVG(s.estimated_service_time) as avg_est
-            FROM services s
-            JOIN resource_services rs ON s.id = rs.service_id
-            WHERE rs.resource_id = $1 AND s.org_id = $2 AND s.is_active = TRUE
-        `, [resourceId, orgId]);
-        avgSpeed = parseFloat(servicesRes.rows[0]?.avg_est);
-        isHistorical = false;
-    }
+    const resourceInfoRes = await query('SELECT concurrent_capacity FROM resources WHERE id = $1', [resourceId]);
+    const concurrent_capacity = resourceInfoRes.rows[0]?.concurrent_capacity || 1;
 
     return {
         resourceId,
         avg_service_time: !isNaN(avgSpeed) ? Math.round(avgSpeed) : 15,
+        concurrent_capacity,
         completed_count: parseInt(stats.completed_count) || 0,
         isHistorical
     };

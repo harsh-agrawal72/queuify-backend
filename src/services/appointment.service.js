@@ -659,11 +659,12 @@ const getUserAppointments = async (userId) => {
                 const avgTime = (await getSystemAverageSpeed(appt.service_id, appt.resource_id)) || appt.estimated_service_time || 15;
                 const nominalAvg = appt.estimated_service_time || 15;
 
-                // Simplified wait time for dashboard (can be further refined if start_time is far in future)
-                // For now, let's use the logic: Wait = (People Ahead) * avgTime
-                // If it's serving, it's roughly avgTime / 2 (on average)
+                // Factor in concurrent capacity for parallel service
+                const resCapInfo = await pool.query('SELECT concurrent_capacity FROM resources WHERE id = $1', [appt.resource_id]);
+                const concurrent_capacity = resCapInfo.rows[0]?.concurrent_capacity || 1;
+                
                 const peopleAhead = parseInt(appt.people_ahead) || 0;
-                let estWait = peopleAhead * avgTime;
+                let estWait = (peopleAhead / concurrent_capacity) * avgTime;
 
                 // If there's a drift (AI vs Nominal), calculate it
                 const nominalWait = peopleAhead * nominalAvg;
@@ -788,6 +789,10 @@ const getQueueStatus = async (appointmentId) => {
         const now = new Date();
         let waitMinutesTillStart = 0;
 
+        // Fetch concurrent capacity
+        const resCapRes = await pool.query('SELECT concurrent_capacity FROM resources WHERE id = $1', [appointment.resource_id]);
+        const concurrent_capacity = resCapRes.rows[0]?.concurrent_capacity || 1;
+
         if (appointment.status === 'serving') {
             estimatedWaitMinutes = 0;
         } else if (servingEntry && servingEntry.serving_started_at) {
@@ -797,16 +802,18 @@ const getQueueStatus = async (appointmentId) => {
                 const timeSpent = (now - startTime) / 60000;
                 const remainingTime = Math.max(0, avgTime - timeSpent);
                 const middlePeople = Math.max(0, myRank - servingRank - 1);
-                estimatedWaitMinutes = remainingTime + (middlePeople * avgTime);
+                // Parallelize the wait: divide middle people by capacity
+                estimatedWaitMinutes = (remainingTime / concurrent_capacity) + ((middlePeople / concurrent_capacity) * avgTime);
             } else {
-                estimatedWaitMinutes = peopleAhead * avgTime;
+                estimatedWaitMinutes = (peopleAhead / concurrent_capacity) * avgTime;
             }
         } else {
             const baseDate = referenceDate ? new Date(referenceDate) : now;
             const baseStartTime = isNaN(baseDate.getTime()) || baseDate < now ? now : baseDate;
             waitMinutesTillStart = (baseStartTime - now) / 60000;
             const peopleWaitingAhead = Math.max(0, myRank - 1);
-            estimatedWaitMinutes = Math.max(0, waitMinutesTillStart) + (peopleWaitingAhead * avgTime);
+            // Parallelize the wait
+            estimatedWaitMinutes = Math.max(0, waitMinutesTillStart) + ((peopleWaitingAhead / concurrent_capacity) * avgTime);
         }
 
         if (isNaN(estimatedWaitMinutes)) estimatedWaitMinutes = peopleAhead * avgTime;

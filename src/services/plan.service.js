@@ -81,15 +81,14 @@ const assignPlanToUser = async (userId, planId, months = 1) => {
     const expiryDate = isPaid ? `NOW() + INTERVAL '${parseInt(months)} months'` : "NOW() + INTERVAL '365 days'";
 
     // 3. Update user
-    const res = await pool.query(
-        `UPDATE users 
-         SET plan_id = $1, 
-             subscription_expiry = ${expiryDate},
-             updated_at = NOW() 
-         WHERE id = $2 
-         RETURNING plan_id, subscription_expiry`,
-        [planId, userId]
-    );
+    let updateQuery = `UPDATE users SET plan_id = $1, subscription_expiry = ${expiryDate}, updated_at = NOW()`;
+    const updateParams = [planId, userId];
+
+    if (isPaid) {
+        updateQuery = `UPDATE users SET plan_id = $1, subscription_expiry = ${expiryDate}, last_paid_plan_id = $1, last_paid_plan_expiry = ${expiryDate}, updated_at = NOW()`;
+    }
+
+    const res = await pool.query(updateQuery + ' WHERE id = $2 RETURNING plan_id, subscription_expiry', updateParams);
 
     if (res.rows.length === 0) {
         throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
@@ -110,15 +109,14 @@ const assignPlanToOrg = async (orgId, planId, months = 1) => {
     const expiryDate = isPaid ? `NOW() + INTERVAL '${parseInt(months)} months'` : "NOW() + INTERVAL '365 days'";
 
     // 3. Update organization
-    const res = await pool.query(
-        `UPDATE organizations 
-         SET plan_id = $1, 
-             subscription_expiry = ${expiryDate},
-             updated_at = NOW() 
-         WHERE id = $2 
-         RETURNING plan_id, subscription_expiry`,
-        [planId, orgId]
-    );
+    let updateQuery = `UPDATE organizations SET plan_id = $1, subscription_expiry = ${expiryDate}, updated_at = NOW()`;
+    const updateParams = [planId, orgId];
+
+    if (isPaid) {
+        updateQuery = `UPDATE organizations SET plan_id = $1, subscription_expiry = ${expiryDate}, last_paid_plan_id = $1, last_paid_plan_expiry = ${expiryDate}, updated_at = NOW()`;
+    }
+
+    const res = await pool.query(updateQuery + ' WHERE id = $2 RETURNING plan_id, subscription_expiry', updateParams);
 
     if (res.rows.length === 0) {
         throw new ApiError(httpStatus.NOT_FOUND, 'Organization not found');
