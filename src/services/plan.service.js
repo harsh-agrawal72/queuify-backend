@@ -76,9 +76,9 @@ const assignPlanToUser = async (userId, planId) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid user plan');
     }
 
-    // 2. Calculate Expiry (30 days for paid plans, NULL for free)
+    // 2. Calculate Expiry (Monthly: 30 days, Free: 365 days)
     const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? 'NOW() + INTERVAL \'30 days\'' : 'NULL';
+    const expiryDate = isPaid ? "NOW() + INTERVAL '30 days'" : "NOW() + INTERVAL '365 days'";
 
     // 3. Update user
     const res = await pool.query(
@@ -105,9 +105,9 @@ const assignPlanToOrg = async (orgId, planId) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid organization plan');
     }
 
-    // 2. Calculate Expiry (30 days for paid plans, NULL for free)
+    // 2. Calculate Expiry (Monthly: 30 days, Free: 365 days)
     const isPaid = parseFloat(plan.price_monthly) > 0;
-    const expiryDate = isPaid ? "NOW() + INTERVAL '30 days'" : 'NULL';
+    const expiryDate = isPaid ? "NOW() + INTERVAL '30 days'" : "NOW() + INTERVAL '365 days'";
 
     // 3. Update organization
     const res = await pool.query(

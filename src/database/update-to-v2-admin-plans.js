@@ -24,7 +24,7 @@ const updatePlans = async () => {
                 features: {
                     max_resources: 1,
                     max_admins: 1,
-                    analytics: 'basic',
+                    analytics: 'locked',
                     has_custom_branding: false,
                     has_top_position: false,
                     has_one_on_one_support: false,
@@ -40,7 +40,7 @@ const updatePlans = async () => {
                 features: {
                     max_resources: 2,
                     max_admins: 1,
-                    analytics: 'basic',
+                    analytics: 'locked',
                     has_custom_branding: false,
                     has_top_position: false,
                     has_one_on_one_support: false,
@@ -56,7 +56,7 @@ const updatePlans = async () => {
                 features: {
                     max_resources: 5,
                     max_admins: 2,
-                    analytics: 'advanced',
+                    analytics: 'basic',
                     has_custom_branding: true,
                     has_top_position: false,
                     has_one_on_one_support: false,

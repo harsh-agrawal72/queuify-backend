@@ -51,12 +51,14 @@ const forceUpdateV3 = catchAsync(async (req, res) => {
             features: {
                 max_resources: 1,
                 max_admins: 1,
-                analytics: 'basic',
+                analytics: 'locked',
                 has_basic_features: true,
                 has_custom_branding: false,
                 has_top_position: false,
-                has_one_on_one_support: false,
-                has_customer_insight: false,
+                has_one_on_one_support: true,
+                has_customer_insight: true,
+                has_slot_copy: false,
+                has_patient_history: false,
                 has_premium_features: false
             }
         },
@@ -68,12 +70,14 @@ const forceUpdateV3 = catchAsync(async (req, res) => {
             features: {
                 max_resources: 2,
                 max_admins: 1,
-                analytics: 'basic',
+                analytics: 'locked',
                 has_basic_features: true,
-                has_custom_branding: false,
+                has_custom_branding: true,
                 has_top_position: false,
-                has_one_on_one_support: false,
-                has_customer_insight: false,
+                has_one_on_one_support: true,
+                has_customer_insight: true,
+                has_slot_copy: true,
+                has_patient_history: false,
                 has_premium_features: false
             }
         },
@@ -85,12 +89,15 @@ const forceUpdateV3 = catchAsync(async (req, res) => {
             features: {
                 max_resources: 5,
                 max_admins: 2,
-                analytics: 'advanced',
+                analytics: 'basic',
                 has_basic_features: true,
                 has_custom_branding: true,
                 has_top_position: false,
-                has_one_on_one_support: false,
-                has_customer_insight: false,
+                has_one_on_one_support: true,
+                has_customer_insight: true,
+                has_slot_copy: true,
+                has_patient_history: true,
+                has_gallery_upload: true,
                 has_premium_features: true
             }
         },
@@ -108,6 +115,9 @@ const forceUpdateV3 = catchAsync(async (req, res) => {
                 has_top_position: true,
                 has_one_on_one_support: true,
                 has_customer_insight: true,
+                has_slot_copy: true,
+                has_patient_history: true,
+                has_gallery_upload: true,
                 has_premium_features: true
             }
         }
