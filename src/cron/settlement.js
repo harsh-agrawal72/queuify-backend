@@ -78,7 +78,7 @@ const runSettlement = async () => {
                 // Mark as completed/settled (Case D: No-show earns admin money)
                 // If it was still 'confirmed', we auto-complete it.
                 await pool.query(
-                    "UPDATE appointments SET status = CASE WHEN status = 'no_show' THEN 'no_show' ELSE 'completed' END, updated_at = NOW() WHERE id = $1",
+                    "UPDATE appointments SET status = (CASE WHEN status = 'no_show' THEN 'no_show' ELSE 'completed' END)::appointment_status, updated_at = NOW() WHERE id = $1",
                     [row.appointment_id]
                 );
                 await walletService.releaseFunds(row.org_id, row.appointment_id);
