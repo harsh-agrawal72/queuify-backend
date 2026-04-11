@@ -376,7 +376,9 @@ const getAnalytics = async (orgId, filters = {}) => {
         heatmapRes,       // 9
         dailyUtilRes,     // 10 (New)
         dailyBookedRes,    // 11 (New)
-        resourcePerfRes    // 12 (New)
+        resourcePerfRes,   // 12 (New)
+        customerIntelRes,  // 13 (New)
+        peakCohortRes      // 14 (New)
     ] = await Promise.all([
         query(kpiQuery, baseParams),
         query(kpiQuery, prevParams),
@@ -405,6 +407,52 @@ const getAnalytics = async (orgId, filters = {}) => {
                 GROUP BY r.id, r.name
                 ORDER BY completed_count DESC
             `, baseParams)
+            : Promise.resolve({ rows: [] }),
+            
+        // 13. Customer Intelligence (Enterprise Only)
+        hasPremiumAnalytics
+            ? query(`
+                WITH user_metrics AS (
+                    SELECT 
+                        user_id, 
+                        COUNT(*) as total_visits,
+                        MAX(completed_at) as last_visit
+                    FROM appointments
+                    WHERE org_id = $1 AND status = 'completed'
+                    GROUP BY user_id
+                )
+                SELECT 
+                    COUNT(*) as total_customers,
+                    COUNT(*) FILTER (WHERE total_visits > 1) as repeat_customers,
+                    COUNT(*) FILTER (WHERE total_visits > 1 AND last_visit < NOW() - INTERVAL '60 days') as churned_customers
+                FROM user_metrics
+            `, [orgId])
+            : Promise.resolve({ rows: [{ total_customers: 0, repeat_customers: 0, churned_customers: 0 }] }),
+
+        // 14. Peak Cohort (Enterprise Only)
+        hasPremiumAnalytics
+            ? query(`
+                SELECT 
+                    CASE 
+                        WHEN age < 18 THEN 'Under 18'
+                        WHEN age BETWEEN 18 AND 24 THEN '18-24'
+                        WHEN age BETWEEN 25 AND 34 THEN '25-34'
+                        WHEN age BETWEEN 35 AND 44 THEN '35-44'
+                        WHEN age BETWEEN 45 AND 54 THEN '45-54'
+                        WHEN age >= 55 THEN '55+'
+                        ELSE 'All Ages'
+                    END as cohort,
+                    COUNT(*) as count
+                FROM (
+                    SELECT EXTRACT(YEAR FROM AGE(u.dob)) as age
+                    FROM appointments a
+                    JOIN users u ON a.user_id = u.id
+                    WHERE a.org_id = $1 AND a.status = 'completed' AND u.dob IS NOT NULL
+                ) sub
+                GROUP BY cohort
+                ORDER BY count DESC
+                LIMIT 1
+            `, [orgId])
             : Promise.resolve({ rows: [] })
     ]);
 
@@ -567,6 +615,32 @@ const getAnalytics = async (orgId, filters = {}) => {
         utilization: safeNum(utilization),
         cancellationRate: safeNum(cancellationRate),
         lifetimeEarning: safeNum(lifetimeEarningTotal),
+        
+        // Customer Intelligence (Dynamic)
+        loyaltyIndex: hasPremiumAnalytics ? (() => {
+            const intel = customerIntelRes.rows[0];
+            const total = parseInt(intel.total_customers) || 0;
+            const repeat = parseInt(intel.repeat_customers) || 0;
+            return total > 0 ? parseFloat(((repeat / total) * 10).toFixed(1)) : 0;
+        })() : 0,
+        retentionRate: hasPremiumAnalytics ? (() => {
+            const intel = customerIntelRes.rows[0];
+            const total = parseInt(intel.total_customers) || 0;
+            const repeat = parseInt(intel.repeat_customers) || 0;
+            return total > 0 ? Math.round((repeat / total) * 100) : 0;
+        })() : 0,
+        churnRisk: hasPremiumAnalytics ? (() => {
+            const intel = customerIntelRes.rows[0];
+            const repeat = parseInt(intel.repeat_customers) || 0;
+            const churned = parseInt(intel.churned_customers) || 0;
+            if (repeat === 0) return 'Low';
+            const ratio = churned / repeat;
+            if (ratio > 0.3) return 'High';
+            if (ratio > 0.1) return 'Medium';
+            return 'Low';
+        })() : 'Low',
+        peakCohort: hasPremiumAnalytics ? (peakCohortRes.rows[0]?.cohort || 'All Ages') : 'All Ages',
+
         // Growth vs previous period
         growth: {
             bookings: safeNum(bookingChange),

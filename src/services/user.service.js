@@ -141,6 +141,18 @@ const updateProfile = async (userId, updateBody) => {
         idx++;
     }
 
+    if (updateBody.dob !== undefined) {
+        query += `, dob = $${idx}`;
+        params.push(updateBody.dob);
+        idx++;
+    }
+
+    if (updateBody.gender !== undefined) {
+        query += `, gender = $${idx}`;
+        params.push(updateBody.gender);
+        idx++;
+    }
+
     if (updateBody.phone !== undefined) {
         query += `, phone = $${idx}`;
         params.push(updateBody.phone);
@@ -187,7 +199,7 @@ const updateProfile = async (userId, updateBody) => {
         }
     }
 
-    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, terms_accepted, terms_accepted_at, profile_picture_url, address, city, state, pincode, email_notification_enabled, notification_enabled, created_at';
+    query += ' WHERE id = $1 RETURNING id, name, email, role, phone, dob, gender, terms_accepted, terms_accepted_at, profile_picture_url, address, city, state, pincode, email_notification_enabled, notification_enabled, created_at';
 
     try {
         const result = await pool.query(query, params);
