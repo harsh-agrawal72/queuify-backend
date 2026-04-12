@@ -225,7 +225,7 @@ const verifyPayment = catchAsync(async (req, res) => {
             queue_number: queueNumber
         });
     } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
+        await client.query('ROLLBACK').catch(() => { });
         throw err;
     } finally {
         client.release();
@@ -564,7 +564,7 @@ const handleWebhook = catchAsync(async (req, res) => {
 
         if (notes.type === 'appointment') {
             let appointmentId = notes.appointment_id;
-            
+
             // FALLBACK: If notes.appointment_id is missing, find via razorpay_order_id column
             if (!appointmentId && orderId) {
                 const fallbackRes = await pool.query(
@@ -576,12 +576,12 @@ const handleWebhook = catchAsync(async (req, res) => {
                     console.log(`[Webhook] Found appointment ${appointmentId} via order_id fallback (${orderId})`);
                 }
             }
-            
+
             if (!appointmentId) {
                 console.error(`[Webhook] Cannot find appointment_id for order ${orderId}. Notes:`, notes);
                 return res.status(httpStatus.OK).send({ status: 'ok', skipped: true, reason: 'no_appointment_id' });
             }
-            
+
             // Check if already processed (Idempotency)
             const appt = await appointmentModel.getAppointmentById(appointmentId);
             if (appt && appt.payment_status === 'paid') {
@@ -592,7 +592,7 @@ const handleWebhook = catchAsync(async (req, res) => {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
-                
+
                 // Acquire lock
                 const { rows } = await client.query(
                     "SELECT * FROM appointments WHERE id = $1::uuid FOR UPDATE",
@@ -601,7 +601,7 @@ const handleWebhook = catchAsync(async (req, res) => {
 
                 if (rows.length > 0 && rows[0].payment_status !== 'paid') {
                     const appointment = rows[0];
-                    
+
                     // Update Status
                     await client.query(
                         "UPDATE appointments SET payment_status = 'paid', payment_id = $1, razorpay_order_id = $2, status = 'confirmed'::appointment_status, updated_at = NOW() WHERE id = $3::uuid",
@@ -620,7 +620,7 @@ const handleWebhook = catchAsync(async (req, res) => {
 
                     // Calculate Rank for notifications
                     const queueNumber = await appointmentModel.getAppointmentRank(appointmentId, client);
-                    
+
                     await client.query('COMMIT');
 
                     // Notifications
@@ -630,14 +630,14 @@ const handleWebhook = catchAsync(async (req, res) => {
                     await client.query('ROLLBACK');
                 }
             } catch (err) {
-                await client.query('ROLLBACK').catch(() => {});
+                await client.query('ROLLBACK').catch(() => { });
                 console.error(`[Webhook] Error processing appointment ${appointmentId}:`, err.message);
                 // Return 500 so Razorpay retries
                 return res.status(httpStatus.INTERNAL_SERVER_ERROR).send('Internal Server Error');
             } finally {
                 client.release();
             }
-        } 
+        }
         else if (notes.type === 'plan') {
             const { planId, duration, user_id, org_id } = notes;
             const months = parseInt(duration) || 1;
