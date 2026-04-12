@@ -27,6 +27,7 @@ const envVarsSchema = Joi.object()
         ENABLE_EMAIL: Joi.any().default(true).description('Global email toggle'),
         RAZORPAY_KEY_ID: Joi.string().description('Razorpay Key ID'),
         RAZORPAY_KEY_SECRET: Joi.string().description('Razorpay Key Secret'),
+        RAZORPAY_WEBHOOK_SECRET: Joi.string().description('Razorpay Webhook Secret'),
     })
     .unknown();
 
@@ -76,5 +77,6 @@ module.exports = {
     razorpay: {
         keyId: envVars.RAZORPAY_KEY_ID,
         keySecret: envVars.RAZORPAY_KEY_SECRET,
+        webhookSecret: envVars.RAZORPAY_WEBHOOK_SECRET,
     },
 };

@@ -83,7 +83,13 @@ app.use(helmet({
 
 
 // Parse JSON
-app.use(express.json({ limit: '20mb' }));
+// Parse JSON with raw body support for webhooks
+app.use(express.json({ 
+    limit: '20mb',
+    verify: (req, res, buf) => {
+        req.rawBody = buf;
+    }
+}));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 // Serve static files

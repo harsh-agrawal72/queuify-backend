@@ -73,7 +73,14 @@ const createOrder = catchAsync(async (req, res) => {
 
     try {
         const receiptId = `a_${String(appointmentId).substring(0, 30)}`;
-        const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId);
+        const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId, {
+            appointment_id: appointmentId,
+            user_id: req.user.id,
+            type: 'appointment'
+        });
+
+        // 4. Store Order ID in DB for reconciliation
+        await pool.query('UPDATE appointments SET razorpay_order_id = $1 WHERE id = $2', [order.id, appointmentId]);
 
         console.log(`[PaymentController] Razorpay Order Created: ${order.id} for appt ${appointmentId}`);
         res.status(httpStatus.OK).send({
@@ -320,7 +327,9 @@ const createPlanOrder = catchAsync(async (req, res) => {
     const order = await razorpayService.createOrder(amountInPaise, 'INR', receiptId, {
         plan_id: planId,
         duration: String(months),
-        org_id: req.user.org_id || ''
+        org_id: req.user.org_id || '',
+        user_id: req.user.id,
+        type: 'plan'
     });
 
     res.status(httpStatus.OK).send({
@@ -525,6 +534,135 @@ const claimRestoration = catchAsync(async (req, res) => {
     });
 });
 
+/**
+ * Step 3: Webhook Handler
+ * Autonomous payment confirmation from Razorpay
+ */
+const handleWebhook = catchAsync(async (req, res) => {
+    const signature = req.headers['x-razorpay-signature'];
+    const secret = config.razorpay.webhookSecret;
+
+    console.log(`[Webhook] Received Razorpay Webhook. Event: ${req.body.event}`);
+
+    // 1. Validate Signature using RAW body
+    const isValid = razorpayService.validateWebhookSignature(req.rawBody || req.body, signature, secret);
+    if (!isValid) {
+        console.error('[Webhook] Invalid webhook signature detected.');
+        return res.status(httpStatus.BAD_REQUEST).send('Invalid signature');
+    }
+
+    const { event, payload } = req.body;
+
+    // 2. Handle Payment Capture
+    if (event === 'payment.captured') {
+        const paymentEntity = payload.payment.entity;
+        const notes = paymentEntity.notes || {};
+        const paymentId = paymentEntity.id;
+        const orderId = paymentEntity.order_id;
+
+        console.log(`[Webhook] Processing captured payment ${paymentId} for ${notes.type || 'unknown type'}`);
+
+        if (notes.type === 'appointment') {
+            let appointmentId = notes.appointment_id;
+            
+            // FALLBACK: If notes.appointment_id is missing, find via razorpay_order_id column
+            if (!appointmentId && orderId) {
+                const fallbackRes = await pool.query(
+                    "SELECT id FROM appointments WHERE razorpay_order_id = $1 LIMIT 1",
+                    [orderId]
+                );
+                if (fallbackRes.rows.length > 0) {
+                    appointmentId = fallbackRes.rows[0].id;
+                    console.log(`[Webhook] Found appointment ${appointmentId} via order_id fallback (${orderId})`);
+                }
+            }
+            
+            if (!appointmentId) {
+                console.error(`[Webhook] Cannot find appointment_id for order ${orderId}. Notes:`, notes);
+                return res.status(httpStatus.OK).send({ status: 'ok', skipped: true, reason: 'no_appointment_id' });
+            }
+            
+            // Check if already processed (Idempotency)
+            const appt = await appointmentModel.getAppointmentById(appointmentId);
+            if (appt && appt.payment_status === 'paid') {
+                console.log(`[Webhook] Appointment ${appointmentId} already marked as paid. Skipping.`);
+                return res.status(httpStatus.OK).send({ status: 'ok', already_processed: true });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                
+                // Acquire lock
+                const { rows } = await client.query(
+                    "SELECT * FROM appointments WHERE id = $1::uuid FOR UPDATE",
+                    [appointmentId]
+                );
+
+                if (rows.length > 0 && rows[0].payment_status !== 'paid') {
+                    const appointment = rows[0];
+                    
+                    // Update Status
+                    await client.query(
+                        "UPDATE appointments SET payment_status = 'paid', payment_id = $1, razorpay_order_id = $2, status = 'confirmed'::appointment_status, updated_at = NOW() WHERE id = $3::uuid",
+                        [paymentId, orderId, appointmentId]
+                    );
+
+                    // Credit Wallet
+                    const basePrice = parseFloat(appointment.price);
+                    await walletService.creditLockedFunds(
+                        appointment.org_id,
+                        basePrice,
+                        appointmentId,
+                        `Payment for ${appt?.service_name || 'Service'} (via Webhook)`,
+                        client
+                    );
+
+                    // Calculate Rank for notifications
+                    const queueNumber = await appointmentModel.getAppointmentRank(appointmentId, client);
+                    
+                    await client.query('COMMIT');
+
+                    // Notifications
+                    const appointmentService = require('../services/appointment.service');
+                    appointmentService.finalizeBookingNotifications(appointmentId, queueNumber);
+                } else {
+                    await client.query('ROLLBACK');
+                }
+            } catch (err) {
+                await client.query('ROLLBACK').catch(() => {});
+                console.error(`[Webhook] Error processing appointment ${appointmentId}:`, err.message);
+                // Return 500 so Razorpay retries
+                return res.status(httpStatus.INTERNAL_SERVER_ERROR).send('Internal Server Error');
+            } finally {
+                client.release();
+            }
+        } 
+        else if (notes.type === 'plan') {
+            const { planId, duration, user_id, org_id } = notes;
+            const months = parseInt(duration) || 1;
+
+            try {
+                const plan = await planService.getPlanById(planId);
+                if (plan) {
+                    if (plan.target_role === 'admin' && org_id) {
+                        await planService.assignPlanToOrg(org_id, planId, months);
+                    } else if (user_id) {
+                        await planService.assignPlanToUser(user_id, planId, months);
+                    }
+                    console.log(`[Webhook] Plan upgrade successful for ${notes.type} via Webhook`);
+                }
+            } catch (err) {
+                console.error(`[Webhook] Error processing plan upgrade:`, err.message);
+                return res.status(httpStatus.INTERNAL_SERVER_ERROR).send('Internal Server Error');
+            }
+        }
+    }
+
+    // Always return 200 to Razorpay
+    res.status(httpStatus.OK).send({ status: 'ok' });
+});
+
 module.exports = {
     createOrder,
     verifyPayment,
@@ -532,5 +670,6 @@ module.exports = {
     verifyPlanPayment,
     validateCoupon,
     claimFreePlan,
-    claimRestoration
+    claimRestoration,
+    handleWebhook
 };

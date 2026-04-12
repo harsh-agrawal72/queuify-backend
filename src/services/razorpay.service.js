@@ -232,10 +232,32 @@ const processPayout = async (amount, bankDetails, referenceId, orgDetails) => {
     }
 };
 
+/**
+ * Validate Razorpay webhook signature
+ * @param {string} body - The raw request body
+ * @param {string} signature - The signature from x-razorpay-signature header
+ * @param {string} secret - The webhook secret
+ * @returns {boolean}
+ */
+const validateWebhookSignature = (body, signature, secret) => {
+    try {
+        const hmac = crypto.createHmac('sha256', secret);
+        // Use raw body buffer if available for exact matching, else fallback to string
+        const content = Buffer.isBuffer(body) ? body : (typeof body === 'string' ? body : JSON.stringify(body));
+        hmac.update(content);
+        const digest = hmac.digest('hex');
+        return digest === signature;
+    } catch (e) {
+        console.error('[RazorpayService] Webhook validation error:', e.message);
+        return false;
+    }
+};
+
 module.exports = {
     createOrder,
     verifySignature,
     getRazorpayInstance,
     refundPayment,
-    processPayout
+    processPayout,
+    validateWebhookSignature
 };

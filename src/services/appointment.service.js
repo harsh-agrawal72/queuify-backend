@@ -1192,7 +1192,7 @@ const verifyOtp = async (appointmentId) => {
 const markArrived = async (appointmentId, userId, scannedOrgId) => {
     // First, verify the appointment exists and belongs to the user
     const check = await pool.query(
-        "SELECT id, org_id FROM appointments WHERE id = $1 AND user_id = $2",
+        "SELECT id, org_id, start_time, check_in_method FROM appointments WHERE id = $1 AND user_id = $2",
         [appointmentId, userId]
     );
 
@@ -1207,6 +1207,23 @@ const markArrived = async (appointmentId, userId, scannedOrgId) => {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid QR Code. Please scan the QR code of the correct clinic.');
     }
 
+    // ─── DATE GUARD: Only allow arrival for today's appointment ───
+    // Prevents a future appointment from being marked as arrived when user scans today.
+    if (appointment.start_time) {
+        const slotDate = new Date(appointment.start_time);
+        const now = new Date();
+
+        const slotDay   = slotDate.getUTCFullYear() * 10000 + (slotDate.getUTCMonth() + 1) * 100 + slotDate.getUTCDate();
+        const todayDay  = now.getUTCFullYear()      * 10000 + (now.getUTCMonth() + 1)      * 100 + now.getUTCDate();
+
+        if (slotDay !== todayDay) {
+            throw new ApiError(
+                httpStatus.BAD_REQUEST,
+                `This appointment is scheduled for ${slotDate.toDateString()}, not today. Please arrive on the correct date.`
+            );
+        }
+    }
+
     const res = await pool.query(
         "UPDATE appointments SET check_in_method = 'user_signal', updated_at = NOW() WHERE id = $1 RETURNING *",
         [appointmentId]
@@ -1217,7 +1234,7 @@ const markArrived = async (appointmentId, userId, scannedOrgId) => {
     socket.emitQueueUpdate({ orgId: res.rows[0].org_id }, {
         type: 'USER_ARRIVED',
         appointmentId,
-        userName: res.rows[0].user_name // If joined, but usually just a generic trigger is enough
+        userName: res.rows[0].user_name
     });
 
     return res.rows[0];

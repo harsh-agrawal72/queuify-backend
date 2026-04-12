@@ -42,6 +42,8 @@ router.post('/validate-coupon', auth('user', 'admin'), paymentController.validat
 router.post('/claim-free-plan', auth(), paymentController.claimFreePlan);
 router.post('/claim-restoration', auth(), paymentController.claimRestoration);
 
+router.post('/webhook', paymentController.handleWebhook);
+
 // ─── Refund Preview ───
 const autoRefundService = require('../../services/autoRefund.service');
 
