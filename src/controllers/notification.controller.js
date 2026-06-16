@@ -3,6 +3,8 @@ const notificationService = require('../services/notification.service');
 
 const getNotifications = catchAsync(async (req, res) => {
     const notifications = await notificationService.getNotifications(req.user.id);
+    // Allow client to cache notifications for 10s, refresh stale in background
+    res.set('Cache-Control', 'private, max-age=10, stale-while-revalidate=20');
     res.json(notifications);
 });
 

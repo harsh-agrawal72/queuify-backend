@@ -28,6 +28,7 @@ const envVarsSchema = Joi.object()
         RAZORPAY_KEY_ID: Joi.string().description('Razorpay Key ID'),
         RAZORPAY_KEY_SECRET: Joi.string().description('Razorpay Key Secret'),
         RAZORPAY_WEBHOOK_SECRET: Joi.string().description('Razorpay Webhook Secret'),
+        POSTGRES_HOST_FALLBACK: Joi.string().default('localhost').description('Fallback PostgreSQL host'),
     })
     .unknown();
 
@@ -49,6 +50,9 @@ module.exports = {
         user: envVars.POSTGRES_USER,
         password: envVars.POSTGRES_PASSWORD,
         database: envVars.POSTGRES_DB,
+    },
+    fallback: {
+        host: envVars.POSTGRES_HOST_FALLBACK,
     },
     jwt: {
         secret: envVars.JWT_SECRET,

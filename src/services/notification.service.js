@@ -93,14 +93,17 @@ const sendPushNotification = async (token, payload) => {
 };
 
 /**
- * Get internal notifications for a user
+ * Get internal notifications for a user (cached 10s to avoid hammering DB on socket events)
  */
 const getNotifications = async (userId) => {
-    const result = await pool.query(
-        'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
-        [userId]
-    );
-    return result.rows;
+    const cacheService = require('./cache.service');
+    return cacheService.getOrSet(`notifications_${userId}`, async () => {
+        const result = await pool.query(
+            'SELECT id, title, message, type, link, is_read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 30',
+            [userId]
+        );
+        return result.rows;
+    }, 10); // 10 second cache — socket events won't flood the DB
 };
 
 /**
@@ -111,6 +114,11 @@ const markAsRead = async (notificationId) => {
         'UPDATE notifications SET is_read = TRUE WHERE id = $1 RETURNING *',
         [notificationId]
     );
+    // Invalidate the cache for this user's notifications
+    if (result.rows[0]) {
+        const cacheService = require('./cache.service');
+        cacheService.invalidate(`notifications_${result.rows[0].user_id}`);
+    }
     return result.rows[0];
 };
 
@@ -118,6 +126,8 @@ const markAsRead = async (notificationId) => {
  * Mark all notifications as read for a user
  */
 const markAllAsRead = async (userId) => {
+    const cacheService = require('./cache.service');
+    cacheService.invalidate(`notifications_${userId}`);
     return await pool.query(
         'UPDATE notifications SET is_read = TRUE WHERE user_id = $1',
         [userId]

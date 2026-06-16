@@ -79,6 +79,10 @@ const defaultRoutes = [
         route: chatRoute,
     },
     {
+        path: '/ai',
+        route: require('./ai.route'),
+    },
+    {
         path: '/payments',
         route: paymentRoute,
     },

@@ -12,46 +12,58 @@ const cacheService = require('./cache.service');
  */
 const getUserStats = async (userId) => {
     return cacheService.getOrSet(`user_stats_${userId}`, async () => {
-        // 1. Total Appointments
-        const totalRes = await pool.query(
-            "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status != 'pending_payment'",
-            [userId]
-        );
-
-        // 2. Upcoming
-        const upcomingRes = await pool.query(`
-            SELECT COUNT(*) FROM appointments a
-            JOIN slots s ON a.slot_id = s.id
-            WHERE a.user_id = $1 
-            AND a.status IN ('confirmed', 'pending', 'serving')
-            AND s.start_time > NOW()
-        `, [userId]);
-
-        // 3. Completed
-        const completedRes = await pool.query(
-            "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status IN ('completed', 'no_show')",
-            [userId]
-        );
-
-        // 4. Cancelled
-        const cancelledRes = await pool.query(
-            "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status = 'cancelled'",
-            [userId]
-        );
-
-        // 5. Next Appointment
-        const nextApptRes = await pool.query(`
-            SELECT a.*, s.start_time, s.end_time, svc.name as service_name, org.name as org_name
-            FROM appointments a
-            JOIN slots s ON a.slot_id = s.id
-            LEFT JOIN services svc ON a.service_id = svc.id
-            LEFT JOIN organizations org ON a.org_id = org.id
-            WHERE a.user_id = $1 
-            AND a.status IN ('confirmed', 'pending', 'serving')
-            AND s.end_time > NOW()
-            ORDER BY s.start_time ASC
-            LIMIT 1
-        `, [userId]);
+        // Run all DB queries in parallel for maximum speed
+        const [totalRes, upcomingRes, completedRes, cancelledRes, nextApptRes, recentCompletedRes] = await Promise.all([
+            // 1. Total Appointments
+            pool.query(
+                "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status != 'pending_payment'",
+                [userId]
+            ),
+            // 2. Upcoming
+            pool.query(`
+                SELECT COUNT(*) FROM appointments a
+                JOIN slots s ON a.slot_id = s.id
+                WHERE a.user_id = $1 
+                AND a.status IN ('confirmed', 'pending', 'serving')
+                AND s.start_time > NOW()
+            `, [userId]),
+            // 3. Completed
+            pool.query(
+                "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status IN ('completed', 'no_show')",
+                [userId]
+            ),
+            // 4. Cancelled
+            pool.query(
+                "SELECT COUNT(*) FROM appointments WHERE user_id = $1 AND status = 'cancelled'",
+                [userId]
+            ),
+            // 5. Next Appointment (with org_address)
+            pool.query(`
+                SELECT a.*, s.start_time, s.end_time, svc.name as service_name, org.name as org_name, org.address as org_address
+                FROM appointments a
+                JOIN slots s ON a.slot_id = s.id
+                LEFT JOIN services svc ON a.service_id = svc.id
+                LEFT JOIN organizations org ON a.org_id = org.id
+                WHERE a.user_id = $1 
+                AND a.status IN ('confirmed', 'pending', 'serving')
+                AND s.end_time > NOW()
+                ORDER BY s.start_time ASC
+                LIMIT 1
+            `, [userId]),
+            // 6. Recent completed appointments
+            pool.query(`
+                SELECT a.id, a.status, s.start_time, svc.name as service_name, org.name as org_name, rv.id as review_id, rv.rating as review_rating
+                FROM appointments a
+                JOIN slots s ON a.slot_id = s.id
+                LEFT JOIN services svc ON a.service_id = svc.id
+                LEFT JOIN organizations org ON a.org_id = org.id
+                LEFT JOIN reviews rv ON a.id = rv.appointment_id
+                WHERE a.user_id = $1 
+                AND a.status = 'completed'
+                ORDER BY s.start_time DESC
+                LIMIT 3
+            `, [userId])
+        ]);
 
         let nextAppointment = nextApptRes.rows[0] || null;
 
@@ -69,20 +81,6 @@ const getUserStats = async (userId) => {
             }
         }
 
-        // 6. Recent unreviewed / completed appointments
-        const recentCompletedRes = await pool.query(`
-            SELECT a.id, a.status, s.start_time, svc.name as service_name, org.name as org_name, rv.id as review_id, rv.rating as review_rating
-            FROM appointments a
-            JOIN slots s ON a.slot_id = s.id
-            LEFT JOIN services svc ON a.service_id = svc.id
-            LEFT JOIN organizations org ON a.org_id = org.id
-            LEFT JOIN reviews rv ON a.id = rv.appointment_id
-            WHERE a.user_id = $1 
-            AND a.status = 'completed'
-            ORDER BY s.start_time DESC
-            LIMIT 3
-        `, [userId]);
-
         return {
             total: parseInt(totalRes.rows[0].count),
             upcoming: parseInt(upcomingRes.rows[0].count),
@@ -91,7 +89,7 @@ const getUserStats = async (userId) => {
             nextAppointment,
             recentCompleted: recentCompletedRes.rows
         };
-    }, 30); // 30 second cache
+    }, 60); // 60 second cache
 };
 
 /**

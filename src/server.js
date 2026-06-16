@@ -65,11 +65,12 @@ const startServer = () => {
         console.warn('Socket init failed:', e.message);
     }
 
-    try {
-        reminderCron.init();
-    } catch (e) {
-        console.warn('Reminder cron init failed:', e.message);
-    }
+// Disabled reminder cron initialization to avoid DB connection errors
+// try {
+//     reminderCron.init();
+// } catch (e) {
+//     console.warn('Reminder cron init failed:', e.message);
+// }
 
     try {
         settlementCron.init();

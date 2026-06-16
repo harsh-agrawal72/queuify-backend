@@ -1,6 +1,53 @@
 const socketIo = require('socket.io');
+const Chat = require('../models/chat.model');
 
 let io;
+const onlinePresences = new Map(); // key (userId or orgId) -> Set of socket.ids
+const socketToPresence = new Map(); // socket.id -> { key, type }
+
+const registerPresence = (key, socketId, type) => {
+    if (!onlinePresences.has(key)) {
+        onlinePresences.set(key, new Set());
+        // Broadcast presence change to all clients
+        if (io) {
+            io.emit('presence_change', { id: key, status: 'online', type });
+        }
+    }
+    onlinePresences.get(key).add(socketId);
+    socketToPresence.set(socketId, { key, type });
+};
+
+const removePresence = async (socketId) => {
+    if (socketToPresence.has(socketId)) {
+        const { key, type } = socketToPresence.get(socketId);
+        const sockets = onlinePresences.get(key);
+        if (sockets) {
+            sockets.delete(socketId);
+            if (sockets.size === 0) {
+                onlinePresences.delete(key);
+                const now = new Date();
+                
+                // Persist last seen in database (non-blocking)
+                Chat.updateLastSeen(key, type, now).catch(err => {
+                    console.error('Failed to update last seen in DB:', err.message);
+                });
+
+                // Broadcast presence change to all clients
+                if (io) {
+                    io.emit('presence_change', { 
+                        id: key, 
+                        status: 'offline', 
+                        type, 
+                        lastSeen: now.toISOString() 
+                    });
+                }
+            }
+        }
+        socketToPresence.delete(socketId);
+    }
+};
+
+const isOnline = (id) => onlinePresences.has(id);
 
 const init = (httpServer) => {
     io = socketIo(httpServer, {
@@ -17,16 +64,26 @@ const init = (httpServer) => {
         console.log('Client connected:', socket.id);
 
         // Join rooms for targeted updates
-        socket.on('join_org', (orgId) => socket.join(`org_${orgId}`));
+        socket.on('join_org', (orgId) => {
+            socket.join(`org_${orgId}`);
+            registerPresence(orgId, socket.id, 'org');
+        });
+        
         socket.on('join_service', (serviceId) => socket.join(`service_${serviceId}`));
         socket.on('join_resource', (resourceId) => socket.join(`resource_${resourceId}`));
-        socket.on('join_user', ({ userId, role }) => {
+        
+        socket.on('join_user', (data) => {
+            const userId = typeof data === 'object' ? data.userId : data;
+            const role = typeof data === 'object' ? data.role : 'user';
+            
             socket.join(`user_${userId}`);
+            registerPresence(userId, socket.id, role);
+            
             // Join role-specific broadcast rooms
             if (role === 'admin') {
                 socket.join('admins');
                 console.log(`Admin ${userId} joined 'admins' room`);
-            } else if (role === 'user') {
+            } else {
                 socket.join('users');
                 console.log(`User ${userId} joined 'users' room`);
             }
@@ -42,6 +99,7 @@ const init = (httpServer) => {
 
         socket.on('disconnect', () => {
             console.log('Client disconnected:', socket.id);
+            removePresence(socket.id);
         });
     });
 
@@ -67,5 +125,6 @@ const emitQueueUpdate = (partitionKey, data) => {
 module.exports = {
     init,
     getIO,
-    emitQueueUpdate
+    emitQueueUpdate,
+    isOnline
 };

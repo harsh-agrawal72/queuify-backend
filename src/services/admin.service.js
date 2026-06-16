@@ -27,16 +27,17 @@ const getColumnNames = async (tableName) => {
 };
 
 // Pre-warm column cache at startup so hot paths don't pay the info_schema cost
-setImmediate(async () => {
-    try {
-        await getColumnNames('appointments');
-        await getColumnNames('wallets');
-        await getColumnNames('wallet_transactions');
-        console.log('[AdminService] Column cache pre-warmed successfully.');
-    } catch (e) {
-        console.warn('[AdminService] Column cache pre-warm failed (will retry on first request):', e.message);
-    }
-});
+// Pre-warm column cache disabled to avoid DB connection during startup
+// setImmediate(async () => {
+//     try {
+//         await getColumnNames('appointments');
+//         await getColumnNames('wallets');
+//         await getColumnNames('wallet_transactions');
+//         console.log('[AdminService] Column cache pre-warmed successfully.');
+//     } catch (e) {
+//         console.warn('[AdminService] Column cache pre-warm failed (will retry on first request):', e.message);
+//     }
+// });
 
 const getOverview = async (orgId) => {
     try {

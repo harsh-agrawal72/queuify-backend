@@ -3,12 +3,17 @@ const httpStatus = require('../utils/httpStatus');
 const config = require('../config/config');
 const ApiError = require('../utils/ApiError');
 const { getUserById } = require('../models/user.model');
+const cacheService = require('../services/cache.service');
+
+// Cache user objects per-token for 30s to avoid DB hit on every request
+const getCachedUser = (userId) =>
+    cacheService.getOrSet(`auth_user_${userId}`, () => getUserById(userId), 30);
 
 const verifyCallback = (req, resolve, reject, requiredRoles) => async (err, decoded) => {
     if (err || !decoded) {
         return reject(new ApiError(httpStatus.UNAUTHORIZED, 'Please authenticate'));
     }
-    const user = await getUserById(decoded.sub);
+    const user = await getCachedUser(decoded.sub);
 
     if (!user) {
         return reject(new ApiError(httpStatus.UNAUTHORIZED, 'User not found'));
@@ -57,7 +62,7 @@ const optionalAuth = async (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, config.jwt.secret);
-        const user = await getUserById(decoded.sub);
+        const user = await getCachedUser(decoded.sub);
         if (user) {
             req.user = user;
         }

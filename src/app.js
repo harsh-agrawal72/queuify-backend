@@ -25,6 +25,7 @@ const allowedOrigins = [
     "https://www.queuify.in",
     "https://queuify-backend.onrender.com",
     "http://localhost:5173",
+    "http://localhost:8080",
 ];
 
 const corsOptions = {
@@ -50,6 +51,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+
+// Gzip compression — reduces JSON payload size by 60-80%
+app.use(compression({ threshold: 1024 })); // Only compress responses > 1KB
 
 // 3. Explicit Global Logger
 app.use((req, res, next) => {
