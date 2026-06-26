@@ -1962,7 +1962,7 @@ const bulkDeleteAppointments = async (orgId, appointmentIds, reason = 'Bulk dele
 
     const validIds = [];
     for (const appt of checkRes.rows) {
-        if (['confirmed', 'no_show'].includes(appt.status)) {
+        if (['pending', 'confirmed', 'no_show'].includes(appt.status)) {
             skippedCount++;
         } else {
             validIds.push(appt.id);
