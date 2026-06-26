@@ -87,6 +87,12 @@ const deleteAppointment = catchAsync(async (req, res) => {
     res.json({ success: true, data: appointment });
 });
 
+const bulkDeleteAppointments = catchAsync(async (req, res) => {
+    const { appointmentIds, reason } = req.body;
+    const result = await adminService.bulkDeleteAppointments(req.user.org_id, appointmentIds, reason);
+    res.json({ success: true, ...result });
+});
+
 const getLiveQueue = catchAsync(async (req, res) => {
     const queue = await adminService.getLiveQueue(req.user.org_id, req.query.date);
     res.send(queue);
@@ -218,6 +224,7 @@ module.exports = {
     getAppointments,
     updateAppointmentStatus,
     deleteAppointment,
+    bulkDeleteAppointments,
     getLiveQueue,
     getNotifications,
     markNotificationAsRead,

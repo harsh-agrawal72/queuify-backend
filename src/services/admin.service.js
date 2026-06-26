@@ -1941,6 +1941,32 @@ const getResourceServices = async (orgId, resourceId) => {
     return res.rows;
 };
 
+/**
+ * Bulk delete (permanent soft-delete) multiple appointments by IDs
+ */
+const bulkDeleteAppointments = async (orgId, appointmentIds, reason = 'Bulk deleted by Admin') => {
+    if (!appointmentIds || appointmentIds.length === 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'No appointment IDs provided');
+    }
+
+    let deletedCount = 0;
+    let failedCount = 0;
+    const errors = [];
+
+    for (const apptId of appointmentIds) {
+        try {
+            await deleteAppointment(orgId, apptId, reason);
+            deletedCount++;
+        } catch (err) {
+            failedCount++;
+            errors.push({ id: apptId, error: err.message });
+            console.error(`[bulkDeleteAppointments] Failed for ${apptId}:`, err.message);
+        }
+    }
+
+    return { deletedCount, failedCount, requestedCount: appointmentIds.length, errors };
+};
+
 module.exports = {
     getOverview,
     getOrgDetails,
@@ -1954,6 +1980,7 @@ module.exports = {
     getAppointments,
     updateAppointmentStatus,
     deleteAppointment,
+    bulkDeleteAppointments,
     getLiveQueue,
     getNotifications,
     markNotificationAsRead,

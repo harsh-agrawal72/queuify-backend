@@ -93,12 +93,20 @@ const updateOrgDetails = {
     }).min(1),
 };
 
+const bulkDeleteAppointments = {
+    body: Joi.object().keys({
+        appointmentIds: Joi.array().items(Joi.string().uuid()).min(1).required(),
+        reason: Joi.string().optional().allow('', null),
+    }),
+};
+
 module.exports = {
     createSlot,
     updateSlot,
     deleteSlot,
     updateAppointmentStatus,
     deleteAppointment,
+    bulkDeleteAppointments,
     inviteAdmin,
     deleteAdmin,
     createManualAppointment,

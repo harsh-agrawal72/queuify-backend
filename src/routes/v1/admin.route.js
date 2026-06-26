@@ -40,6 +40,8 @@ router.route('/appointments')
     .get(adminController.getAppointments)
     .post(validate(adminValidation.createManualAppointment), adminController.createManualAppointment);
 
+router.post('/appointments/bulk-delete', validate(adminValidation.bulkDeleteAppointments), adminController.bulkDeleteAppointments);
+
 router.route('/appointments/:appointmentId')
     .patch(validate(adminValidation.updateAppointmentStatus), adminController.updateAppointmentStatus)
     .delete(validate(adminValidation.deleteAppointment), adminController.deleteAppointment);
