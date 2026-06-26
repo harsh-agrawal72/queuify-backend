@@ -52,7 +52,9 @@ const Chat = {
                 u.email as user_email,
                 u.last_seen_at as user_last_seen,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_type = 'user' AND m.is_read = FALSE) as unread_count,
-                (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message
+                (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
+                (SELECT sender_type FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_sender,
+                (SELECT is_read FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_read
             FROM conversations c
             JOIN users u ON c.user_id = u.id
             WHERE c.org_id = $1 AND c.is_deleted_by_admin = FALSE
