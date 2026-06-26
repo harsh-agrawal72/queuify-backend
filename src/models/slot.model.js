@@ -75,7 +75,7 @@ const getSlotsWithDetails = async (filters) => {
         query += ` AND s.is_active = TRUE`;
     }
 
-    query += ' GROUP BY s.id, r.id ORDER BY s.start_time ASC';
+    query += ' GROUP BY s.id, r.id ORDER BY s.start_time DESC';
 
     const result = await pool.query(query, params);
     return result.rows;

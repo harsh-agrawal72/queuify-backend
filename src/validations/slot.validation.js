@@ -47,9 +47,16 @@ const bulkCopySlots = {
     })
 };
 
+const bulkDeleteSlots = {
+    body: Joi.object().keys({
+        slotIds: Joi.array().items(Joi.string().uuid()).min(1).required()
+    })
+};
+
 module.exports = {
     createSlot,
     getSlots,
     requestSlotNotification,
-    bulkCopySlots
+    bulkCopySlots,
+    bulkDeleteSlots
 };

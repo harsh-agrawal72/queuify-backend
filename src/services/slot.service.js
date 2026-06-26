@@ -412,6 +412,64 @@ const bulkCopySlots = async (orgId, { sourceDate, targetDates, resourceId, overw
     }
 };
 
+/**
+ * Bulk delete (soft-delete) multiple slots by IDs
+ */
+const bulkDeleteSlots = async (slotIds, orgId) => {
+    if (!slotIds || slotIds.length === 0) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'No slot IDs provided');
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Verify all slots belong to the org
+        const verifyResult = await client.query(
+            `SELECT id, start_time FROM slots WHERE id = ANY($1) AND org_id = $2 AND is_active = TRUE`,
+            [slotIds, orgId]
+        );
+
+        if (verifyResult.rowCount === 0) {
+            throw new ApiError(httpStatus.NOT_FOUND, 'No matching active slots found');
+        }
+
+        const validIds = verifyResult.rows.map(r => r.id);
+
+        // Soft delete all valid slots
+        await client.query(
+            `UPDATE slots SET is_active = FALSE WHERE id = ANY($1) AND org_id = $2`,
+            [validIds, orgId]
+        );
+
+        await client.query('COMMIT');
+
+        // Trigger reassignment for non-past slots in background
+        const now = new Date();
+        for (const slot of verifyResult.rows) {
+            if (new Date(slot.start_time) >= now) {
+                setImmediate(() => {
+                    reassignmentService.reassignAppointments(slot.id).catch(err => {
+                        console.error(`[BulkDelete-Reassignment] Error for slot ${slot.id}:`, err.message);
+                    });
+                });
+            }
+        }
+
+        return {
+            deletedCount: validIds.length,
+            requestedCount: slotIds.length,
+            skippedCount: slotIds.length - validIds.length
+        };
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     createSlot,
     getSlotsWithDetails,
@@ -423,5 +481,6 @@ module.exports = {
     requestSlotNotification,
     getUserNotifications,
     deleteNotification,
-    bulkCopySlots
+    bulkCopySlots,
+    bulkDeleteSlots
 };

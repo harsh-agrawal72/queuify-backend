@@ -90,6 +90,16 @@ const bulkCopySlots = catchAsync(async (req, res) => {
     res.status(httpStatus.OK).send(result);
 });
 
+const bulkDeleteSlots = catchAsync(async (req, res) => {
+    const orgId = req.user.org_id;
+    if (!orgId) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Action restricted to organization admins');
+    }
+    const { slotIds } = req.body;
+    const result = await slotService.bulkDeleteSlots(slotIds, orgId);
+    res.status(httpStatus.OK).json({ success: true, ...result });
+});
+
 module.exports = {
     createSlot,
     getSlots,
@@ -98,5 +108,6 @@ module.exports = {
     requestSlotNotification,
     getUserNotifications,
     deleteNotification,
-    bulkCopySlots
+    bulkCopySlots,
+    bulkDeleteSlots
 };
