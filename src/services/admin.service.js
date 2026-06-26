@@ -1951,9 +1951,25 @@ const bulkDeleteAppointments = async (orgId, appointmentIds, reason = 'Bulk dele
 
     let deletedCount = 0;
     let failedCount = 0;
+    let skippedCount = 0;
     const errors = [];
 
-    for (const apptId of appointmentIds) {
+    // Filter out confirmed and no_show appointments
+    const checkRes = await pool.query(
+        'SELECT id, status FROM appointments WHERE id = ANY($1::uuid[]) AND org_id = $2',
+        [appointmentIds, orgId]
+    );
+
+    const validIds = [];
+    for (const appt of checkRes.rows) {
+        if (['confirmed', 'no_show'].includes(appt.status)) {
+            skippedCount++;
+        } else {
+            validIds.push(appt.id);
+        }
+    }
+
+    for (const apptId of validIds) {
         try {
             await deleteAppointment(orgId, apptId, reason);
             deletedCount++;
@@ -1964,7 +1980,7 @@ const bulkDeleteAppointments = async (orgId, appointmentIds, reason = 'Bulk dele
         }
     }
 
-    return { deletedCount, failedCount, requestedCount: appointmentIds.length, errors };
+    return { deletedCount, failedCount, skippedCount, requestedCount: appointmentIds.length, errors };
 };
 
 module.exports = {
