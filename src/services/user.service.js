@@ -285,11 +285,51 @@ const getProfileImage = async (imageId) => {
     return result.rows[0];
 };
 
+/**
+ * Get user favorites
+ * @param {string} userId
+ * @returns {Promise<Array>}
+ */
+const getFavorites = async (userId) => {
+    const query = `
+        SELECT f.org_id, o.name, o.logo_url, o.industry_type, o.city, o.rating, o.review_count
+        FROM user_favorites f
+        JOIN organizations o ON f.org_id = o.id
+        WHERE f.user_id = $1
+        ORDER BY f.created_at DESC
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows;
+};
+
+/**
+ * Toggle favorite
+ * @param {string} userId
+ * @param {string} orgId
+ * @returns {Promise<Object>}
+ */
+const toggleFavorite = async (userId, orgId) => {
+    // Check if it exists
+    const checkRes = await pool.query('SELECT id FROM user_favorites WHERE user_id = $1 AND org_id = $2', [userId, orgId]);
+    
+    if (checkRes.rows.length > 0) {
+        // Remove favorite
+        await pool.query('DELETE FROM user_favorites WHERE user_id = $1 AND org_id = $2', [userId, orgId]);
+        return { isFavorite: false, message: 'Removed from favorites' };
+    } else {
+        // Add favorite
+        await pool.query('INSERT INTO user_favorites (user_id, org_id) VALUES ($1, $2)', [userId, orgId]);
+        return { isFavorite: true, message: 'Added to favorites' };
+    }
+};
+
 module.exports = {
     getUserStats,
     updateProfile,
     deleteAccount,
     saveProfileImage,
-    getProfileImage
+    getProfileImage,
+    getFavorites,
+    toggleFavorite
 };
 

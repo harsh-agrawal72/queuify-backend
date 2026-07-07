@@ -28,8 +28,10 @@ const ChatController = {
             const { conversationId } = req.params;
             const limit = parseInt(req.query.limit) || 50;
             const offset = parseInt(req.query.offset) || 0;
+            // Determine caller's role to filter deleted_for_sender messages
+            const senderType = req.user.role === 'user' ? 'user' : 'admin';
 
-            const messages = await ChatService.getMessages(conversationId, limit, offset);
+            const messages = await ChatService.getMessages(conversationId, limit, offset, senderType);
             res.status(200).json(messages);
         } catch (error) {
             console.error('Error fetching messages:', error);
@@ -110,7 +112,10 @@ const ChatController = {
     async sendAttachment(req, res) {
         try {
             const { conversationId } = req.params;
-            const { senderType } = req.body;
+            const senderTypeFromBody = req.body.senderType;
+            const senderTypeFromQuery = req.query.senderType;
+            const senderType = senderTypeFromBody || senderTypeFromQuery;
+            console.log('clearChat request - conversationId:', conversationId, 'senderTypeBody:', senderTypeFromBody, 'senderTypeQuery:', senderTypeFromQuery);
             const senderId = senderType === 'user' ? req.user.id : req.user.org_id;
 
             if (!req.file) {
@@ -175,10 +180,23 @@ const ChatController = {
         }
     },
 
+    async togglePinMessage(req, res) {
+        try {
+            const { messageId } = req.params;
+            const updatedMessage = await ChatService.togglePinMessage(messageId);
+            res.status(200).json(updatedMessage);
+        } catch (error) {
+            console.error('Error toggling pin message:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    },
+
     async clearChat(req, res) {
         try {
             const { conversationId } = req.params;
-            const { senderType } = req.body;
+            console.log('clearChat - params:', req.params, 'body:', req.body, 'query:', req.query);
+            const senderType = (req.body && req.body.senderType) || req.query.senderType || 'user';
+
             const senderId = senderType === 'user' ? req.user.id : req.user.org_id;
 
             const result = await ChatService.clearChat(conversationId, senderType, senderId);
@@ -214,6 +232,38 @@ const ChatController = {
         } catch (error) {
             console.error('Error toggling conversation flag:', error);
             res.status(500).json({ message: error.message || 'Internal server error' });
+        }
+    },
+
+    async editMessage(req, res) {
+        try {
+            const { messageId } = req.params;
+            const { newContent, senderType } = req.body;
+            const senderId = senderType === 'user' ? req.user.id : req.user.org_id;
+
+            if (!newContent) {
+                return res.status(400).json({ message: 'New content is required' });
+            }
+
+            const updatedMessage = await ChatService.editMessage(messageId, senderType, senderId, newContent);
+            res.status(200).json(updatedMessage);
+        } catch (error) {
+            console.error('Error editing message:', error);
+            res.status(400).json({ message: error.message || 'Failed to edit message' });
+        }
+    },
+
+    async deleteMessage(req, res) {
+        try {
+            const { messageId } = req.params;
+            const { senderType, deleteType } = req.body; // deleteType: 'for_me' | 'for_everyone'
+            const senderId = senderType === 'user' ? req.user.id : req.user.org_id;
+
+            const deletedMessage = await ChatService.deleteMessage(messageId, senderType, senderId, deleteType || 'for_everyone');
+            res.status(200).json(deletedMessage);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+            res.status(400).json({ message: error.message || 'Failed to delete message' });
         }
     }
 };

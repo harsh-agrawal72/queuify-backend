@@ -21,7 +21,10 @@ router.get('/admin', auth('admin'), chatController.getOrgConversations);
 // Shared Routes (Both users and admins can hit these, differentiation is done inside the controller via auth middleware)
 router.post('/messages/:messageId/react', auth(), chatController.toggleReaction);
 router.post('/messages/:messageId/star', auth(), chatController.toggleStarMessage);
+router.post('/messages/:messageId/pin', auth(), chatController.togglePinMessage);
 router.get('/messages/attachment/:id', chatController.getAttachment);
+router.patch('/messages/:messageId/edit', auth(), chatController.editMessage);
+router.delete('/messages/:messageId', auth(), chatController.deleteMessage);
 router.post('/:conversationId/messages/attachment', auth(), upload.single('file'), chatController.sendAttachment);
 router.patch('/:conversationId/disappearing', auth(), chatController.updateDisappearing);
 router.delete('/:conversationId/clear', auth(), chatController.clearChat);

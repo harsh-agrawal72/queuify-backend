@@ -58,12 +58,25 @@ const getUserImage = catchAsync(async (req, res) => {
     res.send(image.image_data);
 });
 
+const getFavorites = catchAsync(async (req, res) => {
+    const favorites = await userService.getFavorites(req.user.id);
+    res.send(favorites);
+});
+
+const toggleFavorite = catchAsync(async (req, res) => {
+    const { orgId } = req.params;
+    const result = await userService.toggleFavorite(req.user.id, orgId);
+    res.send(result);
+});
+
 module.exports = {
     getUserStats,
     getProfile,
     updateProfile,
     deleteAccount,
     uploadProfilePicture,
-    getUserImage
+    getUserImage,
+    getFavorites,
+    toggleFavorite
 };
 

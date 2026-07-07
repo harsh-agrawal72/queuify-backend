@@ -1,5 +1,7 @@
 const Chat = require('../models/chat.model');
 const { getIO } = require('../socket/index');
+const { pool } = require('../config/db');
+
 
 const ChatService = {
     async getUserConversations(userId) {
@@ -10,8 +12,8 @@ const ChatService = {
         return await Chat.getOrgConversations(orgId);
     },
 
-    async getMessages(conversationId, limit, offset) {
-        return await Chat.getMessages(conversationId, limit, offset);
+    async getMessages(conversationId, limit, offset, senderType = null) {
+        return await Chat.getMessages(conversationId, limit, offset, senderType);
     },
 
     async initiateConversation(orgId, userId) {
@@ -216,6 +218,24 @@ const ChatService = {
         return message;
     },
 
+    async togglePinMessage(messageId) {
+        const message = await Chat.togglePinMessage(messageId);
+        
+        try {
+            const { getIO } = require('../socket/index');
+            const io = getIO();
+            const roomName = `chat_${message.conversation_id}`;
+            io.to(roomName).emit('message_pin_update', {
+                messageId: message.id,
+                is_pinned: message.is_pinned
+            });
+        } catch (error) {
+            console.error('Socket IO error in togglePinMessage:', error);
+        }
+
+        return message;
+    },
+
     async clearChat(conversationId, senderType, senderId) {
         const conversation = await Chat.getConversationById(conversationId);
         if (!conversation) {
@@ -228,7 +248,7 @@ const ChatService = {
         // 2. Add system message for clear chat
         const party = senderType === 'admin' ? 'Support' : 'User';
         const systemMsgText = `$$SYSTEM$$:${party} cleared the chat history.`;
-        const systemMessage = await Chat.addMessage(conversationId, 'system', null, systemMsgText);
+        const systemMessage = await Chat.addMessage(conversationId, 'system', senderId, systemMsgText);
 
         // 3. Emit socket events
         try {
@@ -293,6 +313,73 @@ const ChatService = {
         }
 
         return conversation;
+    },
+
+    async editMessage(messageId, senderType, senderId, newContent) {
+        // Fetch directly from DB without disappearing filter
+        const msgResult = await pool.query('SELECT * FROM messages WHERE id = $1', [messageId]);
+        const message = msgResult.rows[0];
+        if (!message) throw new Error('Message not found');
+
+        // Validate ownership by sender_id
+        if (message.sender_id !== senderId) throw new Error('Unauthorized: you can only edit your own messages');
+        if (message.is_deleted) throw new Error('Cannot edit a deleted message');
+
+        const updatedMessage = await Chat.editMessage(messageId, newContent);
+        
+        // Fetch full message to send in socket
+        const fullMessage = await Chat.getMessageById(messageId) || updatedMessage;
+
+        try {
+            const { getIO } = require('../socket/index');
+            const io = getIO();
+            const roomName = `chat_${message.conversation_id}`;
+            io.to(roomName).emit('message_edited', {
+                ...fullMessage,
+                conversation_id: message.conversation_id
+            });
+        } catch (error) {
+            console.error('Socket IO error in editMessage:', error);
+        }
+
+        return fullMessage;
+    },
+
+    async deleteMessage(messageId, senderType, senderId, deleteType = 'for_everyone') {
+        // Fetch directly from DB without disappearing filter
+        const msgResult = await pool.query('SELECT * FROM messages WHERE id = $1', [messageId]);
+        const message = msgResult.rows[0];
+        if (!message) throw new Error('Message not found');
+
+        // Validate ownership by sender_id
+        if (message.sender_id !== senderId) throw new Error('Unauthorized: you can only delete your own messages');
+
+        if (deleteType === 'for_me') {
+            // Soft delete — only hides from sender's view
+            await Chat.deleteMessageForSender(messageId);
+            // No socket broadcast needed — only affects the sender locally
+            return { id: messageId, deleted_for_sender: true, deleteType: 'for_me' };
+        } else {
+            // Delete for everyone — marks as deleted for all
+            const deletedMessage = await Chat.deleteMessage(messageId);
+            const fullMessage = await Chat.getMessageById(messageId) || deletedMessage;
+
+            try {
+                const { getIO } = require('../socket/index');
+                const io = getIO();
+                const roomName = `chat_${message.conversation_id}`;
+                io.to(roomName).emit('message_deleted', {
+                    messageId: message.id,
+                    conversationId: message.conversation_id,
+                    content: 'This message was deleted',
+                    deleteType: 'for_everyone'
+                });
+            } catch (error) {
+                console.error('Socket IO error in deleteMessage:', error);
+            }
+
+            return fullMessage;
+        }
     }
 };
 

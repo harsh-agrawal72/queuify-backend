@@ -14,5 +14,9 @@ router.get('/profile/image/:imageId', userController.getUserImage);
 router.post('/profile/image', auth('user', 'admin', 'superadmin'), upload.single('profile_picture'), userController.uploadProfilePicture);
 router.delete('/account', auth('user', 'admin'), userController.deleteAccount);
 
+// Favorites
+router.get('/favorites', auth('user'), userController.getFavorites);
+router.post('/favorites/:orgId', auth('user'), userController.toggleFavorite);
+
 module.exports = router;
 

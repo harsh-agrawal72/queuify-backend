@@ -32,6 +32,9 @@ const Chat = {
                 o.name as org_name, 
                 oi.image_url as org_avatar,
                 o.last_seen_at as org_last_seen,
+                o.phone as org_phone,
+                o.contact_email as org_email,
+                o.address as org_address,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_type = 'admin' AND m.is_read = FALSE) as unread_count,
                 (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message
             FROM conversations c
@@ -163,7 +166,7 @@ const Chat = {
         }
     },
 
-    async getMessages(conversationId, limit = 50, offset = 0) {
+    async getMessages(conversationId, limit = 50, offset = 0, senderType = null) {
         const query = `
             SELECT m.*, rm.content as reply_to_content, rm.sender_type as reply_to_sender_type,
                    COALESCE(
@@ -184,10 +187,11 @@ const Chat = {
             LEFT JOIN messages rm ON m.reply_to_id = rm.id
             WHERE m.conversation_id = $1 
               AND (c.disappearing_duration = 0 OR m.created_at >= NOW() - (c.disappearing_duration || ' second')::INTERVAL)
+              AND ($4::text IS NULL OR $4 != 'user' OR m.deleted_for_sender = FALSE)
             ORDER BY m.created_at DESC 
             LIMIT $2 OFFSET $3;
         `;
-        const result = await pool.query(query, [conversationId, limit, offset]);
+        const result = await pool.query(query, [conversationId, limit, offset, senderType]);
         // Reverse to get chronological order for UI
         return result.rows.reverse();
     },
@@ -288,6 +292,18 @@ const Chat = {
         return updateRes.rows[0];
     },
 
+    async togglePinMessage(messageId) {
+        const selectQuery = 'SELECT is_pinned FROM messages WHERE id = $1;';
+        const selectRes = await pool.query(selectQuery, [messageId]);
+        if (selectRes.rows.length === 0) {
+            throw new Error('Message not found');
+        }
+        const newPinned = !selectRes.rows[0].is_pinned;
+        const updateQuery = 'UPDATE messages SET is_pinned = $2 WHERE id = $1 RETURNING *;';
+        const updateRes = await pool.query(updateQuery, [messageId, newPinned]);
+        return updateRes.rows[0];
+    },
+
     async getStarredMessages(conversationId) {
         const query = `
             SELECT m.*, rm.content as reply_to_content, rm.sender_type as reply_to_sender_type,
@@ -363,6 +379,63 @@ const Chat = {
         } finally {
             client.release();
         }
+    },
+
+    async editMessage(messageId, newContent) {
+        const query = `
+            UPDATE messages 
+            SET content = $2, is_edited = TRUE, edited_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [messageId, newContent]);
+        return result.rows[0];
+    },
+
+    async deleteMessage(messageId) {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const deleteAttachmentsQuery = `
+                DELETE FROM message_attachments 
+                WHERE message_id = $1;
+            `;
+            await client.query(deleteAttachmentsQuery, [messageId]);
+
+            const deleteReactionsQuery = `
+                DELETE FROM message_reactions 
+                WHERE message_id = $1;
+            `;
+            await client.query(deleteReactionsQuery, [messageId]);
+
+            const query = `
+                UPDATE messages 
+                SET content = 'This message was deleted', is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+                RETURNING *;
+            `;
+            const result = await client.query(query, [messageId]);
+            
+            await client.query('COMMIT');
+            return result.rows[0];
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    },
+
+    async deleteMessageForSender(messageId) {
+        const query = `
+            UPDATE messages
+            SET deleted_for_sender = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [messageId]);
+        return result.rows[0];
     }
 };
 

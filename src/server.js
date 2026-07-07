@@ -96,6 +96,13 @@ const startServer = () => {
         console.warn('KeepAlive cron init failed:', e.message);
     }
 
+    try {
+        const chatCleanupService = require('./services/chatCleanup.service');
+        chatCleanupService.init();
+    } catch (e) {
+        console.warn('Chat Cleanup cron init failed:', e.message);
+    }
+
     // ── Manual Test Trigger for Settlement (DEV only) ──
     const auth = require('./middlewares/auth');
     app.post('/v1/test/run-settlement', auth('admin'), async (req, res) => {
